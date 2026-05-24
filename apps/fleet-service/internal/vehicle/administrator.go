@@ -15,6 +15,7 @@ type Administrator interface {
 	RestoreRow(id string) (Model, error)
 	SetPrimaryImage(id, mediaID string) (Model, error)
 	GetByIDIncludingDeleted(id string) (Model, error)
+	UpdateCurrentMileage(vehicleID string, mileage int) error
 }
 
 type dbAdministrator struct{ db *gorm.DB }
@@ -95,4 +96,12 @@ func (a *dbAdministrator) GetByIDIncludingDeleted(id string) (Model, error) {
 		return Model{}, err
 	}
 	return Make(e), nil
+}
+
+// UpdateCurrentMileage sets fleet.vehicles.current_mileage for the given vehicle.
+// Called by the mileage domain's OnAppend hook to mirror the latest record.
+func (a *dbAdministrator) UpdateCurrentMileage(vehicleID string, mileage int) error {
+	return a.db.Model(&Entity{}).
+		Where("id = ? AND deleted_at IS NULL", vehicleID).
+		Update("current_mileage", mileage).Error
 }
