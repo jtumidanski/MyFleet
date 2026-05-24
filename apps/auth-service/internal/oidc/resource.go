@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -36,6 +37,9 @@ type Dependencies struct {
 	// HomePath / OnboardingPath are relative paths under AppBaseURL.
 	HomePath       string
 	OnboardingPath string
+	// CookieSecure controls the Secure flag on cookies this package sets. It is
+	// false for local plaintext HTTP (Traefik :80) and true in production.
+	CookieSecure bool
 }
 
 // InitializeRoutes wires GET /auth/login/google and GET /auth/callback. Both are
@@ -53,7 +57,7 @@ func loginHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		nonce := uuid.NewString()
 		// Persist state+nonce in a signed, short-lived cookie for CSRF/replay
 		// defense; verified on callback.
-		setStateCookie(w, d.StateSecret, state, nonce)
+		setStateCookie(w, d.StateSecret, state, nonce, d.CookieSecure)
 		http.Redirect(w, req, d.OIDC.AuthCodeURL(state, nonce), http.StatusFound)
 	}
 }
@@ -66,11 +70,12 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 			http.Error(w, "missing code or state", http.StatusBadRequest)
 			return
 		}
-		if _, ok := verifyStateCookie(req, d.StateSecret, state); !ok {
+		wantNonce, ok := verifyStateCookie(req, d.StateSecret, state)
+		if !ok {
 			http.Error(w, "invalid state", http.StatusBadRequest)
 			return
 		}
-		clearStateCookie(w)
+		clearStateCookie(w, d.CookieSecure)
 
 		ctx := req.Context()
 		rawIDToken, err := d.OIDC.Exchange(ctx, code)
@@ -79,9 +84,16 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 			http.Error(w, "authentication failed", http.StatusBadGateway)
 			return
 		}
-		profile, err := d.OIDC.Verify(ctx, rawIDToken)
+		profile, gotNonce, err := d.OIDC.Verify(ctx, rawIDToken)
 		if err != nil {
 			log.WithError(err).Error("oidc id_token verification")
+			http.Error(w, "authentication failed", http.StatusUnauthorized)
+			return
+		}
+		// idtoken.Validate does not check the nonce; bind the id_token to this
+		// login attempt by comparing its nonce to the one in the state cookie.
+		if gotNonce == "" || !hmac.Equal([]byte(gotNonce), []byte(wantNonce)) {
+			log.Error("oidc nonce mismatch")
 			http.Error(w, "authentication failed", http.StatusUnauthorized)
 			return
 		}
@@ -118,14 +130,18 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 			return
 		}
 
-		session.SetRefreshCookie(w, refresh)
-		setAccessCookie(w, access)
+		// Refresh token stays in an HttpOnly cookie (unreadable by JS). The
+		// access token is delivered in the URL fragment so the SPA can read it
+		// in JS and send it as `Authorization: Bearer`; an HttpOnly access
+		// cookie would be invisible to the SPA and break the API client.
+		session.SetRefreshCookie(w, refresh, d.CookieSecure)
 
 		// New users without a fleet go to onboarding; everyone else lands home.
 		dest := d.AppBaseURL + d.HomePath
 		if fleetID == "" {
 			dest = d.AppBaseURL + d.OnboardingPath
 		}
+		dest += "#access_token=" + url.QueryEscape(access)
 		http.Redirect(w, req, dest, http.StatusFound)
 	}
 }
@@ -133,7 +149,7 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 // --- signed state cookie helpers ---
 
 // setStateCookie stores "state|nonce|exp" with an HMAC signature.
-func setStateCookie(w http.ResponseWriter, secret []byte, state, nonce string) {
+func setStateCookie(w http.ResponseWriter, secret []byte, state, nonce string, secure bool) {
 	exp := time.Now().Add(stateTTL).Unix()
 	payload := state + "|" + nonce + "|" + itoa(exp)
 	value := payload + "|" + sign(secret, payload)
@@ -142,7 +158,7 @@ func setStateCookie(w http.ResponseWriter, secret []byte, state, nonce string) {
 		Value:    base64.RawURLEncoding.EncodeToString([]byte(value)),
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(stateTTL),
 	})
@@ -177,26 +193,15 @@ func verifyStateCookie(req *http.Request, secret []byte, state string) (nonce st
 	return gotNonce, true
 }
 
-func clearStateCookie(w http.ResponseWriter) {
+func clearStateCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
-	})
-}
-
-func setAccessCookie(w http.ResponseWriter, access string) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "access_token",
-		Value:    access,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
 	})
 }
 

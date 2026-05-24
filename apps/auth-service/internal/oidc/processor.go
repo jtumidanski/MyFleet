@@ -57,13 +57,15 @@ func (p *Processor) Exchange(ctx context.Context, code string) (string, error) {
 }
 
 // Verify validates a raw id_token against Google's keys and our client id,
-// returning the mapped profile.
-func (p *Processor) Verify(ctx context.Context, rawIDToken string) (user.GoogleProfile, error) {
+// returning the mapped profile and the token's nonce claim. idtoken.Validate
+// does NOT check the nonce, so the caller must compare the returned nonce
+// against the one bound into the verified state cookie (replay defense).
+func (p *Processor) Verify(ctx context.Context, rawIDToken string) (user.GoogleProfile, string, error) {
 	payload, err := idtoken.Validate(ctx, rawIDToken, p.clientID)
 	if err != nil {
-		return user.GoogleProfile{}, err
+		return user.GoogleProfile{}, "", err
 	}
-	return profileFromClaims(payload.Claims), nil
+	return profileFromClaims(payload.Claims), str(payload.Claims["nonce"]), nil
 }
 
 // profileFromClaims maps verified id_token claims to a user.GoogleProfile.

@@ -23,14 +23,16 @@ const RefreshCookieName = "refresh_token"
 // InitializePublicRoutes wires POST /auth/refresh and POST /auth/logout. These
 // are PUBLIC (no JWT middleware): the refresh token itself authenticates the
 // caller. The processor must already be wired with a store via WithStore.
-func InitializePublicRoutes(log logrus.FieldLogger, proc *Processor, resolve MembershipResolver) func(chi.Router) {
+// cookieSecure controls the Secure flag on the refresh cookie (false for local
+// plaintext HTTP, true in production).
+func InitializePublicRoutes(log logrus.FieldLogger, proc *Processor, resolve MembershipResolver, cookieSecure bool) func(chi.Router) {
 	return func(r chi.Router) {
-		r.Post("/auth/refresh", refreshHandler(log, proc, resolve))
-		r.Post("/auth/logout", logoutHandler(log, proc))
+		r.Post("/auth/refresh", refreshHandler(log, proc, resolve, cookieSecure))
+		r.Post("/auth/logout", logoutHandler(log, proc, cookieSecure))
 	}
 }
 
-func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve MembershipResolver) http.HandlerFunc {
+func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve MembershipResolver, cookieSecure bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		raw := readRefreshToken(req)
 		if raw == "" {
@@ -45,7 +47,7 @@ func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve MembershipR
 			if err != ErrNotFound && err != ErrTokenReuse && err != ErrTokenExpired {
 				log.WithError(err).Error("rotate refresh token")
 			}
-			clearRefreshCookie(w)
+			clearRefreshCookie(w, cookieSecure)
 			server.WriteError(w, server.ErrUnauthorized)
 			return
 		}
@@ -64,14 +66,14 @@ func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve MembershipR
 			return
 		}
 
-		SetRefreshCookie(w, newRaw)
+		SetRefreshCookie(w, newRaw, cookieSecure)
 		server.WriteJSON(w, http.StatusOK, server.Document{
 			Data: Transform(Issued{Access: access, Refresh: newRaw}),
 		})
 	}
 }
 
-func logoutHandler(log logrus.FieldLogger, proc *Processor) http.HandlerFunc {
+func logoutHandler(log logrus.FieldLogger, proc *Processor, cookieSecure bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		raw := readRefreshToken(req)
 		if raw != "" {
@@ -79,7 +81,7 @@ func logoutHandler(log logrus.FieldLogger, proc *Processor) http.HandlerFunc {
 				log.WithError(err).Error("logout revoke family")
 			}
 		}
-		clearRefreshCookie(w)
+		clearRefreshCookie(w, cookieSecure)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -103,25 +105,26 @@ func readRefreshToken(req *http.Request) string {
 }
 
 // SetRefreshCookie writes the rotating refresh token as an HttpOnly cookie.
-func SetRefreshCookie(w http.ResponseWriter, raw string) {
+// secure controls the Secure flag (false for local plaintext HTTP).
+func SetRefreshCookie(w http.ResponseWriter, raw string, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshCookieName,
 		Value:    raw,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		Expires:  time.Now().Add(refreshTTL),
 	})
 }
 
-func clearRefreshCookie(w http.ResponseWriter) {
+func clearRefreshCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshCookieName,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})

@@ -21,7 +21,10 @@ type Client struct {
 func NewClient(base string) *Client { return &Client{base: base, hc: http.DefaultClient} }
 
 func (c *Client) Active(ctx context.Context, userID string) (Membership, error) {
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/internal/memberships/active?user_id="+userID, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/internal/memberships/active?user_id="+userID, nil)
+	if err != nil {
+		return Membership{}, err
+	}
 	res, err := c.hc.Do(req)
 	if err != nil {
 		return Membership{}, err

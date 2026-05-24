@@ -16,12 +16,3 @@ func Transform(i Issued) server.Resource {
 		Attributes: Attributes{AccessToken: i.Access, RefreshToken: i.Refresh},
 	}
 }
-
-// TransformSlice renders multiple issued token pairs.
-func TransformSlice(is []Issued) []server.Resource {
-	out := make([]server.Resource, 0, len(is))
-	for _, i := range is {
-		out = append(out, Transform(i))
-	}
-	return out
-}

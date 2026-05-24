@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -53,6 +54,14 @@ func main() {
 		return m.FleetID, m.Role, nil
 	}
 
+	// COOKIE_SECURE controls the Secure flag on every cookie this service sets.
+	// Local dev runs over plaintext HTTP (Traefik :80) where Secure cookies are
+	// dropped by browsers, so it defaults true but is set false in dev .env.
+	cookieSecure, err := strconv.ParseBool(config.Get("COOKIE_SECURE", "true"))
+	if err != nil {
+		cookieSecure = true
+	}
+
 	users := user.NewProcessor(log, user.NewProvider(db), user.NewAdministrator(db))
 
 	oidcProc := oidc.NewProcessor(
@@ -69,6 +78,7 @@ func main() {
 		AppBaseURL:     config.Get("APP_BASE_URL", "http://localhost"),
 		HomePath:       config.Get("APP_HOME_PATH", "/"),
 		OnboardingPath: config.Get("APP_ONBOARDING_PATH", "/onboarding"),
+		CookieSecure:   cookieSecure,
 	}
 
 	if err := server.New(log).
@@ -76,7 +86,7 @@ func main() {
 		// public routes (no JWT): jwks, oidc login/callback, refresh/logout
 		AddRouteInitializer(jwks.InitializeRoutes(ks)).
 		AddRouteInitializer(oidc.InitializeRoutes(log, oidcDeps)).
-		AddRouteInitializer(session.InitializePublicRoutes(log, sess, resolve)).
+		AddRouteInitializer(session.InitializePublicRoutes(log, sess, resolve, cookieSecure)).
 		// protected routes (JWT validated against the in-memory key): /auth/me
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
