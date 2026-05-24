@@ -15,15 +15,15 @@ func (f *fakeProvider) GetBySub(sub string) (Model, error) {
 	return Model{}, ErrNotFound
 }
 
-type fakeWriter struct{ created, updated int }
+type fakeAdmin struct{ created, updated int }
 
-func (f *fakeWriter) Insert(m Model) (Model, error) { f.created++; return m, nil }
-func (f *fakeWriter) Update(m Model) (Model, error) { f.updated++; return m, nil }
+func (f *fakeAdmin) Insert(m Model) (Model, error) { f.created++; return m, nil }
+func (f *fakeAdmin) Update(m Model) (Model, error) { f.updated++; return m, nil }
 
 func TestProvisionFromGoogle_insertsWhenNew(t *testing.T) {
-	p := NewProcessor(logrus.New(), &fakeProvider{bySub: map[string]Model{}})
-	w := &fakeWriter{}
-	got, err := p.ProvisionFromGoogle(w, GoogleProfile{Sub: "g1", Email: "a@b.com", Name: "A"})
+	w := &fakeAdmin{}
+	p := NewProcessor(logrus.New(), &fakeProvider{bySub: map[string]Model{}}, w)
+	got, err := p.ProvisionFromGoogle(GoogleProfile{Sub: "g1", Email: "a@b.com", Name: "A"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,9 +34,9 @@ func TestProvisionFromGoogle_insertsWhenNew(t *testing.T) {
 
 func TestProvisionFromGoogle_updatesLoginWhenExisting(t *testing.T) {
 	existing := NewBuilder().SetGoogleSub("g1").SetEmail("a@b.com").Build()
-	p := NewProcessor(logrus.New(), &fakeProvider{bySub: map[string]Model{"g1": existing}})
-	w := &fakeWriter{}
-	if _, err := p.ProvisionFromGoogle(w, GoogleProfile{Sub: "g1", Email: "a@b.com"}); err != nil {
+	w := &fakeAdmin{}
+	p := NewProcessor(logrus.New(), &fakeProvider{bySub: map[string]Model{"g1": existing}}, w)
+	if _, err := p.ProvisionFromGoogle(GoogleProfile{Sub: "g1", Email: "a@b.com"}); err != nil {
 		t.Fatal(err)
 	}
 	if w.updated != 1 || w.created != 0 {

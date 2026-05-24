@@ -11,3 +11,11 @@ type Attributes struct {
 func Transform(m Model) server.Resource {
 	return server.Resource{Type: "users", ID: m.ID(), Attributes: Attributes{Email: m.Email(), DisplayName: m.DisplayName(), AvatarURL: m.AvatarURL()}}
 }
+
+func TransformSlice(ms []Model) []server.Resource {
+	out := make([]server.Resource, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, Transform(m))
+	}
+	return out
+}

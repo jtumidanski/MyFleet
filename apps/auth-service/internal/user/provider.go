@@ -8,18 +8,15 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/database"
 )
 
+// Provider is the read-only interface for user data access.
 type Provider interface{ GetBySub(sub string) (Model, error) }
 
-type Writer interface {
-	Insert(Model) (Model, error)
-	Update(Model) (Model, error)
-}
+type dbProvider struct{ db *gorm.DB }
 
-type dbStore struct{ db *gorm.DB }
+// NewProvider returns a read-only Provider backed by the given database.
+func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
-func NewStore(db *gorm.DB) *dbStore { return &dbStore{db: db} }
-
-func (s *dbStore) GetBySub(sub string) (Model, error) {
+func (s *dbProvider) GetBySub(sub string) (Model, error) {
 	return database.Query(func() (Model, error) {
 		var e Entity
 		if err := s.db.Where("google_sub = ?", sub).First(&e).Error; err != nil {
@@ -30,20 +27,4 @@ func (s *dbStore) GetBySub(sub string) (Model, error) {
 		}
 		return Make(e), nil
 	})()
-}
-
-func (s *dbStore) Insert(m Model) (Model, error) {
-	e := m.ToEntity()
-	if err := s.db.Create(&e).Error; err != nil {
-		return Model{}, err
-	}
-	return Make(e), nil
-}
-
-func (s *dbStore) Update(m Model) (Model, error) {
-	e := m.ToEntity()
-	if err := s.db.Save(&e).Error; err != nil {
-		return Model{}, err
-	}
-	return Make(e), nil
 }
