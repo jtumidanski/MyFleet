@@ -1,0 +1,100 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redpanda-pvc
+  namespace: myfleet
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redpanda
+  namespace: myfleet
+  labels:
+    app: redpanda
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redpanda
+  template:
+    metadata:
+      labels:
+        app: redpanda
+    spec:
+      containers:
+        - name: redpanda
+          image: redpandadata/redpanda:latest
+          args:
+            - redpanda
+            - start
+            - --smp
+            - "1"
+            - --overprovisioned
+            - --kafka-addr
+            - PLAINTEXT://0.0.0.0:9092
+            - --advertise-kafka-addr
+            - PLAINTEXT://redpanda:9092
+          ports:
+            - containerPort: 9092
+              name: kafka
+          readinessProbe:
+            exec:
+              command:
+                - rpk
+                - cluster
+                - health
+                - -X
+                - brokers=localhost:9092
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 15
+          livenessProbe:
+            exec:
+              command:
+                - rpk
+                - cluster
+                - health
+                - -X
+                - brokers=localhost:9092
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: redpanda-data
+              mountPath: /var/lib/redpanda/data
+      volumes:
+        - name: redpanda-data
+          persistentVolumeClaim:
+            claimName: redpanda-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  namespace: myfleet
+  labels:
+    app: redpanda
+spec:
+  type: ClusterIP
+  selector:
+    app: redpanda
+  ports:
+    - port: 9092
+      targetPort: 9092
+      name: kafka

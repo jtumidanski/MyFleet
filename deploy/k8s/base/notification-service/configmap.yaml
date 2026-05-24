@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: notification-service-config
+  namespace: myfleet
+data:
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  JWKS_URL: "http://auth-service:8080/.well-known/jwks.json"
+  KAFKA_BROKERS: "redpanda:9092"
+  FLEET_INTERNAL_URL: "http://fleet-service:8080"

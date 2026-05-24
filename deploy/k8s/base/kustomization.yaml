@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: myfleet
+
+resources:
+  # Namespace first
+  - namespace.yaml
+
+  # Infrastructure
+  - infra/postgres.yaml
+  - infra/minio.yaml
+  - infra/redpanda.yaml
+  - infra/traefik.yaml
+
+  # Application services
+  - auth-service/configmap.yaml
+  - auth-service/secret.yaml
+  - auth-service/deployment.yaml
+  - auth-service/service.yaml
+
+  - fleet-service/configmap.yaml
+  - fleet-service/secret.yaml
+  - fleet-service/deployment.yaml
+  - fleet-service/service.yaml
+
+  - media-service/configmap.yaml
+  - media-service/secret.yaml
+  - media-service/deployment.yaml
+  - media-service/service.yaml
+
+  - notification-service/configmap.yaml
+  - notification-service/secret.yaml
+  - notification-service/deployment.yaml
+  - notification-service/service.yaml
