@@ -1,1 +1,3 @@
-go 1.24
+go 1.24.4
+
+use ./packages/shared-go
