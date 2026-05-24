@@ -1,0 +1,8 @@
+http:
+  middlewares:
+    cors:
+      headers:
+        accessControlAllowMethods: [GET, POST, PATCH, PUT, DELETE, OPTIONS]
+        accessControlAllowHeaders: ["*"]
+        accessControlAllowOriginList: ["http://localhost"]
+        accessControlMaxAge: 100
