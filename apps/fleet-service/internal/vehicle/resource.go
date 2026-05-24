@@ -2,6 +2,7 @@ package vehicle
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
@@ -23,7 +24,7 @@ type PrimaryImageSetter interface {
 // InitializeRoutes wires the JWT-protected vehicle endpoints.
 // ownerCheck is injected for the authoritative DB owner recheck on restore (stale-claim guard).
 // primaryImage is injected to delegate PUT /vehicles/{id}/primary-image to the vehiclemedia domain.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, primaryImage PrimaryImageSetter) func(chi.Router) {
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, primaryImage PrimaryImageSetter, statusDeps StatusDeps) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
 	return func(r chi.Router) {
 		// GET /fleets/{id}/vehicles — list vehicles (fleet-paged)
@@ -40,8 +41,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				server.WriteError(w, err)
 				return
 			}
+			// Status is derived on read (design §10.2). Per-vehicle gathering is
+			// acceptable at household scale.
+			now := time.Now().UTC()
+			resources := make([]server.Resource, 0, len(ms))
+			for _, m := range ms {
+				resources = append(resources, TransformWithStatus(m, statusDeps.DeriveStatus(m, now)))
+			}
 			server.WriteJSON(w, http.StatusOK, server.Document{
-				Data: TransformSlice(ms),
+				Data: resources,
 				Meta: page.Meta(total),
 			})
 		})
@@ -103,7 +111,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				server.WriteError(w, err)
 				return
 			}
-			server.WriteJSON(w, http.StatusOK, server.Document{Data: Transform(m)})
+			// Status is derived on read (design §10.2), never stored.
+			st := statusDeps.DeriveStatus(m, time.Now().UTC())
+			server.WriteJSON(w, http.StatusOK, server.Document{Data: TransformWithStatus(m, st)})
 		})
 
 		// PATCH /vehicles/{id} — partial update

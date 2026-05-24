@@ -26,6 +26,9 @@ type Provider interface {
 	// ListActiveByFleet returns every active schedule whose vehicle belongs to
 	// the fleet, paired with the vehicle's current mileage.
 	ListActiveByFleet(fleetID string) ([]QueueRow, error)
+	// ListActiveByVehicle returns every active schedule for a single vehicle,
+	// paired with that vehicle's current mileage (for read-time DueState).
+	ListActiveByVehicle(vehicleID string) ([]QueueRow, error)
 	// ListActive returns every active schedule across all fleets, paired with
 	// the vehicle's current mileage (used by the recompute job).
 	ListActive() ([]QueueRow, error)
@@ -76,23 +79,30 @@ type joinRow struct {
 }
 
 func (p *dbProvider) ListActiveByFleet(fleetID string) ([]QueueRow, error) {
-	return p.queryActive(&fleetID)
+	return p.queryActive(&fleetID, nil)
+}
+
+func (p *dbProvider) ListActiveByVehicle(vehicleID string) ([]QueueRow, error) {
+	return p.queryActive(nil, &vehicleID)
 }
 
 func (p *dbProvider) ListActive() ([]QueueRow, error) {
-	return p.queryActive(nil)
+	return p.queryActive(nil, nil)
 }
 
 // queryActive joins active schedules to their (non-deleted) vehicle, optionally
-// scoping to a single fleet. Returns each schedule with the vehicle's current
-// mileage for live DueState computation.
-func (p *dbProvider) queryActive(fleetID *string) ([]QueueRow, error) {
+// scoping to a single fleet and/or a single vehicle. Returns each schedule with
+// the vehicle's current mileage for live DueState computation.
+func (p *dbProvider) queryActive(fleetID, vehicleID *string) ([]QueueRow, error) {
 	q := p.db.Table("fleet.maintenance_schedules AS s").
 		Select("s.*, v.current_mileage AS current_mileage").
 		Joins("JOIN fleet.vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL").
 		Where("s.active = ?", true)
 	if fleetID != nil {
 		q = q.Where("v.fleet_id = ?", *fleetID)
+	}
+	if vehicleID != nil {
+		q = q.Where("s.vehicle_id = ?", *vehicleID)
 	}
 
 	var rows []joinRow

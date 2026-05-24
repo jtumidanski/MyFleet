@@ -98,6 +98,23 @@ func (pr *Processor) Queue(fleetID, wantState string, now time.Time) ([]QueueEnt
 	return out, nil
 }
 
+// ScheduleStatesByVehicle returns the live DueState ("ok"|"upcoming"|"overdue")
+// of every active schedule for a vehicle, computed on read from the vehicle's
+// current mileage and now (design A5 / §10.2). Used by the vehicle layer to
+// derive a vehicle's status on read.
+func (pr *Processor) ScheduleStatesByVehicle(vehicleID string) ([]string, error) {
+	rows, err := pr.p.ListActiveByVehicle(vehicleID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, DueState(r.Schedule.AsSchedule(), now, r.CurrentMileage, DefaultThresholds))
+	}
+	return out, nil
+}
+
 // RecomputeAll re-derives stored status/severity/next_due_* for every active
 // schedule using each vehicle's current mileage and "now" (FR-MAINT-6). Invoked
 // by the hourly recompute job under an advisory lock.

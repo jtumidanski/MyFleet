@@ -74,6 +74,14 @@ func main() {
 	scheduleProc := maintenanceschedule.NewProcessor(log, maintenanceschedule.NewProvider(db), maintenanceschedule.NewAdministrator(db))
 	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db))
 
+	// Read-only accessors for deriving vehicle status on read (design §10.2).
+	// Schedule states come from the schedule processor (live DueState); last
+	// activity comes from the activity domain (falls back to vehicle created_at).
+	vehicleStatusDeps := vehicle.StatusDeps{
+		Schedules: scheduleProc,
+		Activity:  zeroActivity{},
+	}
+
 	// Background sweep: hard-delete soft-deleted vehicles past their purge window.
 	// Runs under advisory lock so only one replica executes per tick (design A9).
 	ctx := context.Background()
@@ -111,7 +119,7 @@ func main() {
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
 				invite.InitializeRoutes(log, db, membershipProc)(pr)
-				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc)(pr)
+				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
 				fuel.InitializeRoutes(log, db, vehicleProc)(pr)
@@ -128,6 +136,13 @@ func main() {
 		log.WithError(err).Fatal("server stopped")
 	}
 }
+
+// zeroActivity is a placeholder LastActivityGatherer used until the activity
+// domain is wired (Phase 11.2). Returning the zero time makes DeriveStatus fall
+// back to the vehicle's created_at, so a fresh vehicle reads as "Healthy".
+type zeroActivity struct{}
+
+func (zeroActivity) LastActivityByVehicle(string) (time.Time, error) { return time.Time{}, nil }
 
 // mustJWKSKeyfunc builds the JWKS keyfunc, retrying up to maxAttempts times
 // with the given delay between attempts. Fatals if all attempts fail.
