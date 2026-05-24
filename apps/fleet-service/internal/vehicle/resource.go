@@ -10,6 +10,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 )
@@ -24,8 +25,10 @@ type PrimaryImageSetter interface {
 // InitializeRoutes wires the JWT-protected vehicle endpoints.
 // ownerCheck is injected for the authoritative DB owner recheck on restore (stale-claim guard).
 // primaryImage is injected to delegate PUT /vehicles/{id}/primary-image to the vehiclemedia domain.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, primaryImage PrimaryImageSetter, statusDeps StatusDeps) func(chi.Router) {
-	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, primaryImage PrimaryImageSetter, statusDeps StatusDeps, record ActivityRecorder, emit EventEmitter) func(chi.Router) {
+	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db)).
+		WithActivityRecorder(record).
+		WithEventEmitter(emit)
 	return func(r chi.Router) {
 		// GET /fleets/{id}/vehicles — list vehicles (fleet-paged)
 		r.Get("/fleets/{id}/vehicles", func(w http.ResponseWriter, req *http.Request) {
@@ -90,7 +93,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				server.WriteError(w, err)
 				return
 			}
-			created, err := proc.Create(m)
+			traceID := telemetry.CorrelationIDFromContext(req.Context())
+			created, err := proc.Create(m, identity.UserID, traceID)
 			if err != nil {
 				server.WriteError(w, err)
 				return

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
@@ -229,6 +230,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				ScheduleID:    id,
 				VehicleID:     sched.VehicleID(),
 				CategoryID:    sched.CategoryID(),
+				FleetID:       v.FleetID(),
+				ActorUserID:   identity.UserID,
+				TraceID:       telemetry.CorrelationIDFromContext(req.Context()),
 				Date:          date,
 				LatestMileage: miles,
 			})

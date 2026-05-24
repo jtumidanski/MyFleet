@@ -17,6 +17,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/activity"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fuel"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/invite"
@@ -44,6 +45,7 @@ func main() {
 		maintenancerecord.Migration,
 		maintenanceschedule.Migration,
 		fuel.Migration,
+		activity.Migration,
 		events.MigrateOutbox,
 	))
 	if err != nil {
@@ -69,17 +71,24 @@ func main() {
 	vehicleProc := vehicle.NewProcessor(log, vehicle.NewProvider(db), vehicleAdmin)
 	vehiclemediaProc := vehiclemedia.NewProcessor(log, vehiclemedia.NewProvider(db), vehiclemedia.NewAdministrator(db))
 
+	// Activity feed (append-only). Record is called from other domains' txns.
+	activityProc := activity.NewProcessor(log, activity.NewProvider(db))
+
 	// Maintenance: schedule processor (for the recompute job) + completion deps
 	// (record insert + mileage append + schedule advance, run in one tx — §10.3).
-	scheduleProc := maintenanceschedule.NewProcessor(log, maintenanceschedule.NewProvider(db), maintenanceschedule.NewAdministrator(db))
-	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db))
+	// The recompute job appends a schedule.overdue activity event on the
+	// transition edge (emitter wired in Phase 11.3).
+	scheduleProc := maintenanceschedule.NewProcessor(log, maintenanceschedule.NewProvider(db), maintenanceschedule.NewAdministrator(db)).
+		WithOverdueHooks(db, activity.Record, nil)
+	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db)).
+		WithActivityRecorder(activity.Record)
 
 	// Read-only accessors for deriving vehicle status on read (design §10.2).
 	// Schedule states come from the schedule processor (live DueState); last
 	// activity comes from the activity domain (falls back to vehicle created_at).
 	vehicleStatusDeps := vehicle.StatusDeps{
 		Schedules: scheduleProc,
-		Activity:  zeroActivity{},
+		Activity:  activityProc,
 	}
 
 	// Background sweep: hard-delete soft-deleted vehicles past their purge window.
@@ -118,14 +127,15 @@ func main() {
 				pr.Use(authmw.JWT(keyfn))
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
-				invite.InitializeRoutes(log, db, membershipProc)(pr)
-				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps)(pr)
+				invite.InitializeRoutes(log, db, membershipProc, activity.Record, nil)(pr)
+				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, nil)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
-				fuel.InitializeRoutes(log, db, vehicleProc)(pr)
+				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, nil)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
 				maintenancerecord.InitializeRoutes(log, db, vehicleProc)(pr)
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)
+				activity.InitializeRoutes(log, db, vehicleProc)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {
@@ -136,13 +146,6 @@ func main() {
 		log.WithError(err).Fatal("server stopped")
 	}
 }
-
-// zeroActivity is a placeholder LastActivityGatherer used until the activity
-// domain is wired (Phase 11.2). Returning the zero time makes DeriveStatus fall
-// back to the vehicle's created_at, so a fresh vehicle reads as "Healthy".
-type zeroActivity struct{}
-
-func (zeroActivity) LastActivityByVehicle(string) (time.Time, error) { return time.Time{}, nil }
 
 // mustJWKSKeyfunc builds the JWKS keyfunc, retrying up to maxAttempts times
 // with the given delay between attempts. Fatals if all attempts fail.

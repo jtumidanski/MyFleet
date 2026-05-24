@@ -65,16 +65,38 @@ func (a *dbAdministrator) SoftDelete(id string) error {
 	return nil
 }
 
+// ActivityRecorder appends an activity event on the supplied tx (design §8.2).
+// Injected to keep the fuel package decoupled. Satisfied by activity.Record.
+type ActivityRecorder func(tx *gorm.DB, actorUserID, eventType, fleetID string, vehicleID *string, payload map[string]any) error
+
+// FuelLoggedEmitter enqueues a fuel.logged event in the outbox on the supplied
+// tx (design A8). Injected to avoid coupling. Satisfied by events.EmitFuelLogged.
+type FuelLoggedEmitter func(tx *gorm.DB, fleetID, actorID, traceID, fuelLogID, vehicleID string, mileage int, totalCost float64) error
+
 // LoggingDeps holds the cross-domain dependencies for the fuel→mileage
 // orchestration (design §8.2, §10.5). All writes execute inside one transaction.
 type LoggingDeps struct {
 	DB       *gorm.DB
 	producer events.Producer
+	record   ActivityRecorder
+	emit     FuelLoggedEmitter
 }
 
 // NewLoggingDeps wires the concrete logging dependencies.
 func NewLoggingDeps(db *gorm.DB, producer events.Producer) LoggingDeps {
 	return LoggingDeps{DB: db, producer: producer}
+}
+
+// WithActivityRecorder injects the activity recorder run on each fuel log.
+func (d LoggingDeps) WithActivityRecorder(rec ActivityRecorder) LoggingDeps {
+	d.record = rec
+	return d
+}
+
+// WithEmitter injects the fuel.logged outbox emitter (A8).
+func (d LoggingDeps) WithEmitter(emit FuelLoggedEmitter) LoggingDeps {
+	d.emit = emit
+	return d
 }
 
 // LogInTransaction runs the full fuel-log flow in ONE db.Transaction:
@@ -117,6 +139,19 @@ func (d LoggingDeps) LogInTransaction(log logrus.FieldLogger, in LogInput) (Mode
 			Where("id = ? AND deleted_at IS NULL AND current_mileage <= ?", created.VehicleID(), created.Mileage()).
 			Update("current_mileage", created.Mileage()).Error; err != nil {
 			return err
+		}
+
+		// Step 3b: append a fuel.logged activity event in the SAME tx (§8.2).
+		if d.record != nil {
+			vid := created.VehicleID()
+			if err := d.record(tx, created.CreatedByUserID(), "fuel.logged", in.FleetID, &vid, map[string]any{
+				"fuel_log_id": created.ID(),
+				"vehicle_id":  created.VehicleID(),
+				"mileage":     created.Mileage(),
+				"total_cost":  created.TotalCost(),
+			}); err != nil {
+				return err
+			}
 		}
 
 		// Step 4: enqueue fuel.logged event in the transactional outbox.

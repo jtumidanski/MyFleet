@@ -5,20 +5,41 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
+// OverdueEmitter enqueues a schedule.overdue event in the outbox on the supplied
+// tx (design A8). Injected to avoid an import cycle.
+type OverdueEmitter func(tx *gorm.DB, fleetID, scheduleID, vehicleID, severity string) error
+
+// systemActor is the actor recorded for system-generated transitions (the
+// recompute job has no human actor).
+const systemActor = "system"
+
 // Processor contains maintenance schedule business logic, injected with
 // Provider and Administrator.
 type Processor struct {
-	log logrus.FieldLogger
-	p   Provider
-	a   Administrator
+	log    logrus.FieldLogger
+	p      Provider
+	a      Administrator
+	db     *gorm.DB
+	record ActivityRecorder
+	emit   OverdueEmitter
 }
 
 func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator) *Processor {
 	return &Processor{log: log, p: p, a: a}
+}
+
+// WithOverdueHooks injects the db handle + recorder + emitter the recompute job
+// uses to record/emit a schedule.overdue event on the transition edge (A8).
+func (pr *Processor) WithOverdueHooks(db *gorm.DB, rec ActivityRecorder, emit OverdueEmitter) *Processor {
+	pr.db = db
+	pr.record = rec
+	pr.emit = emit
+	return pr
 }
 
 // GetByID fetches a maintenance schedule.
@@ -118,13 +139,54 @@ func (pr *Processor) ScheduleStatesByVehicle(vehicleID string) ([]string, error)
 // RecomputeAll re-derives stored status/severity/next_due_* for every active
 // schedule using each vehicle's current mileage and "now" (FR-MAINT-6). Invoked
 // by the hourly recompute job under an advisory lock.
+//
+// When a schedule transitions INTO overdue (prior stored status was not overdue
+// but the freshly computed state is), it appends a schedule.overdue activity
+// event and enqueues a schedule.overdue outbox event in the SAME transaction as
+// the status update (design §8.2, A8). The edge check (only on the
+// ok/upcoming→overdue transition) ensures the event fires once, not every hour.
 func (pr *Processor) RecomputeAll(now time.Time) error {
 	rows, err := pr.p.ListActive()
 	if err != nil {
 		return err
 	}
 	for _, r := range rows {
-		if err := pr.a.Recompute(r.Schedule.ID(), r.CurrentMileage, now); err != nil {
+		prior := r.Schedule.Status()
+		newState := DueState(r.Schedule.AsSchedule(), now, r.CurrentMileage, DefaultThresholds)
+		transitionedToOverdue := prior != "overdue" && newState == "overdue"
+
+		if !transitionedToOverdue || pr.db == nil {
+			// No transition (or no hooks wired): plain recompute.
+			if err := pr.a.Recompute(r.Schedule.ID(), r.CurrentMileage, now); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// Transition edge: recompute + activity + emit atomically (A8).
+		sched := r.Schedule
+		fleetID := r.FleetID
+		if err := pr.db.Transaction(func(tx *gorm.DB) error {
+			if err := pr.a.RecomputeTx(tx, sched.ID(), r.CurrentMileage, now); err != nil {
+				return err
+			}
+			if pr.record != nil {
+				vid := sched.VehicleID()
+				if err := pr.record(tx, systemActor, "schedule.overdue", fleetID, &vid, map[string]any{
+					"schedule_id": sched.ID(),
+					"vehicle_id":  sched.VehicleID(),
+					"severity":    Severity(newState),
+				}); err != nil {
+					return err
+				}
+			}
+			if pr.emit != nil {
+				if err := pr.emit(tx, fleetID, sched.ID(), sched.VehicleID(), Severity(newState)); err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 	}

@@ -11,6 +11,9 @@ type CompletionInput struct {
 	ScheduleID    string
 	VehicleID     string
 	CategoryID    string
+	FleetID       string // for the activity append + outbox event
+	ActorUserID   string // who completed the maintenance
+	TraceID       string // correlation id for the emitted event
 	Date          time.Time
 	LatestMileage int
 }

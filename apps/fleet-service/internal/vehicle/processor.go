@@ -15,15 +15,39 @@ type OwnerChecker interface {
 	RequireOwnerInFleet(fleetID, userID string) error
 }
 
+// ActivityRecorder appends an activity event on the supplied transaction handle
+// (design §8.2). Injected so the vehicle package never imports the activity
+// package directly (would create an import cycle). Satisfied by activity.Record.
+type ActivityRecorder func(tx *gorm.DB, actorUserID, eventType, fleetID string, vehicleID *string, payload map[string]any) error
+
+// EventEmitter enqueues a domain event in the transactional outbox on the
+// supplied tx (design A8). Injected to avoid an import cycle. Satisfied by an
+// adapter over events.EmitVehicleCreated.
+type EventEmitter func(tx *gorm.DB, fleetID, actorID, traceID, vehicleID string) error
+
 // Processor contains vehicle business logic, injected with Provider and Administrator.
 type Processor struct {
-	log logrus.FieldLogger
-	p   Provider
-	a   Administrator
+	log    logrus.FieldLogger
+	p      Provider
+	a      Administrator
+	record ActivityRecorder
+	emit   EventEmitter
 }
 
 func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator) *Processor {
 	return &Processor{log: log, p: p, a: a}
+}
+
+// WithActivityRecorder injects the activity recorder used on vehicle creation.
+func (pr *Processor) WithActivityRecorder(rec ActivityRecorder) *Processor {
+	pr.record = rec
+	return pr
+}
+
+// WithEventEmitter injects the outbox emitter used on vehicle creation (A8).
+func (pr *Processor) WithEventEmitter(emit EventEmitter) *Processor {
+	pr.emit = emit
+	return pr
 }
 
 // GetByID fetches a vehicle by ID (only non-deleted rows).
@@ -52,9 +76,28 @@ func (pr *Processor) ListByFleet(fleetID string, page server.Page) ([]Model, int
 	return pr.p.ListByFleet(fleetID, page)
 }
 
-// Create inserts a new vehicle.
-func (pr *Processor) Create(m Model) (Model, error) {
-	return pr.a.Insert(m)
+// Create inserts a new vehicle and, in the SAME transaction, appends a
+// vehicle.created activity event and enqueues a vehicle.created outbox event
+// (design §8.2, A8). Any hook error rolls the insert back.
+func (pr *Processor) Create(m Model, actorUserID, traceID string) (Model, error) {
+	var hooks []TxHook
+	if pr.record != nil {
+		hooks = append(hooks, func(tx *gorm.DB, created Model) error {
+			vid := created.ID()
+			return pr.record(tx, actorUserID, "vehicle.created", created.FleetID(), &vid, map[string]any{
+				"vehicle_id": created.ID(),
+				"nickname":   created.Nickname(),
+				"make":       created.Make(),
+				"model":      created.Model(),
+			})
+		})
+	}
+	if pr.emit != nil {
+		hooks = append(hooks, func(tx *gorm.DB, created Model) error {
+			return pr.emit(tx, created.FleetID(), actorUserID, traceID, created.ID())
+		})
+	}
+	return pr.a.InsertWithHooks(m, hooks...)
 }
 
 // Update applies a partial update to an existing vehicle.

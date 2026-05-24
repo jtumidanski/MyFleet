@@ -22,17 +22,39 @@ type ScheduleAdvancer interface {
 	AdvanceTx(tx *gorm.DB, id string, date time.Time, miles int) error
 }
 
+// ActivityRecorder appends an activity event on the supplied tx (design §8.2).
+// Injected to avoid an import cycle. Satisfied by activity.Record.
+type ActivityRecorder func(tx *gorm.DB, actorUserID, eventType, fleetID string, vehicleID *string, payload map[string]any) error
+
+// CompletedEmitter enqueues a maintenance.completed event in the outbox on the
+// supplied tx (design A8). Injected to avoid an import cycle.
+type CompletedEmitter func(tx *gorm.DB, fleetID, actorID, traceID, scheduleID, vehicleID, recordID, categoryID string) error
+
 // CompletionDeps holds the dependencies the concrete completion needs to run
 // the cross-domain write set in one transaction (design §10.3).
 type CompletionDeps struct {
 	DB       *gorm.DB
 	Records  RecordInserter
 	Schedule ScheduleAdvancer
+	record   ActivityRecorder
+	emit     CompletedEmitter
 }
 
 // NewCompletionDeps wires the concrete completion dependencies.
 func NewCompletionDeps(db *gorm.DB, records RecordInserter, schedule ScheduleAdvancer) CompletionDeps {
 	return CompletionDeps{DB: db, Records: records, Schedule: schedule}
+}
+
+// WithActivityRecorder injects the activity recorder run after completion.
+func (d CompletionDeps) WithActivityRecorder(rec ActivityRecorder) CompletionDeps {
+	d.record = rec
+	return d
+}
+
+// WithEmitter injects the maintenance.completed outbox emitter (A8).
+func (d CompletionDeps) WithEmitter(emit CompletedEmitter) CompletionDeps {
+	d.emit = emit
+	return d
 }
 
 // CompleteInTransaction runs the full completion flow (record insert + mileage
@@ -46,7 +68,28 @@ func (d CompletionDeps) CompleteInTransaction(log logrus.FieldLogger, in Complet
 		proc := NewCompletionProcessor(log, c)
 		var perr error
 		out, perr = proc.Complete(in)
-		return perr
+		if perr != nil {
+			return perr
+		}
+		// Append a maintenance.completed activity event in the SAME tx (§8.2).
+		if d.record != nil {
+			vid := in.VehicleID
+			if err := d.record(tx, in.ActorUserID, "maintenance.completed", in.FleetID, &vid, map[string]any{
+				"schedule_id":           in.ScheduleID,
+				"vehicle_id":            in.VehicleID,
+				"maintenance_record_id": out.MaintenanceRecordID,
+				"category_id":           in.CategoryID,
+			}); err != nil {
+				return err
+			}
+		}
+		// Enqueue the maintenance.completed outbox event in the SAME tx (A8).
+		if d.emit != nil {
+			if err := d.emit(tx, in.FleetID, in.ActorUserID, in.TraceID, in.ScheduleID, in.VehicleID, out.MaintenanceRecordID, in.CategoryID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return out, err
 }

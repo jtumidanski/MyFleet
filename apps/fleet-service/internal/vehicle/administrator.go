@@ -6,10 +6,18 @@ import (
 	"gorm.io/gorm"
 )
 
+// TxHook runs side-effecting work (activity append + event emission) on the same
+// transaction as the vehicle insert, so the writes commit/rollback atomically
+// (design §8.2, A8). Errors are FATAL: they roll back the whole transaction.
+type TxHook func(tx *gorm.DB, created Model) error
+
 // Administrator is the write interface for vehicle data access.
 // All mutations (inserts, updates, soft-delete, restore, primary-image) go here.
 type Administrator interface {
 	Insert(Model) (Model, error)
+	// InsertWithHooks inserts a vehicle and runs each hook on the same tx. Any
+	// hook error rolls the insert back.
+	InsertWithHooks(m Model, hooks ...TxHook) (Model, error)
 	Update(Model) (Model, error)
 	SoftDelete(id string) (Model, error)
 	RestoreRow(id string) (Model, error)
@@ -29,6 +37,27 @@ func (a *dbAdministrator) Insert(m Model) (Model, error) {
 		return Model{}, err
 	}
 	return Make(e), nil
+}
+
+func (a *dbAdministrator) InsertWithHooks(m Model, hooks ...TxHook) (Model, error) {
+	var created Model
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		e := m.ToEntity()
+		if err := tx.Create(&e).Error; err != nil {
+			return err
+		}
+		created = Make(e)
+		for _, h := range hooks {
+			if err := h(tx, created); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return Model{}, err
+	}
+	return created, nil
 }
 
 func (a *dbAdministrator) Update(m Model) (Model, error) {

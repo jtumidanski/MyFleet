@@ -21,6 +21,10 @@ type Administrator interface {
 	// Recompute re-derives next_due_*, status, and severity for an existing
 	// schedule given the vehicle's current mileage and "now" (FR-MAINT-6).
 	Recompute(id string, currentMileage int, now time.Time) error
+	// RecomputeTx is Recompute on the supplied transaction handle, so the
+	// recompute job can append activity + enqueue an outbox event atomically with
+	// the status update on an overdue transition (design A8).
+	RecomputeTx(tx *gorm.DB, id string, currentMileage int, now time.Time) error
 }
 
 type dbAdministrator struct{ db *gorm.DB }
@@ -98,8 +102,12 @@ func (a *dbAdministrator) AdvanceTx(tx *gorm.DB, id string, date time.Time, mile
 }
 
 func (a *dbAdministrator) Recompute(id string, currentMileage int, now time.Time) error {
+	return a.RecomputeTx(a.db, id, currentMileage, now)
+}
+
+func (a *dbAdministrator) RecomputeTx(tx *gorm.DB, id string, currentMileage int, now time.Time) error {
 	var e Entity
-	if err := a.db.First(&e, "id = ?", id).Error; err != nil {
+	if err := tx.First(&e, "id = ?", id).Error; err != nil {
 		return err
 	}
 	m := Make(e)
@@ -116,7 +124,7 @@ func (a *dbAdministrator) Recompute(id string, currentMileage int, now time.Time
 	} else {
 		updates["next_due_date"] = nil
 	}
-	return a.db.Model(&Entity{}).Where("id = ?", id).Updates(updates).Error
+	return tx.Model(&Entity{}).Where("id = ?", id).Updates(updates).Error
 }
 
 func (a *dbAdministrator) get(id string) (Model, error) {

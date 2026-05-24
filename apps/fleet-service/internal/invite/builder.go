@@ -14,11 +14,11 @@ type Builder struct{ m Model }
 
 func NewBuilder() *Builder { return &Builder{m: Model{id: uuid.NewString()}} }
 
-func (b *Builder) SetFleetID(id string) *Builder         { b.m.fleetID = id; return b }
-func (b *Builder) SetEmail(email string) *Builder        { b.m.email = email; return b }
-func (b *Builder) SetRole(role string) *Builder          { b.m.role = role; return b }
-func (b *Builder) SetToken(token string) *Builder        { b.m.token = token; return b }
-func (b *Builder) SetExpiresAt(t time.Time) *Builder     { b.m.expiresAt = t; return b }
+func (b *Builder) SetFleetID(id string) *Builder          { b.m.fleetID = id; return b }
+func (b *Builder) SetEmail(email string) *Builder         { b.m.email = email; return b }
+func (b *Builder) SetRole(role string) *Builder           { b.m.role = role; return b }
+func (b *Builder) SetToken(token string) *Builder         { b.m.token = token; return b }
+func (b *Builder) SetExpiresAt(t time.Time) *Builder      { b.m.expiresAt = t; return b }
 func (b *Builder) SetInvitedByUserID(uid string) *Builder { b.m.invitedByUserID = uid; return b }
 
 // setAcceptedAt is unexported — used only by white-box tests in package invite.

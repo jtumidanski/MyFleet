@@ -18,10 +18,34 @@ type Administrator interface {
 	Accept(inv Model, userID string) (Model, error)
 }
 
-type dbAdministrator struct{ db *gorm.DB }
+// ActivityRecorder appends an activity event on the supplied tx (design §8.2).
+// Injected to keep the invite package decoupled. Satisfied by activity.Record.
+type ActivityRecorder func(tx *gorm.DB, actorUserID, eventType, fleetID string, vehicleID *string, payload map[string]any) error
+
+// InvitedEmitter enqueues a member.invited event in the outbox on the supplied
+// tx (design A8). Injected to avoid coupling. Satisfied by events.EmitMemberInvited.
+type InvitedEmitter func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error
+
+type dbAdministrator struct {
+	db     *gorm.DB
+	record ActivityRecorder
+	emit   InvitedEmitter
+}
 
 // NewAdministrator returns an Administrator backed by the given database.
-func NewAdministrator(db *gorm.DB) Administrator { return &dbAdministrator{db: db} }
+func NewAdministrator(db *gorm.DB) *dbAdministrator { return &dbAdministrator{db: db} }
+
+// WithActivityRecorder injects the activity recorder run on invite acceptance.
+func (a *dbAdministrator) WithActivityRecorder(rec ActivityRecorder) *dbAdministrator {
+	a.record = rec
+	return a
+}
+
+// WithEmitter injects the member.invited outbox emitter (A8).
+func (a *dbAdministrator) WithEmitter(emit InvitedEmitter) *dbAdministrator {
+	a.emit = emit
+	return a
+}
 
 func (a *dbAdministrator) Insert(m Model) (Model, error) {
 	e := m.ToEntity()
@@ -70,7 +94,18 @@ func (a *dbAdministrator) Accept(inv Model, userID string) (Model, error) {
 			return err
 		}
 
-		// 3. Enqueue member.invited event in the transactional outbox
+		// 3. Append a member.invited activity event in the SAME tx (§8.2).
+		if a.record != nil {
+			if err := a.record(tx, userID, "member.invited", inv.FleetID(), nil, map[string]any{
+				"invite_id": inv.ID(),
+				"email":     inv.Email(),
+				"role":      inv.Role(),
+			}); err != nil {
+				return err
+			}
+		}
+
+		// 4. Enqueue member.invited event in the transactional outbox
 		env := events.Envelope{
 			EventID:     inv.ID(),
 			Type:        "member.invited",

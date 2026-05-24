@@ -17,6 +17,7 @@ var ErrNotFound = errors.New("maintenance schedule not found")
 type QueueRow struct {
 	Schedule       Model
 	CurrentMileage int
+	FleetID        string
 }
 
 // Provider is the read-only interface for maintenance schedule data access.
@@ -76,6 +77,7 @@ func (p *dbProvider) ListByVehicle(vehicleID string, page server.Page) ([]Model,
 type joinRow struct {
 	Entity
 	CurrentMileage int
+	FleetID        string
 }
 
 func (p *dbProvider) ListActiveByFleet(fleetID string) ([]QueueRow, error) {
@@ -95,7 +97,7 @@ func (p *dbProvider) ListActive() ([]QueueRow, error) {
 // the vehicle's current mileage for live DueState computation.
 func (p *dbProvider) queryActive(fleetID, vehicleID *string) ([]QueueRow, error) {
 	q := p.db.Table("fleet.maintenance_schedules AS s").
-		Select("s.*, v.current_mileage AS current_mileage").
+		Select("s.*, v.current_mileage AS current_mileage, v.fleet_id AS fleet_id").
 		Joins("JOIN fleet.vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL").
 		Where("s.active = ?", true)
 	if fleetID != nil {
@@ -112,7 +114,7 @@ func (p *dbProvider) queryActive(fleetID, vehicleID *string) ([]QueueRow, error)
 
 	out := make([]QueueRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, QueueRow{Schedule: Make(r.Entity), CurrentMileage: r.CurrentMileage})
+		out = append(out, QueueRow{Schedule: Make(r.Entity), CurrentMileage: r.CurrentMileage, FleetID: r.FleetID})
 	}
 	return out, nil
 }

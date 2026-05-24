@@ -25,10 +25,12 @@ type VehicleAccessor interface {
 // InitializeRoutes wires the JWT-protected fuel log endpoints.
 // vehicleAccessor resolves the owning vehicle's fleetID + currentMileage for
 // authz and for the OnAppend mileage rule.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor) func(chi.Router) {
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor, record ActivityRecorder, emit FuelLoggedEmitter) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db))
 	adm := NewAdministrator(db)
-	loggingDeps := NewLoggingDeps(db, events.NoopProducer{})
+	loggingDeps := NewLoggingDeps(db, events.NoopProducer{}).
+		WithActivityRecorder(record).
+		WithEmitter(emit)
 	return func(r chi.Router) {
 		// GET /vehicles/{id}/fuel-logs — list fuel logs (newest first, paged).
 		r.Get("/vehicles/{id}/fuel-logs", func(w http.ResponseWriter, req *http.Request) {

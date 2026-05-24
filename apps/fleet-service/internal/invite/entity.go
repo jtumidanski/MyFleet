@@ -8,14 +8,14 @@ import (
 
 // Entity maps to fleet.fleet_invites (PRD §6).
 type Entity struct {
-	ID              string     `gorm:"type:uuid;primaryKey"`
-	FleetID         string     `gorm:"type:uuid;not null;index"`
-	Email           string     `gorm:"not null"`
-	Role            string     `gorm:"not null"`
-	Token           string     `gorm:"not null;uniqueIndex"`
-	ExpiresAt       time.Time  `gorm:"not null"`
+	ID              string    `gorm:"type:uuid;primaryKey"`
+	FleetID         string    `gorm:"type:uuid;not null;index"`
+	Email           string    `gorm:"not null"`
+	Role            string    `gorm:"not null"`
+	Token           string    `gorm:"not null;uniqueIndex"`
+	ExpiresAt       time.Time `gorm:"not null"`
 	AcceptedAt      *time.Time
-	InvitedByUserID string    `gorm:"not null"`
+	InvitedByUserID string `gorm:"not null"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
