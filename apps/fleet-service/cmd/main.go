@@ -19,6 +19,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/invite"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancecategory"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
@@ -36,10 +37,16 @@ func main() {
 		vehicle.Migration,
 		vehiclemedia.Migration,
 		mileage.Migration,
+		maintenancecategory.Migration,
 		events.MigrateOutbox,
 	))
 	if err != nil {
 		log.WithError(err).Fatal("db connect")
+	}
+
+	// Seed system-defined maintenance categories (idempotent; FR-MAINT-1).
+	if err := maintenancecategory.Seed(db); err != nil {
+		log.WithError(err).Fatal("seed maintenance categories")
 	}
 
 	// Fleet-service validates auth-service JWT tokens via JWKS.
@@ -83,6 +90,7 @@ func main() {
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
+				maintenancecategory.InitializeRoutes(log, db)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {
