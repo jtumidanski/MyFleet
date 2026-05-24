@@ -22,6 +22,7 @@ import (
 	dtoevents "github.com/jtumidanski/myfleet/packages/dto-go/events"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/activity"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/dashboard"
 	fleetevents "github.com/jtumidanski/myfleet/apps/fleet-service/internal/events"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fuel"
@@ -52,6 +53,7 @@ func main() {
 		fuel.Migration,
 		activity.Migration,
 		events.MigrateOutbox,
+		dashboard.Migration,
 	))
 	if err != nil {
 		log.WithError(err).Fatal("db connect")
@@ -179,6 +181,7 @@ func main() {
 				maintenancerecord.InitializeRoutes(log, db, vehicleProc)(pr)
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)
 				activity.InitializeRoutes(log, db, vehicleProc)(pr)
+				dashboard.InitializeRoutes(log, db, scheduleProc, activityProc, vehicleProc)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {

@@ -153,6 +153,13 @@ func (pr *Processor) DueAcrossAllFleets(now time.Time) ([]DueEntry, error) {
 	return out, nil
 }
 
+// ListActiveByFleet returns the raw QueueRows for all active schedules in a
+// fleet. Exposed so the dashboard overview can derive per-vehicle status counts
+// without re-entering the schedule processor's DueState logic.
+func (pr *Processor) ListActiveByFleet(fleetID string) ([]QueueRow, error) {
+	return pr.p.ListActiveByFleet(fleetID)
+}
+
 // ScheduleStatesByVehicle returns the live DueState ("ok"|"upcoming"|"overdue")
 // of every active schedule for a vehicle, computed on read from the vehicle's
 // current mileage and now (design A5 / §10.2). Used by the vehicle layer to
