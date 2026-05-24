@@ -1,6 +1,10 @@
 package health
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
 
 func Liveness() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
@@ -17,4 +21,9 @@ func Readiness(checks ...func() error) http.HandlerFunc {
 		}
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+// Metrics returns the default Prometheus metrics handler (design §10: /metrics).
+func Metrics() http.Handler {
+	return promhttp.Handler()
 }

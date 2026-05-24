@@ -22,3 +22,15 @@ func TestReadiness_503WhenCheckFails(t *testing.T) {
 		t.Fatalf("want 503 got %d", rec.Code)
 	}
 }
+
+func TestMetrics_nonNilAnd200(t *testing.T) {
+	h := Metrics()
+	if h == nil {
+		t.Fatal("Metrics() returned nil handler")
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200 got %d", rec.Code)
+	}
+}

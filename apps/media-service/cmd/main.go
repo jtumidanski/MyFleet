@@ -106,6 +106,7 @@ func main() {
 		AddRouteInitializer(func(r chi.Router) {
 			r.Get("/healthz", health.Liveness())
 			r.Get("/readyz", health.Readiness(func() error { d, _ := db.DB(); return d.Ping() }))
+			r.Handle("/metrics", health.Metrics())
 		}).
 		Run(); err != nil {
 		log.WithError(err).Fatal("server stopped")
