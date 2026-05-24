@@ -1,2 +1,15 @@
 # Task worktrees (siblings of the main repo, created by /spec-task)
 .worktrees/
+
+# Go
+*.test
+*.out
+bin/
+# Node
+node_modules/
+dist/
+# Env / secrets
+.env
+*.local
+# MinIO/data
+deploy/compose/data/
