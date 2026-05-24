@@ -39,8 +39,8 @@ function VehicleTrend({ vehicleId, range }: MileageTrendsVehicleProps) {
     return <p className="text-xs text-muted-foreground">Not enough data for {vehicleId}.</p>;
   }
 
-  const first = points[0];
-  const last = points[points.length - 1];
+  const first = points[0]!;
+  const last = points[points.length - 1]!;
   const delta = last.mileage - first.mileage;
 
   return (

@@ -18,8 +18,9 @@ import { RecentActivityWidget } from './widgets/RecentActivityWidget';
 import { SpendByVehicleWidget } from './widgets/SpendByVehicleWidget';
 import { MileageTrendsWidget } from './widgets/MileageTrendsWidget';
 
-// Re-export from the pure catalog module so importers can use either file.
-export { WIDGET_CATALOG, type WidgetType } from './widgetCatalog';
+// Import catalog types for use within this file only.
+// Tests use widgetManifest.ts (pure TS) directly.
+import { type WidgetType } from './widgetCatalog';
 
 // ---------------------------------------------------------------------------
 // Registry entry

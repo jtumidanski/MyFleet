@@ -10,11 +10,8 @@ import { Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../ui/button';
 import { cn } from '../../../lib/utils';
-import {
-  widgetRegistry,
-  WIDGET_CATALOG,
-  type WidgetType,
-} from './widgetRegistry';
+import { widgetRegistry } from './widgetRegistry';
+import { WIDGET_CATALOG, type WidgetType } from './widgetCatalog';
 import { useDashboardLayout, useSaveDashboardLayout } from '../../../lib/hooks/api/dashboard';
 import type { WidgetInput } from '../../../types/models/dashboard';
 
@@ -101,14 +98,22 @@ export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
   const moveUp = (idx: number) => {
     if (idx === 0) return;
     const next = [...widgets];
-    [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+    const above = next[idx - 1];
+    const current = next[idx];
+    if (!above || !current) return;
+    next[idx - 1] = current;
+    next[idx] = above;
     save(next);
   };
 
   const moveDown = (idx: number) => {
     if (idx === widgets.length - 1) return;
     const next = [...widgets];
-    [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+    const current = next[idx];
+    const below = next[idx + 1];
+    if (!current || !below) return;
+    next[idx] = below;
+    next[idx + 1] = current;
     save(next);
   };
 
