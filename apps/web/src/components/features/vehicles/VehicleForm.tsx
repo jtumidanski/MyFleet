@@ -1,8 +1,18 @@
-import type { ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { Loader2 } from 'lucide-react';
 import { vehicleSchema, type VehicleFormInput } from '../../../lib/schemas/vehicle';
-import { cn } from '../../../lib/utils';
+import { Button } from '../../ui/button';
+import { Input } from '../../ui/input';
+import { Textarea } from '../../ui/textarea';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '../../ui/form';
 
 interface VehicleFormProps {
   // 'create' shows all fields; 'edit' only the server-mutable subset
@@ -14,31 +24,6 @@ interface VehicleFormProps {
   submitting?: boolean;
 }
 
-function Field({
-  label,
-  error,
-  children,
-}: {
-  label: string;
-  error?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-gray-700">{label}</label>
-      <div className="mt-1">{children}</div>
-      {error && (
-        <p className="mt-1 text-sm text-red-600" role="alert">
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
-const inputClass =
-  'block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none disabled:bg-gray-50';
-
 export function VehicleForm({
   mode,
   defaultValues,
@@ -47,11 +32,7 @@ export function VehicleForm({
   submitting,
 }: VehicleFormProps) {
   const isCreate = mode === 'create';
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<VehicleFormInput>({
+  const form = useForm<VehicleFormInput>({
     resolver: zodResolver(vehicleSchema),
     defaultValues: {
       make: '',
@@ -65,75 +46,155 @@ export function VehicleForm({
   });
 
   return (
-    <form onSubmit={handleSubmit((values) => onSubmit(values))} className="space-y-4">
-      <Field label="Nickname" error={errors.nickname?.message}>
-        <input type="text" className={inputClass} {...register('nickname')} />
-      </Field>
-
-      {/* make/model/year are immutable after create; show read-only in edit. */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Field label="Make" error={errors.make?.message}>
-          <input type="text" className={inputClass} disabled={!isCreate} {...register('make')} />
-        </Field>
-        <Field label="Model" error={errors.model?.message}>
-          <input type="text" className={inputClass} disabled={!isCreate} {...register('model')} />
-        </Field>
-        <Field label="Year" error={errors.year?.message}>
-          <input
-            type="number"
-            className={inputClass}
-            disabled={!isCreate}
-            {...register('year', { valueAsNumber: true })}
-          />
-        </Field>
-      </div>
-
-      {isCreate && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Trim" error={errors.trim?.message}>
-            <input type="text" className={inputClass} {...register('trim')} />
-          </Field>
-          <Field label="VIN" error={errors.vin?.message}>
-            <input type="text" className={inputClass} {...register('vin')} />
-          </Field>
-        </div>
-      )}
-
-      <Field label="Current mileage" error={errors.currentMileage?.message}>
-        <input
-          type="number"
-          className={inputClass}
-          {...register('currentMileage', {
-            setValueAs: (v) => (v === '' || v === null || v === undefined ? undefined : Number(v)),
-          })}
-        />
-      </Field>
-
-      <Field label="Notes" error={errors.notes?.message}>
-        <textarea rows={3} className={inputClass} {...register('notes')} />
-      </Field>
-
-      <div className="flex justify-end gap-2">
-        {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md border border-gray-300 px-4 py-2 text-sm hover:bg-gray-50"
-          >
-            Cancel
-          </button>
-        )}
-        <button
-          type="submit"
-          disabled={submitting}
-          className={cn(
-            'rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800',
-            submitting && 'opacity-60',
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit((values) => onSubmit(values))} className="space-y-4">
+        <FormField
+          control={form.control}
+          name="nickname"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Nickname</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} value={field.value ?? ''} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
           )}
-        >
-          {submitting ? 'Saving…' : isCreate ? 'Add vehicle' : 'Save changes'}
-        </button>
-      </div>
-    </form>
+        />
+
+        {/* make/model/year are immutable after create; show read-only in edit. */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <FormField
+            control={form.control}
+            name="make"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Make</FormLabel>
+                <FormControl>
+                  <Input type="text" disabled={!isCreate} {...field} value={field.value ?? ''} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="model"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Model</FormLabel>
+                <FormControl>
+                  <Input type="text" disabled={!isCreate} {...field} value={field.value ?? ''} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="year"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Year</FormLabel>
+                <FormControl>
+                  <Input
+                    type="number"
+                    disabled={!isCreate}
+                    value={field.value ?? ''}
+                    onChange={(e) =>
+                      field.onChange(e.target.value === '' ? undefined : e.target.valueAsNumber)
+                    }
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    ref={field.ref}
+                  />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        </div>
+
+        {isCreate && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <FormField
+              control={form.control}
+              name="trim"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Trim</FormLabel>
+                  <FormControl>
+                    <Input type="text" {...field} value={field.value ?? ''} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="vin"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>VIN</FormLabel>
+                  <FormControl>
+                    <Input type="text" {...field} value={field.value ?? ''} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        )}
+
+        <FormField
+          control={form.control}
+          name="currentMileage"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Current Mileage</FormLabel>
+              <FormControl>
+                <Input
+                  type="number"
+                  value={field.value ?? ''}
+                  onChange={(e) =>
+                    field.onChange(e.target.value === '' ? undefined : e.target.valueAsNumber)
+                  }
+                  onBlur={field.onBlur}
+                  name={field.name}
+                  ref={field.ref}
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="notes"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Notes</FormLabel>
+              <FormControl>
+                <Textarea rows={3} {...field} value={field.value ?? ''} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <div className="flex justify-end gap-2">
+          {onCancel && (
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+          )}
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isCreate ? 'Add Vehicle' : 'Save Changes'}
+          </Button>
+        </div>
+      </form>
+    </Form>
   );
 }

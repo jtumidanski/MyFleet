@@ -2,9 +2,21 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { Loader2 } from 'lucide-react';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { createFleetSchema, type CreateFleetInput } from '../lib/schemas/fleet';
 import { useCreateFleet } from '../lib/hooks/api/fleets';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Input } from '../components/ui/input';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '../components/ui/form';
 
 /**
  * First-run onboarding: create the household fleet. On success the access token
@@ -14,16 +26,13 @@ import { useCreateFleet } from '../lib/hooks/api/fleets';
 export function OnboardingPage() {
   const navigate = useNavigate();
   const createFleet = useCreateFleet();
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isSubmitting },
-  } = useForm<CreateFleetInput>({
+  const form = useForm<CreateFleetInput>({
     resolver: zodResolver(createFleetSchema),
     defaultValues: { name: '' },
   });
+  const { isSubmitting } = form.formState;
 
-  const onSubmit = handleSubmit(async (values) => {
+  const onSubmit = form.handleSubmit(async (values) => {
     try {
       await createFleet.mutateAsync(values);
       toast.success('Fleet created');
@@ -35,43 +44,37 @@ export function OnboardingPage() {
   });
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <form
-        onSubmit={onSubmit}
-        className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-8 shadow-sm"
-      >
-        <h1 className="text-2xl font-semibold text-gray-900">Set up your fleet</h1>
-        <p className="mt-2 text-sm text-gray-500">
-          Give your household fleet a name to get started.
-        </p>
+    <div className="flex min-h-screen items-center justify-center bg-muted">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Set Up Your Fleet</CardTitle>
+          <CardDescription>Give your household fleet a name to get started.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={onSubmit} className="space-y-6">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Fleet Name</FormLabel>
+                    <FormControl>
+                      <Input type="text" autoFocus placeholder="The Smith Household" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-        <div className="mt-6">
-          <label htmlFor="name" className="block text-sm font-medium text-gray-700">
-            Fleet name
-          </label>
-          <input
-            id="name"
-            type="text"
-            autoFocus
-            {...register('name')}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-gray-500 focus:outline-none"
-            placeholder="The Smith Household"
-          />
-          {errors.name && (
-            <p className="mt-1 text-sm text-red-600" role="alert">
-              {errors.name.message}
-            </p>
-          )}
-        </div>
-
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="mt-6 w-full rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
-        >
-          {isSubmitting ? 'Creating…' : 'Create fleet'}
-        </button>
-      </form>
+              <Button type="submit" className="w-full" disabled={isSubmitting}>
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Create Fleet
+              </Button>
+            </form>
+          </Form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

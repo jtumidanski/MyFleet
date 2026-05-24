@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useMe, logoutRequest, authKeys } from '../lib/hooks/api/auth';
 import { captureTokenFromHash, clearAccessToken, getAccessToken } from '../lib/api/token';
@@ -36,17 +44,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [me.isError]);
 
-  const login = () => {
+  const login = useCallback(() => {
     // Full navigation to auth-service so the OAuth redirect chain works.
     window.location.href = '/api/auth/login/google';
-  };
+  }, []);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await logoutRequest();
     clearAccessToken();
     setHasToken(false);
     queryClient.removeQueries({ queryKey: authKeys.all });
-  };
+  }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(() => {
     const data = me.data;
@@ -59,9 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
     };
-    // login/logout are stable closures over setHasToken/queryClient.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me.data, me.isLoading, hasToken]);
+  }, [me.data, me.isLoading, hasToken, login, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

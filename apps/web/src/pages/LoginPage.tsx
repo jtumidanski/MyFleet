@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 
 /**
  * Google sign-in landing page. The button performs a full navigation to
@@ -17,20 +19,18 @@ export function LoginPage() {
   }, [isAuthenticated, navigate]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50">
-      <div className="w-full max-w-sm rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
-        <h1 className="text-center text-2xl font-semibold text-gray-900">MyFleet</h1>
-        <p className="mt-2 text-center text-sm text-gray-500">
-          Sign in to manage your household fleet.
-        </p>
-        <button
-          type="button"
-          onClick={login}
-          className="mt-6 flex w-full items-center justify-center gap-2 rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-        >
-          Continue with Google
-        </button>
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-muted">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="items-center text-center">
+          <CardTitle>MyFleet</CardTitle>
+          <CardDescription>Sign in to manage your household fleet.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button type="button" variant="outline" className="w-full" onClick={login}>
+            Continue with Google
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

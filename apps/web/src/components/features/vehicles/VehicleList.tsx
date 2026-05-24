@@ -1,4 +1,4 @@
-import { Skeleton } from '../../common/Skeleton';
+import { Skeleton } from '../../ui/skeleton';
 import { VehicleCard } from './VehicleCard';
 import type { Vehicle } from '../../../types/models/vehicle';
 

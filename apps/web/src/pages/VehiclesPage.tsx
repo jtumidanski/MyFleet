@@ -5,6 +5,8 @@ import { useAuth } from '../context/AuthContext';
 import { useVehicles, useCreateVehicle } from '../lib/hooks/api/vehicles';
 import { VehicleList } from '../components/features/vehicles/VehicleList';
 import { VehicleForm } from '../components/features/vehicles/VehicleForm';
+import { Button } from '../components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import type { VehicleFormInput } from '../lib/schemas/vehicle';
 import type { CreateVehicleAttributes } from '../types/models/vehicle';
 
@@ -47,26 +49,26 @@ export function VehiclesPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Vehicles</h1>
         {canWrite && !showForm && (
-          <button
-            type="button"
-            onClick={() => setShowForm(true)}
-            className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-          >
-            Add vehicle
-          </button>
+          <Button type="button" onClick={() => setShowForm(true)}>
+            Add Vehicle
+          </Button>
         )}
       </div>
 
       {canWrite && showForm && (
-        <div className="mt-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-medium">New vehicle</h2>
-          <VehicleForm
-            mode="create"
-            onSubmit={handleCreate}
-            onCancel={() => setShowForm(false)}
-            submitting={createVehicle.isPending}
-          />
-        </div>
+        <Card className="mt-6">
+          <CardHeader>
+            <CardTitle className="text-lg">New Vehicle</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <VehicleForm
+              mode="create"
+              onSubmit={handleCreate}
+              onCancel={() => setShowForm(false)}
+              submitting={createVehicle.isPending}
+            />
+          </CardContent>
+        </Card>
       )}
 
       <div className="mt-6">

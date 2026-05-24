@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { StatusBadge, formatMileage, type VehicleStatus } from '@myfleet/ui-components';
+import { Card } from '../../ui/card';
 import type { Vehicle } from '../../../types/models/vehicle';
 
 const KNOWN_STATUSES: readonly VehicleStatus[] = [
@@ -23,23 +24,24 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
   const status = asVehicleStatus(attributes.status);
 
   return (
-    <Link
-      to={`/vehicles/${vehicle.id}`}
-      className="block rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:border-gray-300 hover:shadow"
-    >
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="font-medium text-gray-900">{title}</div>
-          <div className="text-sm text-gray-500">
-            {attributes.year} {attributes.make} {attributes.model}
-            {attributes.trim ? ` ${attributes.trim}` : ''}
+    <Link to={`/vehicles/${vehicle.id}`} className="block">
+      <Card className="cursor-pointer p-4 transition hover:border-ring hover:shadow">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="font-medium text-foreground">{title}</div>
+            <div className="text-sm text-muted-foreground">
+              {attributes.year} {attributes.make} {attributes.model}
+              {attributes.trim ? ` ${attributes.trim}` : ''}
+            </div>
           </div>
+          {status && <StatusBadge status={status} />}
         </div>
-        {status && <StatusBadge status={status} />}
-      </div>
-      {typeof attributes.currentMileage === 'number' && (
-        <div className="mt-3 text-sm text-gray-600">{formatMileage(attributes.currentMileage)}</div>
-      )}
+        {typeof attributes.currentMileage === 'number' && (
+          <div className="mt-3 text-sm text-muted-foreground">
+            {formatMileage(attributes.currentMileage)}
+          </div>
+        )}
+      </Card>
     </Link>
   );
 }

@@ -1,20 +1,11 @@
-type ClassValue = string | number | null | undefined | false | ClassValue[];
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
 /**
- * Conditional className helper. Joins truthy class values with a space.
- * Kept dependency-free; swap for clsx + tailwind-merge if conflict resolution
- * is needed later.
+ * Conditional className helper — the shadcn/ui standard. Combines `clsx`
+ * (conditional join) with `tailwind-merge` (conflict resolution so later
+ * Tailwind classes win over earlier ones).
  */
 export function cn(...inputs: ClassValue[]): string {
-  const out: string[] = [];
-  for (const input of inputs) {
-    if (!input) continue;
-    if (Array.isArray(input)) {
-      const nested = cn(...input);
-      if (nested) out.push(nested);
-    } else {
-      out.push(String(input));
-    }
-  }
-  return out.join(' ');
+  return twMerge(clsx(inputs));
 }

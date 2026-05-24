@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { Skeleton } from './ui/skeleton';
 
 /**
  * Route guard.
@@ -16,7 +17,7 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="h-8 w-48 animate-pulse rounded bg-gray-200" aria-hidden />
+        <Skeleton className="h-8 w-48" />
       </div>
     );
   }

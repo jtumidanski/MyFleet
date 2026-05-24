@@ -11,7 +11,9 @@ import {
   useRestoreVehicle,
 } from '../lib/hooks/api/vehicles';
 import { VehicleForm } from '../components/features/vehicles/VehicleForm';
-import { Skeleton } from '../components/common/Skeleton';
+import { Skeleton } from '../components/ui/skeleton';
+import { Button } from '../components/ui/button';
+import { Card, CardContent } from '../components/ui/card';
 import type { VehicleFormInput } from '../lib/schemas/vehicle';
 import type { UpdateVehicleAttributes } from '../types/models/vehicle';
 
@@ -52,7 +54,7 @@ export function VehicleDetailPage() {
   }
 
   if (!vehicle) {
-    return <p className="text-gray-500">Vehicle not found.</p>;
+    return <p className="text-muted-foreground">Vehicle not found.</p>;
   }
 
   const { attributes } = vehicle;
@@ -105,83 +107,81 @@ export function VehicleDetailPage() {
             <h1 className="text-2xl font-semibold">{title}</h1>
             {status && <StatusBadge status={status} />}
           </div>
-          <p className="mt-1 text-sm text-gray-500">
+          <p className="mt-1 text-sm text-muted-foreground">
             {attributes.year} {attributes.make} {attributes.model}
             {attributes.trim ? ` ${attributes.trim}` : ''}
           </p>
         </div>
         <div className="flex gap-2">
           {canWrite && !editing && (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50"
-            >
+            <Button type="button" variant="outline" onClick={() => setEditing(true)}>
               Edit
-            </button>
+            </Button>
           )}
           {canWrite && (
-            <button
+            <Button
               type="button"
+              variant="destructive"
               onClick={() => void handleDelete()}
               disabled={softDelete.isPending}
-              className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:opacity-60"
             >
               Delete
-            </button>
+            </Button>
           )}
           {canRestore && (
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={() => void handleRestore()}
               disabled={restore.isPending}
-              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-60"
             >
               Restore
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
-      <div className="mt-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        {editing ? (
-          <VehicleForm
-            mode="edit"
-            defaultValues={{
-              make: attributes.make,
-              model: attributes.model,
-              year: attributes.year,
-              nickname: attributes.nickname ?? '',
-              trim: attributes.trim ?? '',
-              vin: attributes.vin ?? '',
-              currentMileage: attributes.currentMileage,
-              notes: attributes.notes ?? '',
-            }}
-            onSubmit={handleUpdate}
-            onCancel={() => setEditing(false)}
-            submitting={updateVehicle.isPending}
-          />
-        ) : (
-          <dl className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <dt className="text-gray-500">Mileage</dt>
-              <dd className="text-gray-900">
-                {typeof attributes.currentMileage === 'number'
-                  ? formatMileage(attributes.currentMileage)
-                  : '—'}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-gray-500">VIN</dt>
-              <dd className="text-gray-900">{attributes.vin || '—'}</dd>
-            </div>
-            <div className="col-span-2">
-              <dt className="text-gray-500">Notes</dt>
-              <dd className="whitespace-pre-wrap text-gray-900">{attributes.notes || '—'}</dd>
-            </div>
-          </dl>
-        )}
-      </div>
+      <Card className="mt-6">
+        <CardContent className="pt-6">
+          {editing ? (
+            <VehicleForm
+              mode="edit"
+              defaultValues={{
+                make: attributes.make,
+                model: attributes.model,
+                year: attributes.year,
+                nickname: attributes.nickname ?? '',
+                trim: attributes.trim ?? '',
+                vin: attributes.vin ?? '',
+                currentMileage: attributes.currentMileage,
+                notes: attributes.notes ?? '',
+              }}
+              onSubmit={handleUpdate}
+              onCancel={() => setEditing(false)}
+              submitting={updateVehicle.isPending}
+            />
+          ) : (
+            <dl className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <dt className="text-muted-foreground">Mileage</dt>
+                <dd className="text-foreground">
+                  {typeof attributes.currentMileage === 'number'
+                    ? formatMileage(attributes.currentMileage)
+                    : '—'}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">VIN</dt>
+                <dd className="text-foreground">{attributes.vin || '—'}</dd>
+              </div>
+              <div className="col-span-2">
+                <dt className="text-muted-foreground">Notes</dt>
+                <dd className="whitespace-pre-wrap text-foreground">{attributes.notes || '—'}</dd>
+              </div>
+            </dl>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
