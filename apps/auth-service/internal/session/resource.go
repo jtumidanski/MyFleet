@@ -64,7 +64,7 @@ func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve MembershipR
 			return
 		}
 
-		setRefreshCookie(w, newRaw)
+		SetRefreshCookie(w, newRaw)
 		server.WriteJSON(w, http.StatusOK, server.Document{
 			Data: Transform(Issued{Access: access, Refresh: newRaw}),
 		})
@@ -102,7 +102,8 @@ func readRefreshToken(req *http.Request) string {
 	return ""
 }
 
-func setRefreshCookie(w http.ResponseWriter, raw string) {
+// SetRefreshCookie writes the rotating refresh token as an HttpOnly cookie.
+func SetRefreshCookie(w http.ResponseWriter, raw string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     RefreshCookieName,
 		Value:    raw,
