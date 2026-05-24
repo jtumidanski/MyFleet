@@ -30,9 +30,10 @@ func (pr *Processor) AddMedia(m Model) (Model, error) {
 }
 
 // SetPrimary sets exactly one row is_primary=true and clears the others,
-// then mirrors the chosen media_id into fleet.vehicles. Runs all updates
-// sequentially (administrator handles each DB call; atomicity is best-effort
-// at this layer — a transaction wrapper in administrator handles the real tx).
+// then mirrors the chosen media_id into fleet.vehicles. The three mutations
+// (clear old primaries, set new primary, update vehicle mirror) execute inside
+// a single database transaction via SetPrimaryAtomic; a partial failure rolls
+// back entirely, preventing zero-primary or dual-primary inconsistencies.
 func (pr *Processor) SetPrimary(vehicleID, mediaID string) error {
 	rows, err := pr.p.ListByVehicle(vehicleID)
 	if err != nil {
@@ -51,22 +52,16 @@ func (pr *Processor) SetPrimary(vehicleID, mediaID string) error {
 		return server.ErrNotFound
 	}
 
-	// Clear is_primary on all rows that are currently primary (other than target).
+	// Collect IDs of rows that are currently primary and need to be cleared.
+	var clearIDs []string
 	for _, row := range rows {
 		if row.IsPrimary() && row.ID() != target.ID() {
-			if err := pr.a.SetIsPrimary(row.ID(), false); err != nil {
-				return err
-			}
+			clearIDs = append(clearIDs, row.ID())
 		}
 	}
 
-	// Set is_primary on the target row.
-	if err := pr.a.SetIsPrimary(target.ID(), true); err != nil {
-		return err
-	}
-
-	// Mirror into fleet.vehicles.primary_image_media_id.
-	return pr.a.UpdateVehiclePrimaryImage(vehicleID, mediaID)
+	// Perform the atomic mutation: clear + set + mirror in one transaction.
+	return pr.a.SetPrimaryAtomic(vehicleID, target.ID(), mediaID, clearIDs)
 }
 
 // GetByVehicleAndMedia fetches a specific media ref.

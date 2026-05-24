@@ -21,23 +21,43 @@ func (f *fakeProvider) GetByVehicleAndMedia(vehicleID, mediaID string) (Model, e
 	return Model{}, ErrNotFound
 }
 
-// capturedUpdate records calls made to the fakeAdministrator.
-type capturedUpdate struct {
-	id        string
-	isPrimary bool
-}
-
 // fakeAdministrator satisfies Administrator for unit tests.
+// SetPrimaryAtomic applies the mutations to an in-memory copy of rows so that
+// end-state assertions remain meaningful without a real database.
 type fakeAdministrator struct {
-	updates []capturedUpdate
+	// rows mirrors fakeProvider.rows and is updated atomically by SetPrimaryAtomic.
+	rows []Model
+	// lastVehicleID and lastMediaID capture the mirror-update arguments.
+	lastVehicleID  string
+	lastTargetID   string
+	lastMediaID    string
+	lastClearIDs   []string
 }
 
 func (f *fakeAdministrator) Insert(m Model) (Model, error) { return m, nil }
-func (f *fakeAdministrator) SetIsPrimary(id string, isPrimary bool) error {
-	f.updates = append(f.updates, capturedUpdate{id: id, isPrimary: isPrimary})
-	return nil
-}
-func (f *fakeAdministrator) UpdateVehiclePrimaryImage(vehicleID, mediaID string) error {
+
+// SetPrimaryAtomic applies clear + set + mirror in memory, simulating the
+// transactional behaviour of the real administrator.
+func (f *fakeAdministrator) SetPrimaryAtomic(vehicleID, targetID, targetMediaID string, clearIDs []string) error {
+	// Capture arguments for assertion.
+	f.lastVehicleID = vehicleID
+	f.lastTargetID = targetID
+	f.lastMediaID = targetMediaID
+	f.lastClearIDs = clearIDs
+
+	// Apply mutations to in-memory rows.
+	clearSet := make(map[string]struct{}, len(clearIDs))
+	for _, id := range clearIDs {
+		clearSet[id] = struct{}{}
+	}
+	for i, row := range f.rows {
+		if _, ok := clearSet[row.ID()]; ok {
+			f.rows[i] = row.WithIsPrimary(false)
+		}
+		if row.ID() == targetID {
+			f.rows[i] = row.WithIsPrimary(true)
+		}
+	}
 	return nil
 }
 
@@ -45,29 +65,37 @@ func TestSetPrimary_unsetsPrevious(t *testing.T) {
 	prev := NewBuilder().SetVehicleID("v1").SetMediaID("m1").SetIsPrimary(true).SetSortOrder(0).Build()
 	next := NewBuilder().SetVehicleID("v1").SetMediaID("m2").SetIsPrimary(false).SetSortOrder(1).Build()
 
-	fp := &fakeProvider{rows: []Model{prev, next}}
-	fa := &fakeAdministrator{}
+	rows := []Model{prev, next}
+	fp := &fakeProvider{rows: rows}
+	fa := &fakeAdministrator{rows: rows}
 	proc := NewProcessor(logrus.New(), fp, fa)
 
 	if err := proc.SetPrimary("v1", "m2"); err != nil {
 		t.Fatalf("SetPrimary failed: %v", err)
 	}
 
-	// Expect: prev → false, next → true
-	wantFalse := 0
-	wantTrue := 0
-	for _, u := range fa.updates {
-		if u.id == prev.ID() && !u.isPrimary {
-			wantFalse++
-		}
-		if u.id == next.ID() && u.isPrimary {
-			wantTrue++
+	// Verify the transactional call received the correct arguments.
+	if fa.lastTargetID != next.ID() {
+		t.Errorf("SetPrimaryAtomic target ID = %q, want %q", fa.lastTargetID, next.ID())
+	}
+	if fa.lastMediaID != "m2" {
+		t.Errorf("SetPrimaryAtomic targetMediaID = %q, want %q", fa.lastMediaID, "m2")
+	}
+	if len(fa.lastClearIDs) != 1 || fa.lastClearIDs[0] != prev.ID() {
+		t.Errorf("SetPrimaryAtomic clearIDs = %v, want [%s]", fa.lastClearIDs, prev.ID())
+	}
+
+	// Verify the in-memory end state: exactly one row is primary.
+	primaryCount := 0
+	for _, row := range fa.rows {
+		if row.IsPrimary() {
+			primaryCount++
+			if row.ID() != next.ID() {
+				t.Errorf("unexpected primary row: %s (expected %s)", row.ID(), next.ID())
+			}
 		}
 	}
-	if wantFalse != 1 {
-		t.Errorf("previous media row should be set to is_primary=false, updates: %+v", fa.updates)
-	}
-	if wantTrue != 1 {
-		t.Errorf("new media row should be set to is_primary=true, updates: %+v", fa.updates)
+	if primaryCount != 1 {
+		t.Errorf("expected exactly 1 primary row after SetPrimary, got %d (rows: %+v)", primaryCount, fa.rows)
 	}
 }
