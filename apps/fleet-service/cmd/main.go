@@ -21,6 +21,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/invite"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehiclemedia"
 )
 
 func main() {
@@ -32,6 +33,7 @@ func main() {
 		membership.Migration,
 		invite.Migration,
 		vehicle.Migration,
+		vehiclemedia.Migration,
 		events.MigrateOutbox,
 	))
 	if err != nil {
@@ -46,6 +48,10 @@ func main() {
 
 	membershipAdmin := membership.NewAdministrator(db)
 	membershipProc := membership.NewProcessor(log, membership.NewProvider(db))
+
+	// Build shared processors for cross-domain injection.
+	vehicleProc := vehicle.NewProcessor(log, vehicle.NewProvider(db), vehicle.NewAdministrator(db))
+	vehiclemediaProc := vehiclemedia.NewProcessor(log, vehiclemedia.NewProvider(db), vehiclemedia.NewAdministrator(db))
 
 	// Background sweep: hard-delete soft-deleted vehicles past their purge window.
 	// Runs under advisory lock so only one replica executes per tick (design A9).
@@ -71,7 +77,8 @@ func main() {
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
 				invite.InitializeRoutes(log, db, membershipProc)(pr)
-				vehicle.InitializeRoutes(log, db, membershipProc)(pr)
+				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc)(pr)
+				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {

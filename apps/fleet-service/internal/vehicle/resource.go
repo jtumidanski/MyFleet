@@ -13,9 +13,17 @@ import (
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 )
 
+// PrimaryImageSetter handles setting the primary image for a vehicle, updating
+// both the vehiclemedia rows and mirroring into vehicles.primary_image_media_id.
+// Satisfied by *vehiclemedia.Processor.
+type PrimaryImageSetter interface {
+	SetPrimary(vehicleID, mediaID string) error
+}
+
 // InitializeRoutes wires the JWT-protected vehicle endpoints.
 // ownerCheck is injected for the authoritative DB owner recheck on restore (stale-claim guard).
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker) func(chi.Router) {
+// primaryImage is injected to delegate PUT /vehicles/{id}/primary-image to the vehiclemedia domain.
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, primaryImage PrimaryImageSetter) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
 	return func(r chi.Router) {
 		// GET /fleets/{id}/vehicles — list vehicles (fleet-paged)
@@ -195,7 +203,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			server.WriteJSON(w, http.StatusOK, server.Document{Data: Transform(restored)})
 		})
 
-		// PUT /vehicles/{id}/primary-image — set primary image (mirrors to vehicles row)
+		// PUT /vehicles/{id}/primary-image — set primary image.
+		// Delegates to vehiclemedia.Processor.SetPrimary which: clears all is_primary
+		// rows, sets exactly one is_primary=true, and mirrors to vehicles row.
 		r.Put("/vehicles/{id}/primary-image", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			MediaID string `json:"mediaId"`
 		}) {
@@ -214,7 +224,12 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				server.WriteError(w, err)
 				return
 			}
-			updated, err := proc.SetPrimaryImage(id, attrs.MediaID)
+			if err := primaryImage.SetPrimary(id, attrs.MediaID); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			// Re-fetch vehicle to reflect updated primary_image_media_id.
+			updated, err := proc.GetByID(id)
 			if err != nil {
 				server.WriteError(w, err)
 				return
