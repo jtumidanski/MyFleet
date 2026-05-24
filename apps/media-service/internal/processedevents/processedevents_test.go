@@ -26,6 +26,43 @@ func newTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestExists(t *testing.T) {
+	db := newTestDB(t)
+	store := New(logrus.New(), db)
+
+	// Unknown event must not exist.
+	exists, err := store.Exists("evt-unknown")
+	if err != nil {
+		t.Fatalf("Exists on unknown event: %v", err)
+	}
+	if exists {
+		t.Fatal("Exists must return false for an unrecorded event")
+	}
+
+	// Record the event via MarkProcessed.
+	if _, err := store.MarkProcessed("evt-known"); err != nil {
+		t.Fatalf("MarkProcessed: %v", err)
+	}
+
+	// Now Exists must return true.
+	exists, err = store.Exists("evt-known")
+	if err != nil {
+		t.Fatalf("Exists after MarkProcessed: %v", err)
+	}
+	if !exists {
+		t.Fatal("Exists must return true for a recorded event")
+	}
+
+	// A different event is still unknown.
+	exists, err = store.Exists("evt-other")
+	if err != nil {
+		t.Fatalf("Exists on different event: %v", err)
+	}
+	if exists {
+		t.Fatal("Exists must return false for a different unrecorded event")
+	}
+}
+
 func TestMarkProcessed_idempotent(t *testing.T) {
 	db := newTestDB(t)
 	store := New(logrus.New(), db)

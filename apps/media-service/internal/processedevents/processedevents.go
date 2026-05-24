@@ -35,8 +35,9 @@ func New(log logrus.FieldLogger, db *gorm.DB) *Store { return &Store{log: log, d
 
 // MarkProcessed records the event_id and reports whether it had already been
 // processed. It inserts with ON CONFLICT DO NOTHING; a zero-rows-affected result
-// means the event was seen before (alreadyProcessed=true). This is the dedupe
-// gate the worker checks before doing any expensive work.
+// means the event was seen before (alreadyProcessed=true). Call this AFTER all
+// work succeeds so that a mid-processing failure leaves the event unrecorded and
+// eligible for redelivery.
 func (s *Store) MarkProcessed(eventID string) (alreadyProcessed bool, err error) {
 	res := s.db.Clauses(clause.OnConflict{DoNothing: true}).
 		Create(&Entity{EventID: eventID, ProcessedAt: time.Now().UTC()})
@@ -48,4 +49,16 @@ func (s *Store) MarkProcessed(eventID string) (alreadyProcessed bool, err error)
 		return false, res.Error
 	}
 	return res.RowsAffected == 0, nil
+}
+
+// Exists reports whether the given event_id has already been recorded. Use this
+// as a read-only dedupe check at the START of an event handler, before doing
+// any expensive work, so the handler can skip immediately without writing.
+func (s *Store) Exists(eventID string) (bool, error) {
+	var count int64
+	err := s.db.Model(&Entity{}).Where("event_id = ?", eventID).Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }

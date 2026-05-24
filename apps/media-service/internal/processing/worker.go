@@ -100,29 +100,54 @@ func (w *Worker) Run(ctx context.Context, brokers []string, group string) {
 	events.Consume(ctx, w.log, brokers, group, mediaobject.EventTypeMediaUploaded, w.handle)
 }
 
-// handle processes one media.uploaded event idempotently. The dedupe gate is
-// checked first: a re-delivered event whose ID is already recorded is skipped.
+// handle processes one media.uploaded event with a mark-after-success pattern:
+//
+//  1. Read-only dedupe check (Exists): if the event ID is already recorded, the
+//     event was fully handled on a prior delivery — skip and commit the offset.
+//  2. Extract and validate the payload. Bad payloads are committed immediately
+//     (poison-pill avoidance) without touching the ledger.
+//  3. Load the media object. If it is already in the ready state the worker
+//     previously completed all work (variants persisted, status set) but crashed
+//     before writing the ledger row — record it now and commit.
+//  4. Generate variants (idempotent ReplaceForMediaObject), upload, and
+//     transition processing → ready.
+//  5. Only AFTER all work succeeds, record the event via MarkProcessed. A
+//     failure anywhere in (3)–(4) returns the error WITHOUT touching the ledger,
+//     so the event is redelivered and retried.
 func (w *Worker) handle(ctx context.Context, e events.Envelope) error {
-	already, err := w.dedupe.MarkProcessed(e.EventID)
+	// Step 1 — read-only dedupe check.
+	exists, err := w.dedupe.Exists(e.EventID)
 	if err != nil {
 		return fmt.Errorf("dedupe check: %w", err)
 	}
-	if already {
+	if exists {
 		w.log.WithField("event_id", e.EventID).Debug("media.uploaded already processed; skipping")
 		return nil
 	}
 
+	// Step 2 — validate payload.
 	mediaID, _ := e.Data["media_id"].(string)
 	if mediaID == "" {
 		w.log.WithField("event_id", e.EventID).Error("media.uploaded missing media_id; skipping")
 		return nil // bad payload — committing avoids a poison-pill retry loop
 	}
 
+	// Step 3 — load the object and short-circuit if it is already ready.
 	obj, err := w.objects.GetByID(mediaID)
 	if err != nil {
 		return fmt.Errorf("load media object %s: %w", mediaID, err)
 	}
+	if obj.Status() == mediaobject.StatusReady {
+		// A previous run completed all work but crashed before writing the ledger.
+		// Record the event now so future redeliveries are skipped cheaply.
+		w.log.WithField("media_id", mediaID).Debug("media object already ready; recording event and skipping variant generation")
+		if _, err := w.dedupe.MarkProcessed(e.EventID); err != nil {
+			return fmt.Errorf("record processed event: %w", err)
+		}
+		return nil
+	}
 
+	// Step 4 — generate and persist variants, then transition to ready.
 	src, err := w.decodeOriginal(ctx, obj.ObjectKey())
 	if err != nil {
 		return fmt.Errorf("decode original %s: %w", obj.ObjectKey(), err)
@@ -151,13 +176,21 @@ func (w *Worker) handle(ctx context.Context, e events.Envelope) error {
 	// processing → ready (transition guard lives in mediaobject.MarkReady).
 	ready, err := mediaobject.MarkReady(obj)
 	if err != nil {
-		// Already ready (or unexpected state) — the variants are persisted, so
-		// treat as success to avoid an endless redelivery loop.
+		// Unexpected state (not processing) — variants are persisted so treat as
+		// success; record the event to avoid an endless redelivery loop.
 		w.log.WithField("media_id", mediaID).WithError(err).Warn("media object not in processing state; leaving status unchanged")
+		if _, err := w.dedupe.MarkProcessed(e.EventID); err != nil {
+			return fmt.Errorf("record processed event (unexpected state): %w", err)
+		}
 		return nil
 	}
 	if _, err := w.objectAdmin.Update(ready); err != nil {
 		return fmt.Errorf("mark media object ready: %w", err)
+	}
+
+	// Step 5 — record the event ONLY after all work has succeeded.
+	if _, err := w.dedupe.MarkProcessed(e.EventID); err != nil {
+		return fmt.Errorf("record processed event: %w", err)
 	}
 	w.log.WithField("media_id", mediaID).Info("media variants generated; object ready")
 	return nil
