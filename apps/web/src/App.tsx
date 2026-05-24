@@ -5,12 +5,12 @@ import { LoginPage } from './pages/LoginPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { VehiclesPage } from './pages/VehiclesPage';
 import { VehicleDetailPage } from './pages/VehicleDetailPage';
+import { ActivityPage } from './pages/ActivityPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import {
   DashboardPage,
   MaintenancePage,
   FuelPage,
-  ActivityPage,
-  NotificationsPage,
   SettingsPage,
 } from './pages/PlaceholderPage';
 

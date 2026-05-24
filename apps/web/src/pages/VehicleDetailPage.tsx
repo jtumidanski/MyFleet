@@ -13,6 +13,7 @@ import {
 import { VehicleForm } from '../components/features/vehicles/VehicleForm';
 import { VehicleMediaGallery } from '../components/features/vehicles/media/VehicleMediaGallery';
 import { VehicleMileageSection } from '../components/features/vehicles/mileage/VehicleMileageSection';
+import { VehicleActivityTimeline } from '../components/features/activity/VehicleActivityTimeline';
 import { Skeleton } from '../components/ui/skeleton';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
@@ -194,6 +195,9 @@ export function VehicleDetailPage() {
         currentMileage={attributes.currentMileage}
         canWrite={canWrite}
       />
+
+      {/* Task 15.5 — Per-vehicle activity timeline */}
+      <VehicleActivityTimeline vehicleId={vehicle.id} />
     </div>
   );
 }

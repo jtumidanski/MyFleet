@@ -12,6 +12,6 @@ export function PlaceholderPage({ title }: { title: string }) {
 export const DashboardPage = () => <PlaceholderPage title="Dashboard" />;
 export const MaintenancePage = () => <PlaceholderPage title="Maintenance" />;
 export const FuelPage = () => <PlaceholderPage title="Fuel" />;
-export const ActivityPage = () => <PlaceholderPage title="Activity" />;
-export const NotificationsPage = () => <PlaceholderPage title="Notifications" />;
+// ActivityPage → apps/web/src/pages/ActivityPage.tsx (Task 15.5)
+// NotificationsPage → apps/web/src/pages/NotificationsPage.tsx (Task 15.6)
 export const SettingsPage = () => <PlaceholderPage title="Settings" />;
