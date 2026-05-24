@@ -49,7 +49,7 @@ export function InviteAcceptPage() {
   if (status === 'success') {
     return (
       <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-        <CheckCircle className="h-8 w-8 text-green-600" />
+        <CheckCircle className="h-8 w-8 text-primary" />
         <p className="text-base font-medium">You have joined the fleet!</p>
         <p className="text-sm text-muted-foreground">Redirecting to dashboard…</p>
       </div>
@@ -58,7 +58,7 @@ export function InviteAcceptPage() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[40vh] gap-4">
-      <XCircle className="h-8 w-8 text-red-600" />
+      <XCircle className="h-8 w-8 text-destructive" />
       <p className="text-base font-medium">Could not accept invite</p>
       <p className="text-sm text-muted-foreground">{errorMessage}</p>
       <Button variant="outline" onClick={() => navigate('/')}>

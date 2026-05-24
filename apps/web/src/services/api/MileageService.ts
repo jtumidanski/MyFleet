@@ -22,8 +22,8 @@ class MileageService {
     const url = new URL(`${this.basePath}/${vehicleId}/mileage`, 'http://localhost');
     if (params?.from) url.searchParams.set('from', params.from);
     if (params?.to) url.searchParams.set('to', params.to);
-    if (params?.page != null) url.searchParams.set('page', String(params.page));
-    if (params?.pageSize != null) url.searchParams.set('pageSize', String(params.pageSize));
+    if (params?.page != null) url.searchParams.set('page[number]', String(params.page));
+    if (params?.pageSize != null) url.searchParams.set('page[size]', String(params.pageSize));
 
     const doc = await apiClient.request<
       JsonApiDocument<Array<JsonApiResource<MileageRecordAttributes>>>

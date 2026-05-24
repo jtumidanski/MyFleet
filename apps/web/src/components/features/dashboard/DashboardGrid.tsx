@@ -143,19 +143,21 @@ export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
               Add Widget
             </Button>
             {showAddMenu && (
-              <div className="absolute right-0 z-10 mt-1 w-52 rounded-md border bg-white shadow-lg">
+              <div className="absolute right-0 z-10 mt-1 w-52 rounded-md border bg-popover shadow-lg">
                 <ul className="py-1">
                   {WIDGET_CATALOG.map((type) => (
                     <li key={type}>
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         className={cn(
-                          'w-full px-4 py-2 text-left text-sm hover:bg-gray-100',
+                          'w-full justify-start px-4 py-2 text-sm font-normal',
                           widgets.some((w) => w.type === type) && 'text-muted-foreground',
                         )}
                         onClick={() => addWidget(type)}
                       >
                         {widgetRegistry[type].label}
-                      </button>
+                      </Button>
                     </li>
                   ))}
                 </ul>
@@ -183,30 +185,36 @@ export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
               <div key={widget.id} className="relative group">
                 <WidgetComponent fleetId={fleetId} />
                 {isOwner && (
-                  <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1 bg-white rounded border shadow-sm p-0.5">
-                    <button
+                  <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1 bg-background rounded border shadow-sm p-0.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       title="Move up"
                       disabled={idx === 0}
                       onClick={() => moveUp(idx)}
-                      className="p-1 rounded hover:bg-gray-100 disabled:opacity-40"
+                      className="h-6 w-6"
                     >
                       <ChevronUp className="h-3 w-3" />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       title="Move down"
                       disabled={idx === widgets.length - 1}
                       onClick={() => moveDown(idx)}
-                      className="p-1 rounded hover:bg-gray-100 disabled:opacity-40"
+                      className="h-6 w-6"
                     >
                       <ChevronDown className="h-3 w-3" />
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       title="Remove widget"
                       onClick={() => removeWidget(widget.id)}
-                      className="p-1 rounded hover:bg-red-50 text-red-500"
+                      className="h-6 w-6 text-destructive hover:text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="h-3 w-3" />
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>

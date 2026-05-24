@@ -8,11 +8,20 @@
  *   3. useRemoveMember invalidates memberKeys.lists() AND fleetKeys.all
  *   4. useCreateInvite invalidates inviteKeys.lists()
  *   5. useRenameFleet invalidates fleetKeys.all AND memberKeys.all
+ *   6. useRevokeInvite invalidates inviteKeys.lists()
+ *   7. useAcceptInvite invalidates memberKeys.all, fleetKeys.all, inviteKeys.all
+ *
+ * Invalidation tests render the real hooks with a real QueryClient so that
+ * removing an invalidation call from the hook source WILL break the test.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { memberKeys } from './members';
-import { inviteKeys } from './invites';
+import { renderHook, act, waitFor } from '@testing-library/react';
+import React from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { memberKeys, useRemoveMember } from './members';
+import { inviteKeys, useCreateInvite, useRevokeInvite, useAcceptInvite } from './invites';
 import { fleetKeys } from './fleets';
+import { useRenameFleet } from './fleetSettings';
 
 // ---------------------------------------------------------------------------
 // Key factory hierarchy
@@ -35,91 +44,160 @@ describe('inviteKeys', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Invalidation verification via mocked queryClient
+// Real invalidation tests — render actual hooks; mocking only the service.
 //
-// We verify the invalidation keys by inspecting what keys are passed to
-// invalidateQueries in the onSettled/onSuccess callbacks. We do this by
-// reading the source hook factories and directly exercising the mutation
-// callbacks with a mock queryClient — matching the pattern used across
-// the codebase.
+// These tests will FAIL if the invalidation calls are removed from the hooks.
 // ---------------------------------------------------------------------------
 
-/**
- * A minimal mock queryClient that records invalidateQueries calls.
- */
-function makeMockQueryClient() {
-  const calls: Array<{ queryKey: readonly unknown[] }> = [];
+// Mock service modules so no network is needed; return minimal valid responses.
+vi.mock('../../../services/api/MemberService', () => ({
+  memberService: {
+    removeMember: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+vi.mock('../../../services/api/InviteService', () => ({
+  inviteService: {
+    createInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
+    revokeInvite: vi.fn().mockResolvedValue(undefined),
+    acceptInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
+  },
+}));
+
+vi.mock('../../../services/api/FleetSettingsService', () => ({
+  fleetSettingsService: {
+    rename: vi.fn().mockResolvedValue({ id: 'f1', type: 'fleets', attributes: { name: 'New' } }),
+  },
+}));
+
+// Silence sonner toast calls in tests.
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
+
+// Silence createErrorFromUnknown for test purposes; preserve all other exports.
+vi.mock('@myfleet/shared-ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@myfleet/shared-ts')>();
   return {
-    invalidateQueries: vi.fn(({ queryKey }: { queryKey: readonly unknown[] }) => {
-      calls.push({ queryKey });
-      return Promise.resolve();
-    }),
-    calls,
+    ...actual,
+    createErrorFromUnknown: vi.fn((e: unknown) => ({
+      message: String(e),
+      status: 500,
+    })),
+  };
+});
+
+function makeWrapper(queryClient: QueryClient) {
+  return function Wrapper({ children }: { children: React.ReactNode }) {
+    return React.createElement(QueryClientProvider, { client: queryClient }, children);
   };
 }
 
-describe('mutation invalidation contracts', () => {
+describe('mutation invalidation contracts — real hooks', () => {
+  let queryClient: QueryClient;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let invalidateSpy: ReturnType<typeof vi.spyOn<any, any>>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
   });
 
-  it('useRemoveMember invalidates memberKeys.lists() and fleetKeys.all', () => {
-    const qc = makeMockQueryClient();
+  // --------------------------------------------------------------------------
+  // useRemoveMember
+  // --------------------------------------------------------------------------
+  it('useRemoveMember invalidates memberKeys.lists() and fleetKeys.all', async () => {
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
 
-    // Simulate the onSettled callback of useRemoveMember(fleetId)
-    const fleetId = 'f1';
-    // Inline the invalidation calls as written in members.ts
-    void qc.invalidateQueries({ queryKey: memberKeys.lists() });
-    void qc.invalidateQueries({ queryKey: fleetKeys.all });
+    await act(async () => {
+      result.current.mutate('user-1');
+    });
 
-    expect(qc.calls).toContainEqual({ queryKey: memberKeys.lists() });
-    expect(qc.calls).toContainEqual({ queryKey: fleetKeys.all });
-    // Sanity: memberKeys.lists() matches
-    expect(memberKeys.lists()).toEqual(['members', 'list']);
-    // Sanity: fleetKeys.all matches
-    expect(fleetKeys.all).toEqual(['fleets']);
+    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
 
-    void fleetId; // used above
+    // Assert both invalidation calls were made with the correct query keys.
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.lists() }));
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
   });
 
-  it('useCreateInvite invalidates inviteKeys.lists()', () => {
-    const qc = makeMockQueryClient();
+  // --------------------------------------------------------------------------
+  // useRenameFleet (in fleetSettings.ts)
+  // --------------------------------------------------------------------------
+  it('useRenameFleet invalidates fleetKeys.all and memberKeys.all', async () => {
+    const { result } = renderHook(() => useRenameFleet('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
 
-    void qc.invalidateQueries({ queryKey: inviteKeys.lists() });
+    await act(async () => {
+      result.current.mutate('New Name');
+    });
 
-    expect(qc.calls).toContainEqual({ queryKey: inviteKeys.lists() });
-    expect(inviteKeys.lists()).toEqual(['invites', 'list']);
+    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.all }));
   });
 
-  it('useRenameFleet invalidates fleetKeys.all and memberKeys.all', () => {
-    const qc = makeMockQueryClient();
+  // --------------------------------------------------------------------------
+  // useCreateInvite
+  // --------------------------------------------------------------------------
+  it('useCreateInvite invalidates inviteKeys.lists()', async () => {
+    const { result } = renderHook(() => useCreateInvite('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
 
-    void qc.invalidateQueries({ queryKey: fleetKeys.all });
-    void qc.invalidateQueries({ queryKey: memberKeys.all });
+    await act(async () => {
+      result.current.mutate({ email: 'a@b.com', role: 'member' });
+    });
 
-    expect(qc.calls).toContainEqual({ queryKey: fleetKeys.all });
-    expect(qc.calls).toContainEqual({ queryKey: memberKeys.all });
-    expect(fleetKeys.all).toEqual(['fleets']);
-    expect(memberKeys.all).toEqual(['members']);
+    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));
   });
 
-  it('useRevokeInvite invalidates inviteKeys.lists()', () => {
-    const qc = makeMockQueryClient();
+  // --------------------------------------------------------------------------
+  // useRevokeInvite
+  // --------------------------------------------------------------------------
+  it('useRevokeInvite invalidates inviteKeys.lists()', async () => {
+    const { result } = renderHook(() => useRevokeInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
 
-    void qc.invalidateQueries({ queryKey: inviteKeys.lists() });
+    await act(async () => {
+      result.current.mutate('inv-1');
+    });
 
-    expect(qc.calls).toContainEqual({ queryKey: inviteKeys.lists() });
+    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));
   });
 
-  it('useAcceptInvite invalidates memberKeys.all, fleetKeys.all, and inviteKeys.all', () => {
-    const qc = makeMockQueryClient();
+  // --------------------------------------------------------------------------
+  // useAcceptInvite
+  // --------------------------------------------------------------------------
+  it('useAcceptInvite invalidates memberKeys.all, fleetKeys.all, and inviteKeys.all', async () => {
+    const { result } = renderHook(() => useAcceptInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
 
-    void qc.invalidateQueries({ queryKey: memberKeys.all });
-    void qc.invalidateQueries({ queryKey: fleetKeys.all });
-    void qc.invalidateQueries({ queryKey: inviteKeys.all });
+    await act(async () => {
+      result.current.mutate('tok-abc');
+    });
 
-    expect(qc.calls).toContainEqual({ queryKey: memberKeys.all });
-    expect(qc.calls).toContainEqual({ queryKey: fleetKeys.all });
-    expect(qc.calls).toContainEqual({ queryKey: inviteKeys.all });
+    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.all }));
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.all }));
   });
 });
