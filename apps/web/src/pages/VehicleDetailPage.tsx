@@ -11,6 +11,8 @@ import {
   useRestoreVehicle,
 } from '../lib/hooks/api/vehicles';
 import { VehicleForm } from '../components/features/vehicles/VehicleForm';
+import { VehicleMediaGallery } from '../components/features/vehicles/media/VehicleMediaGallery';
+import { VehicleMileageSection } from '../components/features/vehicles/mileage/VehicleMileageSection';
 import { Skeleton } from '../components/ui/skeleton';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
@@ -100,7 +102,7 @@ export function VehicleDetailPage() {
   };
 
   return (
-    <div className="max-w-2xl">
+    <div className="max-w-2xl space-y-6">
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="flex items-center gap-3">
@@ -141,7 +143,7 @@ export function VehicleDetailPage() {
         </div>
       </div>
 
-      <Card className="mt-6">
+      <Card>
         <CardContent className="pt-6">
           {editing ? (
             <VehicleForm
@@ -182,6 +184,16 @@ export function VehicleDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Task 15.1 — Vehicle media gallery */}
+      <VehicleMediaGallery vehicleId={vehicle.id} canWrite={canWrite} />
+
+      {/* Task 15.2 — Mileage history + trend */}
+      <VehicleMileageSection
+        vehicleId={vehicle.id}
+        currentMileage={attributes.currentMileage}
+        canWrite={canWrite}
+      />
     </div>
   );
 }
