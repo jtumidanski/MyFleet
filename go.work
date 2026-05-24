@@ -1,3 +1,6 @@
-go 1.24.4
+go 1.25.0
 
-use ./packages/shared-go
+use (
+	./packages/dto-go
+	./packages/shared-go
+)
