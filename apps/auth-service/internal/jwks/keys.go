@@ -4,7 +4,10 @@ package jwks
 import (
 	"crypto/rsa"
 	"encoding/base64"
+	"errors"
 	"math/big"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type JWK struct {
@@ -29,6 +32,20 @@ func NewKeySet(priv *rsa.PrivateKey, kid string) *KeySet { return &KeySet{priv: 
 
 func (k *KeySet) Private() *rsa.PrivateKey { return k.priv }
 func (k *KeySet) Kid() string              { return k.kid }
+
+// Keyfunc returns a jwt.Keyfunc that validates tokens against this key set's
+// in-memory RSA public key, matching on the token's "kid" header. This lets
+// auth-service validate its OWN tokens without HTTP-fetching its own JWKS at
+// startup (Decision 2 — avoids a self-fetch deadlock before the server listens).
+func (k *KeySet) Keyfunc() jwt.Keyfunc {
+	pub := k.priv.Public()
+	return func(t *jwt.Token) (any, error) {
+		if kid, _ := t.Header["kid"].(string); kid != k.kid {
+			return nil, errors.New("jwks: unknown key id")
+		}
+		return pub, nil
+	}
+}
 
 func (k *KeySet) PublicJWKS() JWKSDocument {
 	pub := k.priv.Public().(*rsa.PublicKey)
