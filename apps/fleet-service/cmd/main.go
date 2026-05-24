@@ -13,6 +13,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/database"
 	"github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/health"
+	"github.com/jtumidanski/myfleet/packages/shared-go/jobs"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
@@ -45,6 +46,19 @@ func main() {
 
 	membershipAdmin := membership.NewAdministrator(db)
 	membershipProc := membership.NewProcessor(log, membership.NewProvider(db))
+
+	// Background sweep: hard-delete soft-deleted vehicles past their purge window.
+	// Runs under advisory lock so only one replica executes per tick (design A9).
+	ctx := context.Background()
+	go jobs.Every(ctx, 24*time.Hour, func(ctx context.Context) error {
+		_, err := database.WithLeaderLock(db, "vehicle-purge", func() error {
+			return vehicle.PurgeExpired(db)
+		})
+		if err != nil {
+			log.WithError(err).Warn("vehicle purge sweep failed")
+		}
+		return err
+	})
 
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
