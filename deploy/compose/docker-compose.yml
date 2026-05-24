@@ -186,3 +186,28 @@ services:
       - "traefik.http.routers.notifications.middlewares=notifications-stripprefix"
       - "traefik.http.middlewares.notifications-stripprefix.stripprefix.prefixes=/api/notifications"
       - "traefik.http.services.notifications.loadbalancer.server.port=8080"
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - auth-service
+      - fleet-service
+      - media-service
+      - notification-service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    labels:
+      - "traefik.enable=true"
+      # Catch-all for the SPA at the root path. Low priority so the more
+      # specific /api/* PathPrefix routers (auth/fleet/media/notifications)
+      # always win; only paths they don't match fall through to the SPA,
+      # whose nginx serves index.html for client-side routing.
+      - "traefik.http.routers.web.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.web.entrypoints=web"
+      - "traefik.http.routers.web.priority=1"
+      - "traefik.http.services.web.loadbalancer.server.port=80"

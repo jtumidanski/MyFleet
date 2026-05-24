@@ -13,3 +13,5 @@ dist/
 *.local
 # MinIO/data
 deploy/compose/data/
+# Local-only compose overrides (e.g. host-port remaps for machine-specific collisions)
+deploy/compose/docker-compose.*.yml
