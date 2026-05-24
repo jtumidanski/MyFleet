@@ -18,6 +18,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fuel"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/invite"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancecategory"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancerecord"
@@ -42,6 +43,7 @@ func main() {
 		maintenancecategory.Migration,
 		maintenancerecord.Migration,
 		maintenanceschedule.Migration,
+		fuel.Migration,
 		events.MigrateOutbox,
 	))
 	if err != nil {
@@ -112,6 +114,7 @@ func main() {
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
+				fuel.InitializeRoutes(log, db, vehicleProc)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
 				maintenancerecord.InitializeRoutes(log, db, vehicleProc)(pr)
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)
