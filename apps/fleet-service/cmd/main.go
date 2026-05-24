@@ -20,6 +20,8 @@ import (
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/invite"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancecategory"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancerecord"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenanceschedule"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
@@ -38,6 +40,8 @@ func main() {
 		vehiclemedia.Migration,
 		mileage.Migration,
 		maintenancecategory.Migration,
+		maintenancerecord.Migration,
+		maintenanceschedule.Migration,
 		events.MigrateOutbox,
 	))
 	if err != nil {
@@ -63,6 +67,11 @@ func main() {
 	vehicleProc := vehicle.NewProcessor(log, vehicle.NewProvider(db), vehicleAdmin)
 	vehiclemediaProc := vehiclemedia.NewProcessor(log, vehiclemedia.NewProvider(db), vehiclemedia.NewAdministrator(db))
 
+	// Maintenance: schedule processor (for the recompute job) + completion deps
+	// (record insert + mileage append + schedule advance, run in one tx — §10.3).
+	scheduleProc := maintenanceschedule.NewProcessor(log, maintenanceschedule.NewProvider(db), maintenanceschedule.NewAdministrator(db))
+	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db))
+
 	// Background sweep: hard-delete soft-deleted vehicles past their purge window.
 	// Runs under advisory lock so only one replica executes per tick (design A9).
 	ctx := context.Background()
@@ -72,6 +81,19 @@ func main() {
 		})
 		if err != nil {
 			log.WithError(err).Warn("vehicle purge sweep failed")
+		}
+		return err
+	})
+
+	// Background recompute: re-derive status/severity/next_due_* for active
+	// maintenance schedules hourly (FR-MAINT-6). Runs under advisory lock so
+	// only one replica executes per tick (design A9).
+	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
+		_, err := database.WithLeaderLock(db, "maintenance-recompute", func() error {
+			return scheduleProc.RecomputeAll(time.Now().UTC())
+		})
+		if err != nil {
+			log.WithError(err).Warn("maintenance recompute sweep failed")
 		}
 		return err
 	})
@@ -91,6 +113,8 @@ func main() {
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
+				maintenancerecord.InitializeRoutes(log, db, vehicleProc)(pr)
+				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {
