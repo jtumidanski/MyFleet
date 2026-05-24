@@ -88,6 +88,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 // GET /internal/memberships/active?user_id= → {fleet_id, role} or 404.
 func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 	prov := NewProvider(db)
+	proc := NewProcessor(log, prov)
 	return func(r chi.Router) {
 		r.Get("/internal/memberships/active", func(w http.ResponseWriter, req *http.Request) {
 			userID := req.URL.Query().Get("user_id")
@@ -105,6 +106,24 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Rout
 				return
 			}
 			server.WriteJSON(w, http.StatusOK, ActiveResponse{FleetID: m.FleetID(), Role: m.Role()})
+		})
+
+		// GET /internal/fleets/{fleetID}/members → active members [{user_id, role}].
+		// Network-restricted (no JWT); notification-service uses this to resolve a
+		// fleet's recipients without a cross-service DB join (D2).
+		r.Get("/internal/fleets/{fleetID}/members", func(w http.ResponseWriter, req *http.Request) {
+			fleetID := chi.URLParam(req, "fleetID")
+			if fleetID == "" {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+			ms, err := proc.ListActiveMembers(fleetID)
+			if err != nil {
+				log.WithError(err).Error("internal list active members")
+				server.WriteError(w, err)
+				return
+			}
+			server.WriteJSON(w, http.StatusOK, TransformInternalMembers(ms))
 		})
 	}
 }

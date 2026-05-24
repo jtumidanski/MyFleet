@@ -39,3 +39,21 @@ type ActiveResponse struct {
 	FleetID string `json:"fleet_id"`
 	Role    string `json:"role"`
 }
+
+// InternalMember is one row of the internal fleet-members endpoint, consumed by
+// notification-service for recipient resolution. Snake-case keys match the
+// notification-service fleetclient decoder.
+type InternalMember struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// TransformInternalMembers projects active memberships onto the internal
+// recipient-resolution response shape.
+func TransformInternalMembers(ms []Model) []InternalMember {
+	out := make([]InternalMember, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, InternalMember{UserID: m.UserID(), Role: m.Role()})
+	}
+	return out
+}

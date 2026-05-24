@@ -43,6 +43,13 @@ func (pr *Processor) ListMembers(fleetID string) ([]Model, error) {
 	return pr.p.ListByFleetID(fleetID)
 }
 
+// ListActiveMembers returns the active memberships in a fleet. Used by the
+// internal recipient-resolution endpoint (notification-service resolves a
+// fleet's recipients via this API rather than a cross-service DB join; D2).
+func (pr *Processor) ListActiveMembers(fleetID string) ([]Model, error) {
+	return pr.p.ListActiveByFleetID(fleetID)
+}
+
 // GetMember returns the membership for a specific user in a fleet.
 func (pr *Processor) GetMember(fleetID, userID string) (Model, error) {
 	m, err := pr.p.GetByFleetAndUser(fleetID, userID)

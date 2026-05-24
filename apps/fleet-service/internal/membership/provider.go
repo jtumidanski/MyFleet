@@ -14,6 +14,9 @@ type Provider interface {
 	GetActiveByUserID(userID string) (Model, error)
 	// ListByFleetID returns all memberships in a fleet.
 	ListByFleetID(fleetID string) ([]Model, error)
+	// ListActiveByFleetID returns the active memberships in a fleet (used by the
+	// internal recipient-resolution endpoint for notification-service).
+	ListActiveByFleetID(fleetID string) ([]Model, error)
 	// GetByFleetAndUser returns the membership for a specific user in a fleet.
 	GetByFleetAndUser(fleetID, userID string) (Model, error)
 	// CountOwners returns the number of owners in a fleet.
@@ -39,6 +42,18 @@ func (p *dbProvider) GetActiveByUserID(userID string) (Model, error) {
 func (p *dbProvider) ListByFleetID(fleetID string) ([]Model, error) {
 	var es []Entity
 	if err := p.db.Where("fleet_id = ?", fleetID).Find(&es).Error; err != nil {
+		return nil, err
+	}
+	out := make([]Model, 0, len(es))
+	for _, e := range es {
+		out = append(out, Make(e))
+	}
+	return out, nil
+}
+
+func (p *dbProvider) ListActiveByFleetID(fleetID string) ([]Model, error) {
+	var es []Entity
+	if err := p.db.Where("fleet_id = ? AND status = ?", fleetID, "active").Find(&es).Error; err != nil {
 		return nil, err
 	}
 	out := make([]Model, 0, len(es))

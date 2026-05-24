@@ -11,8 +11,10 @@ import (
 )
 
 // OverdueEmitter enqueues a schedule.overdue event in the outbox on the supplied
-// tx (design A8). Injected to avoid an import cycle.
-type OverdueEmitter func(tx *gorm.DB, fleetID, scheduleID, vehicleID, severity string) error
+// tx (design A8). Injected to avoid an import cycle. dueCycle is the due-window
+// token (see DueCycleToken) carried on the event so consumers can build a
+// per-user dedupe_key identical to the reminder safety-net's (design A6).
+type OverdueEmitter func(tx *gorm.DB, fleetID, scheduleID, vehicleID, severity, dueCycle string) error
 
 // systemActor is the actor recorded for system-generated transitions (the
 // recompute job has no human actor).
@@ -119,6 +121,38 @@ func (pr *Processor) Queue(fleetID, wantState string, now time.Time) ([]QueueEnt
 	return out, nil
 }
 
+// DueEntry is one non-ok schedule across all fleets, with its live DueState and
+// fleet id resolved. Used by the internal /internal/maintenance/due endpoint that
+// feeds notification-service's daily reminder safety-net (design §11, A6).
+type DueEntry struct {
+	Schedule Model
+	FleetID  string
+	State    string // upcoming | overdue
+}
+
+// DueAcrossAllFleets returns every active schedule (across ALL fleets) whose
+// live DueState is upcoming or overdue, computed on read from the vehicle's
+// current mileage and now (design A5). Used by the internal reminder feed.
+func (pr *Processor) DueAcrossAllFleets(now time.Time) ([]DueEntry, error) {
+	rows, err := pr.p.ListActive()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DueEntry, 0, len(rows))
+	for _, r := range rows {
+		state := DueState(r.Schedule.AsSchedule(), now, r.CurrentMileage, DefaultThresholds)
+		if state == "ok" {
+			continue // only surface non-ok schedules
+		}
+		out = append(out, DueEntry{
+			Schedule: r.Schedule.WithStatus(state, Severity(state)),
+			FleetID:  r.FleetID,
+			State:    state,
+		})
+	}
+	return out, nil
+}
+
 // ScheduleStatesByVehicle returns the live DueState ("ok"|"upcoming"|"overdue")
 // of every active schedule for a vehicle, computed on read from the vehicle's
 // current mileage and now (design A5 / §10.2). Used by the vehicle layer to
@@ -181,7 +215,7 @@ func (pr *Processor) RecomputeAll(now time.Time) error {
 				}
 			}
 			if pr.emit != nil {
-				if err := pr.emit(tx, fleetID, sched.ID(), sched.VehicleID(), Severity(newState)); err != nil {
+				if err := pr.emit(tx, fleetID, sched.ID(), sched.VehicleID(), Severity(newState), DueCycleToken(sched)); err != nil {
 					return err
 				}
 			}

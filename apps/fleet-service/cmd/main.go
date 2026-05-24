@@ -97,10 +97,10 @@ func main() {
 		return fleetevents.EmitMaintenanceCompleted(tx, fleetID, actorID, traceID,
 			dtoevents.MaintenanceCompletedData{ScheduleID: scheduleID, VehicleID: vehicleID, MaintenanceRecord: recordID, CategoryID: categoryID})
 	}
-	emitScheduleOverdue := func(tx *gorm.DB, fleetID, scheduleID, vehicleID, severity string) error {
+	emitScheduleOverdue := func(tx *gorm.DB, fleetID, scheduleID, vehicleID, severity, dueCycle string) error {
 		// System-generated transition: no human actor / correlation id.
 		return fleetevents.EmitScheduleOverdue(tx, fleetID, "system", "",
-			dtoevents.ScheduleOverdueData{ScheduleID: scheduleID, VehicleID: vehicleID, Severity: severity})
+			dtoevents.ScheduleOverdueData{ScheduleID: scheduleID, VehicleID: vehicleID, Severity: severity, DueCycle: dueCycle})
 	}
 
 	// Maintenance: schedule processor (for the recompute job) + completion deps
@@ -161,8 +161,9 @@ func main() {
 
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
-		// Internal route: no JWT, network-restricted.
+		// Internal routes: no JWT, network-restricted (consumed by other services).
 		AddRouteInitializer(membership.InitializeInternalRoutes(log, db)).
+		AddRouteInitializer(maintenanceschedule.InitializeInternalRoutes(log, db)).
 		// Protected routes: JWT required.
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {

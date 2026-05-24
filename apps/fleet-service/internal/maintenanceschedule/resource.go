@@ -257,6 +257,26 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 	}
 }
 
+// InitializeInternalRoutes wires the network-restricted internal endpoint (no
+// JWT). Register WITHOUT JWT middleware. Feeds notification-service's reminder
+// safety-net (design §11): all currently upcoming/overdue schedules across ALL
+// fleets, with live-computed DueState.
+func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
+	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
+	return func(r chi.Router) {
+		// GET /internal/maintenance/due → all non-ok schedules across all fleets.
+		r.Get("/internal/maintenance/due", func(w http.ResponseWriter, req *http.Request) {
+			entries, err := proc.DueAcrossAllFleets(time.Now().UTC())
+			if err != nil {
+				log.WithError(err).Error("internal maintenance due feed")
+				server.WriteError(w, err)
+				return
+			}
+			server.WriteJSON(w, http.StatusOK, TransformInternalDue(entries))
+		})
+	}
+}
+
 // queueHandler builds a fleet-scoped, live-computed queue handler for the given
 // due-state (design A5). DueState is computed on read from current mileage + now.
 func queueHandler(log logrus.FieldLogger, proc *Processor, state string) http.HandlerFunc {

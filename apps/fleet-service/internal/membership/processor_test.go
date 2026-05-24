@@ -19,7 +19,8 @@ type stubProvider struct {
 func (s stubProvider) GetActiveByUserID(userID string) (Model, error) {
 	return Model{}, ErrNotFound
 }
-func (s stubProvider) ListByFleetID(fleetID string) ([]Model, error) { return nil, nil }
+func (s stubProvider) ListByFleetID(fleetID string) ([]Model, error)       { return nil, nil }
+func (s stubProvider) ListActiveByFleetID(fleetID string) ([]Model, error) { return nil, nil }
 func (s stubProvider) GetByFleetAndUser(fleetID, userID string) (Model, error) {
 	if s.byFleetAndUser != nil {
 		if m, ok := s.byFleetAndUser[fleetID+":"+userID]; ok {

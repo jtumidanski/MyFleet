@@ -1,8 +1,26 @@
 package maintenanceschedule
 
-import "github.com/jtumidanski/myfleet/packages/shared-go/server"
+import (
+	"fmt"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+)
 
 const timeFormat = "2006-01-02T15:04:05Z07:00"
+
+// DueCycleToken builds the canonical due-window token for a schedule from its
+// next-due date + mileage: "<RFC3339 next_due_date>|<next_due_mileage>" (the
+// date part is empty for pure-mileage schedules). This MUST stay byte-identical
+// to the token notification-service derives from the /internal/maintenance/due
+// feed's next_due_date + next_due_mileage, so the event path and the reminder
+// safety-net build the same per-user dedupe_key (design A6).
+func DueCycleToken(m Model) string {
+	date := ""
+	if !m.NextDueDate().IsZero() {
+		date = m.NextDueDate().Format(timeFormat)
+	}
+	return fmt.Sprintf("%s|%d", date, m.NextDueMileage())
+}
 
 // Attributes is the JSON:API attributes payload for a maintenance schedule.
 type Attributes struct {
@@ -48,6 +66,42 @@ func TransformSlice(ms []Model) []server.Resource {
 	out := make([]server.Resource, 0, len(ms))
 	for _, m := range ms {
 		out = append(out, Transform(m))
+	}
+	return out
+}
+
+// InternalDueSchedule is one row of the internal /internal/maintenance/due
+// endpoint, consumed by notification-service's reminder safety-net. Snake-case
+// keys match the notification-service fleetclient decoder. next_due_date is
+// RFC3339 (empty for pure-mileage schedules); next_due_mileage is 0 for
+// pure-time schedules.
+type InternalDueSchedule struct {
+	ScheduleID     string `json:"schedule_id"`
+	VehicleID      string `json:"vehicle_id"`
+	FleetID        string `json:"fleet_id"`
+	CategoryID     string `json:"category_id"`
+	State          string `json:"state"`
+	NextDueDate    string `json:"next_due_date,omitempty"`
+	NextDueMileage int    `json:"next_due_mileage,omitempty"`
+}
+
+// TransformInternalDue projects live due-entries onto the internal reminder-feed
+// response shape.
+func TransformInternalDue(entries []DueEntry) []InternalDueSchedule {
+	out := make([]InternalDueSchedule, 0, len(entries))
+	for _, e := range entries {
+		row := InternalDueSchedule{
+			ScheduleID:     e.Schedule.ID(),
+			VehicleID:      e.Schedule.VehicleID(),
+			FleetID:        e.FleetID,
+			CategoryID:     e.Schedule.CategoryID(),
+			State:          e.State,
+			NextDueMileage: e.Schedule.NextDueMileage(),
+		}
+		if !e.Schedule.NextDueDate().IsZero() {
+			row.NextDueDate = e.Schedule.NextDueDate().Format(timeFormat)
+		}
+		out = append(out, row)
 	}
 	return out
 }

@@ -25,6 +25,11 @@ type ScheduleOverdueData struct {
 	ScheduleID string `json:"schedule_id"`
 	VehicleID  string `json:"vehicle_id"`
 	Severity   string `json:"severity"`
+	// DueCycle identifies the due window the schedule entered (next-due date +
+	// mileage). It is the dedupe token: the notification consumer and the daily
+	// reminder safety-net build the SAME per-user dedupe_key from it, so the two
+	// paths cannot double-fire for one overdue cycle (design A6).
+	DueCycle string `json:"due_cycle"`
 }
 
 type MemberInvitedData struct {

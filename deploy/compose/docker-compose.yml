@@ -107,6 +107,11 @@ services:
         condition: service_healthy
       auth-service:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     labels:
       - "traefik.enable=true"
       # Route /api/fleet/* to this service and strip the /api/fleet prefix so
@@ -151,3 +156,33 @@ services:
       - "traefik.http.routers.media.middlewares=media-stripprefix"
       - "traefik.http.middlewares.media-stripprefix.stripprefix.prefixes=/api/media"
       - "traefik.http.services.media.loadbalancer.server.port=8080"
+
+  notification-service:
+    build:
+      context: ../..
+      dockerfile: apps/notification-service/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWKS_URL: http://auth-service:8080/.well-known/jwks.json
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      FLEET_INTERNAL_URL: http://fleet-service:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      fleet-service:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      # Route /api/notifications/* to this service and strip the prefix so the
+      # service sees bare paths (/notifications, /notification-preferences, ...).
+      - "traefik.http.routers.notifications.rule=PathPrefix(`/api/notifications`)"
+      - "traefik.http.routers.notifications.entrypoints=web"
+      - "traefik.http.routers.notifications.middlewares=notifications-stripprefix"
+      - "traefik.http.middlewares.notifications-stripprefix.stripprefix.prefixes=/api/notifications"
+      - "traefik.http.services.notifications.loadbalancer.server.port=8080"
