@@ -13,6 +13,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 )
@@ -158,7 +159,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			updated, err := adm.Accept(inv, identity.UserID)
+			updated, err := adm.Accept(inv, identity.UserID, telemetry.CorrelationIDFromContext(req.Context()))
 			if err != nil {
 				server.WriteError(w, err)
 				return

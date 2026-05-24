@@ -98,9 +98,12 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       JWKS_URL: http://auth-service:8080/.well-known/jwks.json
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
       auth-service:
         condition: service_healthy

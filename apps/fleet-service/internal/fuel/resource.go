@@ -9,8 +9,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
-	"github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
@@ -28,7 +28,7 @@ type VehicleAccessor interface {
 func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor, record ActivityRecorder, emit FuelLoggedEmitter) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db))
 	adm := NewAdministrator(db)
-	loggingDeps := NewLoggingDeps(db, events.NoopProducer{}).
+	loggingDeps := NewLoggingDeps(db).
 		WithActivityRecorder(record).
 		WithEmitter(emit)
 	return func(r chi.Router) {
@@ -122,6 +122,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			created, err := loggingDeps.LogInTransaction(log, LogInput{
 				FuelLog: m,
 				FleetID: v.FleetID(),
+				TraceID: telemetry.CorrelationIDFromContext(req.Context()),
 			})
 			if err != nil {
 				log.WithError(err).Error("log fuel entry")

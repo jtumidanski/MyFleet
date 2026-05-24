@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	authmw "github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/config"
@@ -17,7 +19,10 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
+	dtoevents "github.com/jtumidanski/myfleet/packages/dto-go/events"
+
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/activity"
+	fleetevents "github.com/jtumidanski/myfleet/apps/fleet-service/internal/events"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fuel"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/invite"
@@ -74,14 +79,39 @@ func main() {
 	// Activity feed (append-only). Record is called from other domains' txns.
 	activityProc := activity.NewProcessor(log, activity.NewProvider(db))
 
+	// Outbox emit adapters (design A8). Each builds the canonical Envelope from a
+	// dto-go payload and Enqueues it on the caller's tx; failures roll the tx back.
+	emitVehicleCreated := func(tx *gorm.DB, fleetID, actorID, traceID, vehicleID string) error {
+		return fleetevents.EmitVehicleCreated(tx, fleetID, actorID, traceID,
+			dtoevents.VehicleCreatedData{VehicleID: vehicleID, FleetID: fleetID})
+	}
+	emitFuelLogged := func(tx *gorm.DB, fleetID, actorID, traceID, fuelLogID, vehicleID string, mileage int, totalCost float64) error {
+		return fleetevents.EmitFuelLogged(tx, fleetID, actorID, traceID,
+			dtoevents.FuelLoggedData{FuelLogID: fuelLogID, VehicleID: vehicleID, Mileage: mileage, TotalCost: totalCost})
+	}
+	emitMemberInvited := func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
+		return fleetevents.EmitMemberInvited(tx, fleetID, actorID, traceID,
+			dtoevents.MemberInvitedData{InviteID: inviteID, Email: email, Role: role})
+	}
+	emitMaintenanceCompleted := func(tx *gorm.DB, fleetID, actorID, traceID, scheduleID, vehicleID, recordID, categoryID string) error {
+		return fleetevents.EmitMaintenanceCompleted(tx, fleetID, actorID, traceID,
+			dtoevents.MaintenanceCompletedData{ScheduleID: scheduleID, VehicleID: vehicleID, MaintenanceRecord: recordID, CategoryID: categoryID})
+	}
+	emitScheduleOverdue := func(tx *gorm.DB, fleetID, scheduleID, vehicleID, severity string) error {
+		// System-generated transition: no human actor / correlation id.
+		return fleetevents.EmitScheduleOverdue(tx, fleetID, "system", "",
+			dtoevents.ScheduleOverdueData{ScheduleID: scheduleID, VehicleID: vehicleID, Severity: severity})
+	}
+
 	// Maintenance: schedule processor (for the recompute job) + completion deps
 	// (record insert + mileage append + schedule advance, run in one tx — §10.3).
-	// The recompute job appends a schedule.overdue activity event on the
-	// transition edge (emitter wired in Phase 11.3).
+	// The recompute job appends a schedule.overdue activity event + outbox event
+	// on the transition edge (A8).
 	scheduleProc := maintenanceschedule.NewProcessor(log, maintenanceschedule.NewProvider(db), maintenanceschedule.NewAdministrator(db)).
-		WithOverdueHooks(db, activity.Record, nil)
+		WithOverdueHooks(db, activity.Record, emitScheduleOverdue)
 	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db)).
-		WithActivityRecorder(activity.Record)
+		WithActivityRecorder(activity.Record).
+		WithEmitter(emitMaintenanceCompleted)
 
 	// Read-only accessors for deriving vehicle status on read (design §10.2).
 	// Schedule states come from the schedule processor (live DueState); last
@@ -117,6 +147,18 @@ func main() {
 		return err
 	})
 
+	// Transactional-outbox relay (design A8): every 2s, publish unsent outbox
+	// rows to Kafka and mark them sent. Runs under an advisory lock so only one
+	// replica relays per tick (design A9), preventing duplicate publishes.
+	brokers := strings.Split(config.MustGet("KAFKA_BROKERS"), ",")
+	producer := events.NewKafkaProducer(brokers)
+	go jobs.Every(ctx, 2*time.Second, func(ctx context.Context) error {
+		_, err := database.WithLeaderLock(db, "fleet-outbox", func() error {
+			return events.RelayOnce(ctx, log, db, producer)
+		})
+		return err
+	})
+
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
 		// Internal route: no JWT, network-restricted.
@@ -127,11 +169,11 @@ func main() {
 				pr.Use(authmw.JWT(keyfn))
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
-				invite.InitializeRoutes(log, db, membershipProc, activity.Record, nil)(pr)
-				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, nil)(pr)
+				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited)(pr)
+				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
-				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, nil)(pr)
+				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, emitFuelLogged)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
 				maintenancerecord.InitializeRoutes(log, db, vehicleProc)(pr)
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)

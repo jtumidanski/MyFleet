@@ -10,7 +10,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
-	"github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
@@ -94,7 +93,7 @@ func TestLogInTransaction_FuelAndMileageAtomic(t *testing.T) {
 		t.Fatalf("insert vehicle: %v", err)
 	}
 
-	deps := NewLoggingDeps(db, events.NoopProducer{})
+	deps := NewLoggingDeps(db)
 	log := logrus.New()
 
 	// --- Case 1: mileage advances (42000 > 40000) ---

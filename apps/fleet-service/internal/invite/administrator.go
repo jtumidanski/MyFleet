@@ -6,7 +6,6 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
-	"github.com/jtumidanski/myfleet/packages/shared-go/events"
 )
 
 // Administrator is the write interface for invite data access.
@@ -14,8 +13,9 @@ type Administrator interface {
 	Insert(Model) (Model, error)
 	Delete(id string) error
 	// Accept stamps accepted_at and creates an active membership in one transaction.
-	// Enqueues a member.invited event in the transactional outbox.
-	Accept(inv Model, userID string) (Model, error)
+	// Appends a member.invited activity event and enqueues a member.invited
+	// outbox event in the SAME transaction.
+	Accept(inv Model, userID, traceID string) (Model, error)
 }
 
 // ActivityRecorder appends an activity event on the supplied tx (design §8.2).
@@ -63,7 +63,7 @@ func (a *dbAdministrator) Delete(id string) error {
 //  1. Stamp accepted_at on the invite row.
 //  2. Create an active membership for the accepting user.
 //  3. Enqueue a member.invited event in the outbox.
-func (a *dbAdministrator) Accept(inv Model, userID string) (Model, error) {
+func (a *dbAdministrator) Accept(inv Model, userID, traceID string) (Model, error) {
 	now := time.Now()
 	var updated Model
 	err := a.db.Transaction(func(tx *gorm.DB) error {
@@ -105,21 +105,14 @@ func (a *dbAdministrator) Accept(inv Model, userID string) (Model, error) {
 			}
 		}
 
-		// 4. Enqueue member.invited event in the transactional outbox
-		env := events.Envelope{
-			EventID:     inv.ID(),
-			Type:        "member.invited",
-			Version:     1,
-			OccurredAt:  now,
-			FleetID:     inv.FleetID(),
-			ActorUserID: userID,
-			Data: map[string]any{
-				"invite_id": inv.ID(),
-				"email":     inv.Email(),
-				"role":      inv.Role(),
-			},
+		// 4. Enqueue member.invited event in the transactional outbox (A8).
+		// FATAL: a failed enqueue rolls back the whole accept transaction.
+		if a.emit != nil {
+			if err := a.emit(tx, inv.FleetID(), userID, traceID, inv.ID(), inv.Email(), inv.Role()); err != nil {
+				return err
+			}
 		}
-		return events.Enqueue(tx, env)
+		return nil
 	})
 	if err != nil {
 		return Model{}, err

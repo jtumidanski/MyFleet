@@ -8,7 +8,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
-	"github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
@@ -76,15 +75,14 @@ type FuelLoggedEmitter func(tx *gorm.DB, fleetID, actorID, traceID, fuelLogID, v
 // LoggingDeps holds the cross-domain dependencies for the fuel→mileage
 // orchestration (design §8.2, §10.5). All writes execute inside one transaction.
 type LoggingDeps struct {
-	DB       *gorm.DB
-	producer events.Producer
-	record   ActivityRecorder
-	emit     FuelLoggedEmitter
+	DB     *gorm.DB
+	record ActivityRecorder
+	emit   FuelLoggedEmitter
 }
 
 // NewLoggingDeps wires the concrete logging dependencies.
-func NewLoggingDeps(db *gorm.DB, producer events.Producer) LoggingDeps {
-	return LoggingDeps{DB: db, producer: producer}
+func NewLoggingDeps(db *gorm.DB) LoggingDeps {
+	return LoggingDeps{DB: db}
 }
 
 // WithActivityRecorder injects the activity recorder run on each fuel log.
@@ -154,26 +152,13 @@ func (d LoggingDeps) LogInTransaction(log logrus.FieldLogger, in LogInput) (Mode
 			}
 		}
 
-		// Step 4: enqueue fuel.logged event in the transactional outbox.
-		env := events.Envelope{
-			EventID:     created.ID(),
-			Type:        "fuel.logged",
-			Version:     1,
-			OccurredAt:  time.Now().UTC(),
-			FleetID:     in.FleetID,
-			ActorUserID: created.CreatedByUserID(),
-			Data: map[string]any{
-				"fuel_log_id": created.ID(),
-				"vehicle_id":  created.VehicleID(),
-				"gallons":     created.Gallons(),
-				"total_cost":  created.TotalCost(),
-				"mileage":     created.Mileage(),
-			},
-		}
-		if err := events.Enqueue(tx, env); err != nil {
-			log.WithError(err).Warn("fuel: outbox enqueue failed (non-fatal, relay will retry)")
-			// Non-fatal: the main write already succeeded. Carry on.
-			// (Phase 11 may harden this to a full rollback.)
+		// Step 4: enqueue fuel.logged event in the transactional outbox (A8).
+		// FATAL: an enqueue failure rolls back the whole transaction so the
+		// domain write and the outbox row stay atomic (no silent event loss).
+		if d.emit != nil {
+			if err := d.emit(tx, in.FleetID, created.CreatedByUserID(), in.TraceID, created.ID(), created.VehicleID(), created.Mileage(), created.TotalCost()); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -190,4 +175,5 @@ func (d LoggingDeps) LogInTransaction(log logrus.FieldLogger, in LogInput) (Mode
 type LogInput struct {
 	FuelLog Model
 	FleetID string // needed for the outbox event envelope
+	TraceID string // correlation id for the emitted event
 }
