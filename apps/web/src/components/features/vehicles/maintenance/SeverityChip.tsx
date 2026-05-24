@@ -7,6 +7,8 @@ interface SeverityChipProps {
   className?: string;
 }
 
+// Intentional status colors: severity values have no shadcn semantic equivalent.
+// red=urgent, amber=recommended, blue=informational are consistent severity indicators.
 const severityConfig: Record<Severity, { label: string; className: string }> = {
   urgent: {
     label: 'Urgent',
@@ -34,7 +36,7 @@ export function SeverityChip({ severity, className }: SeverityChipProps) {
       <span
         className={cn(
           'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
-          'bg-gray-100 text-gray-800 border-gray-200',
+          'bg-muted text-muted-foreground border-border',
           className,
         )}
       >

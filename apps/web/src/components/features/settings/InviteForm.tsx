@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { createInviteSchema, type CreateInviteInput } from '../../../lib/schemas/fleetSettings';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -38,9 +39,14 @@ export function InviteForm({ fleetId }: InviteFormProps) {
   });
 
   const onSubmit = async (values: CreateInviteInput) => {
-    await createInvite.mutateAsync(values);
-    toast.success(`Invite sent to ${values.email}`);
-    form.reset({ email: '', role: 'member' });
+    try {
+      await createInvite.mutateAsync(values);
+      toast.success(`Invite sent to ${values.email}`);
+      form.reset({ email: '', role: 'member' });
+    } catch (err) {
+      const apiError = createErrorFromUnknown(err);
+      toast.error(apiError.message || 'Could not create invite');
+    }
   };
 
   return (

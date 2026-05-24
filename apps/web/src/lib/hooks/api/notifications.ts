@@ -108,10 +108,6 @@ export function useMarkNotificationRead() {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: notificationKeys.lists() });
     },
-    onError: (err) => {
-      const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not mark notification as read');
-    },
   });
 }
 
@@ -125,10 +121,6 @@ export function useMarkAllNotificationsRead() {
     mutationFn: () => notificationService.markAllRead(),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: notificationKeys.lists() });
-    },
-    onError: (err) => {
-      const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not mark all notifications as read');
     },
   });
 }

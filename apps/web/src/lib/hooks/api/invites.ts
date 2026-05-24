@@ -65,10 +65,6 @@ export function useCreateInvite(fleetId: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: inviteKeys.lists() });
     },
-    onError: (err) => {
-      const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not create invite');
-    },
   });
 }
 

@@ -20,7 +20,7 @@ export function VehicleList({ vehicles, isLoading }: VehicleListProps) {
 
   if (vehicles.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 p-8 text-center text-gray-500">
+      <div className="rounded-lg border border-dashed border-border p-8 text-center text-muted-foreground">
         No vehicles yet. Add your first one to get started.
       </div>
     );

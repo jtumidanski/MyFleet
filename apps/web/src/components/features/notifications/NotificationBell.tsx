@@ -17,7 +17,7 @@ export function NotificationBell({ className }: NotificationBellProps) {
       {/* Bell icon */}
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        className="h-6 w-6 text-gray-600"
+        className="h-6 w-6 text-muted-foreground"
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -34,7 +34,7 @@ export function NotificationBell({ className }: NotificationBellProps) {
       {/* Unread badge */}
       {unreadCount > 0 && (
         <span
-          className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white"
+          className="absolute -right-1 -top-1 flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold leading-none text-destructive-foreground"
           aria-live="polite"
           aria-label={`${unreadCount} unread notifications`}
         >

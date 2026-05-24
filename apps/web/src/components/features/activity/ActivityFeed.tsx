@@ -49,25 +49,25 @@ export function ActivityFeed({
         <h2 className="mb-4 text-base font-semibold">{title}</h2>
 
         {events.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+          <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
             No activity yet.
           </p>
         ) : (
-          <ol className="relative border-l border-gray-200">
+          <ol className="relative border-l border-border">
             {events.map((event) => (
               <li key={event.id} className="mb-6 ml-6">
                 <span className="absolute -left-4 flex items-center justify-center">
                   <ActivityEventIcon type={event.attributes.type} />
                 </span>
-                <div className="rounded-md border border-gray-100 bg-white p-3 shadow-sm">
-                  <p className="text-sm font-medium text-gray-900">
+                <div className="rounded-md border border-border bg-card p-3 shadow-sm">
+                  <p className="text-sm font-medium text-foreground">
                     {getActivityEventLabel(event.attributes.type)}
                   </p>
-                  <time className="text-xs text-gray-500">
+                  <time className="text-xs text-muted-foreground">
                     {new Date(event.attributes.createdAt).toLocaleString()}
                   </time>
                   {event.attributes.vehicleId && (
-                    <p className="mt-1 text-xs text-gray-400">
+                    <p className="mt-1 text-xs text-muted-foreground">
                       Vehicle: {event.attributes.vehicleId}
                     </p>
                   )}
@@ -78,7 +78,7 @@ export function ActivityFeed({
         )}
 
         {totalPages > 1 && (
-          <div className="mt-4 flex items-center justify-between text-sm text-gray-500">
+          <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
             <Button
               variant="outline"
               size="sm"

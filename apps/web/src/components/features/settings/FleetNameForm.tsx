@@ -4,6 +4,8 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { renameFleetSchema, type RenameFleetInput } from '../../../lib/schemas/fleetSettings';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
@@ -31,8 +33,14 @@ export function FleetNameForm({ fleetId, currentName }: FleetNameFormProps) {
   });
 
   const onSubmit = async (values: RenameFleetInput) => {
-    await rename.mutateAsync(values.name);
-    form.reset({ name: values.name });
+    try {
+      await rename.mutateAsync(values.name);
+      toast.success('Fleet name updated');
+      form.reset({ name: values.name });
+    } catch (err) {
+      const apiError = createErrorFromUnknown(err);
+      toast.error(apiError.message || 'Could not rename fleet');
+    }
   };
 
   return (

@@ -24,6 +24,7 @@ export function FleetOverviewWidget({ fleetId }: FleetOverviewWidgetProps) {
     <Card>
       <CardContent className="pt-4">
         <h3 className="text-sm font-semibold mb-3">Fleet Overview</h3>
+        {/* Intentional status colors: green=healthy, amber=upcoming, red=overdue */}
         {data ? (
           <div className="grid grid-cols-2 gap-2 text-sm">
             <div className="rounded border p-2 text-center">
@@ -39,7 +40,7 @@ export function FleetOverviewWidget({ fleetId }: FleetOverviewWidgetProps) {
               <div className="text-xs text-muted-foreground">Overdue</div>
             </div>
             <div className="rounded border p-2 text-center">
-              <div className="text-2xl font-bold text-gray-400">{data.inactive}</div>
+              <div className="text-2xl font-bold text-muted-foreground">{data.inactive}</div>
               <div className="text-xs text-muted-foreground">Inactive</div>
             </div>
           </div>

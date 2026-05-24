@@ -3,6 +3,7 @@ import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { Button } from '../../ui/button';
 import { Skeleton } from '../../ui/skeleton';
 import { Card, CardContent } from '../../ui/card';
+import { cn } from '../../../lib/utils';
 import {
   useNotifications,
   useMarkNotificationRead,
@@ -21,15 +22,18 @@ function NotificationItem({ notification, onMarkRead, isMarkingRead }: Notificat
 
   return (
     <li
-      className={`flex items-start gap-3 rounded-md border p-3 ${read ? 'border-gray-100 bg-white' : 'border-blue-100 bg-blue-50'}`}
+      className={cn(
+        'flex items-start gap-3 rounded-md border p-3',
+        read ? 'border-border bg-card' : 'border-primary/20 bg-primary/5',
+      )}
     >
       {!read && (
-        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-blue-500" aria-hidden="true" />
+        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" aria-hidden="true" />
       )}
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-900">{title}</p>
-        {body && <p className="mt-0.5 text-xs text-gray-500">{body}</p>}
-        <time className="mt-1 text-xs text-gray-400">
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        {body && <p className="mt-0.5 text-xs text-muted-foreground">{body}</p>}
+        <time className="mt-1 text-xs text-muted-foreground">
           {new Date(createdAt).toLocaleString()}
         </time>
       </div>
@@ -109,7 +113,7 @@ export function NotificationList() {
         </div>
 
         {notifications.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+          <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
             No notifications yet.
           </p>
         ) : (

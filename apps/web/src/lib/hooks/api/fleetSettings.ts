@@ -6,8 +6,6 @@
  *   - Rename fleet     (PATCH /fleets/{id}) — owner-only
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
-import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { fleetSettingsService } from '../../../services/api/FleetSettingsService';
 import { fleetKeys } from './fleets';
 import { memberKeys } from './members';
@@ -46,13 +44,6 @@ export function useRenameFleet(fleetId: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: fleetKeys.all });
       void queryClient.invalidateQueries({ queryKey: memberKeys.all });
-    },
-    onSuccess: () => {
-      toast.success('Fleet name updated');
-    },
-    onError: (err) => {
-      const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not rename fleet');
     },
   });
 }

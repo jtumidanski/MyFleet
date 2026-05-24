@@ -32,7 +32,7 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
 
   return (
     <div className="space-y-6">
-      {/* Overdue */}
+      {/* Overdue — intentional status colors: red indicates urgency */}
       <Card>
         <CardContent className="pt-6">
           <h2 className="mb-4 text-base font-semibold text-red-700">Overdue Maintenance</h2>
@@ -68,7 +68,7 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
         </CardContent>
       </Card>
 
-      {/* Upcoming */}
+      {/* Upcoming — intentional status color: amber indicates upcoming attention needed */}
       <Card>
         <CardContent className="pt-6">
           <h2 className="mb-4 text-base font-semibold text-amber-700">Upcoming Maintenance</h2>

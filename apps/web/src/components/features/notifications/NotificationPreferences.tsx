@@ -47,7 +47,7 @@ export function NotificationPreferences() {
         <h2 className="mb-4 text-base font-semibold">Notification Preferences</h2>
 
         {prefs.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
+          <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
             No notification preferences configured yet.
           </p>
         ) : (
@@ -57,7 +57,7 @@ export function NotificationPreferences() {
               const labelId = `pref-${pref.id}`;
               return (
                 <li key={pref.id} className="flex items-center justify-between gap-4">
-                  <Label htmlFor={labelId} className="flex-1 cursor-pointer text-sm text-gray-700">
+                  <Label htmlFor={labelId} className="flex-1 cursor-pointer text-sm text-foreground">
                     {getTypeLabel(type)}
                   </Label>
                   <Switch
