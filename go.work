@@ -3,6 +3,7 @@ go 1.25.0
 use (
 	./apps/auth-service
 	./apps/fleet-service
+	./apps/media-service
 	./packages/dto-go
 	./packages/shared-go
 )
