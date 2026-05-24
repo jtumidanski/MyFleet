@@ -176,7 +176,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			// Fetch including deleted to get fleetID for authz.
-			current, err := proc.a.GetByIDIncludingDeleted(id)
+			current, err := proc.GetByIDIncludingDeleted(id)
 			if err != nil {
 				server.WriteError(w, server.ErrNotFound)
 				return

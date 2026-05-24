@@ -93,3 +93,13 @@ func (pr *Processor) SetPrimaryImage(id, mediaID string) (Model, error) {
 	}
 	return pr.a.SetPrimaryImage(id, mediaID)
 }
+
+// GetByIDIncludingDeleted fetches a vehicle regardless of soft-delete status.
+// Used by restore handler to resolve fleetID for authz before acting.
+func (pr *Processor) GetByIDIncludingDeleted(id string) (Model, error) {
+	m, err := pr.a.GetByIDIncludingDeleted(id)
+	if err != nil {
+		return Model{}, server.ErrNotFound
+	}
+	return m, nil
+}
