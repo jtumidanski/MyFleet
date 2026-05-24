@@ -19,6 +19,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/invite"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
 )
 
 func main() {
@@ -29,6 +30,7 @@ func main() {
 		fleet.Migration,
 		membership.Migration,
 		invite.Migration,
+		vehicle.Migration,
 		events.MigrateOutbox,
 	))
 	if err != nil {
@@ -55,6 +57,7 @@ func main() {
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
 				invite.InitializeRoutes(log, db, membershipProc)(pr)
+				vehicle.InitializeRoutes(log, db, membershipProc)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {
