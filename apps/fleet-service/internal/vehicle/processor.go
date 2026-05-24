@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
@@ -30,7 +31,7 @@ func (pr *Processor) GetByID(id string) (Model, error) {
 	// First check if it exists at all (including deleted) to distinguish 404 vs 410.
 	m, err := pr.a.GetByIDIncludingDeleted(id)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, ErrNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
 			return Model{}, server.ErrNotFound
 		}
 		return Model{}, err
@@ -69,6 +70,9 @@ func (pr *Processor) Update(id string, apply func(Model) Model) (Model, error) {
 // SoftDelete marks a vehicle as deleted (sets deleted_at + purge_after).
 func (pr *Processor) SoftDelete(id string) error {
 	_, err := pr.a.SoftDelete(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return server.ErrNotFound
+	}
 	return err
 }
 
@@ -77,7 +81,10 @@ func (pr *Processor) SoftDelete(id string) error {
 func (pr *Processor) Restore(id string) (Model, error) {
 	m, err := pr.a.GetByIDIncludingDeleted(id)
 	if err != nil {
-		return Model{}, server.ErrNotFound
+		if errors.Is(err, ErrNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			return Model{}, server.ErrNotFound
+		}
+		return Model{}, err
 	}
 	if IsPurgeable(m.PurgeAfter()) {
 		return Model{}, server.ErrGone
@@ -99,7 +106,10 @@ func (pr *Processor) SetPrimaryImage(id, mediaID string) (Model, error) {
 func (pr *Processor) GetByIDIncludingDeleted(id string) (Model, error) {
 	m, err := pr.a.GetByIDIncludingDeleted(id)
 	if err != nil {
-		return Model{}, server.ErrNotFound
+		if errors.Is(err, ErrNotFound) || errors.Is(err, gorm.ErrRecordNotFound) {
+			return Model{}, server.ErrNotFound
+		}
+		return Model{}, err
 	}
 	return m, nil
 }
