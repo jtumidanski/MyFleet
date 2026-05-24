@@ -12,26 +12,25 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
-	"github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
-	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 )
 
 const defaultExpiry = 7 * 24 * time.Hour
 
-// ownerChecker is satisfied by membership.Provider for the authoritative owner check.
-type ownerChecker interface {
-	GetByFleetAndUser(fleetID, userID string) (membership.Model, error)
+// OwnerChecker performs the authoritative DB-level owner check (stale-claim guard,
+// design §9). Satisfied by *membership.Processor.
+type OwnerChecker interface {
+	RequireOwnerInFleet(fleetID, userID string) error
 }
 
 // InitializeRoutes wires the JWT-protected invite endpoints.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, producer events.Producer) func(chi.Router) {
+// ownerCheck is injected for the authoritative DB owner recheck on mutations.
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker) func(chi.Router) {
 	prov := NewProvider(db)
 	adm := NewAdministrator(db)
-	proc := NewProcessor(log)
-	memProv := membership.NewProvider(db)
+	proc := NewProcessor(log, prov)
 
 	return func(r chi.Router) {
 		// POST /fleets/{id}/invites — owner-only; creates an invite with a unique token
@@ -46,23 +45,14 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, producer events.Produ
 				server.WriteError(w, err)
 				return
 			}
-			// Token-level owner gate
+			// Token-level owner gate (fast path)
 			if err := authz.RequireOwner(identity); err != nil {
 				server.WriteError(w, err)
 				return
 			}
-			// Authoritative DB check: confirm actor is still owner
-			actorMem, err := memProv.GetByFleetAndUser(fleetID, identity.UserID)
-			if err != nil {
-				if errors.Is(err, membership.ErrNotFound) {
-					server.WriteError(w, server.ErrForbidden)
-					return
-				}
+			// Authoritative DB check via processor (stale-claim guard, design §9)
+			if err := ownerCheck.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
 				server.WriteError(w, err)
-				return
-			}
-			if actorMem.Role() != "owner" {
-				server.WriteError(w, server.ErrForbidden)
 				return
 			}
 
@@ -103,7 +93,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, producer events.Produ
 				server.WriteError(w, err)
 				return
 			}
-			ms, err := prov.ListByFleetID(fleetID)
+			ms, err := proc.ListByFleet(fleetID)
 			if err != nil {
 				server.WriteError(w, err)
 				return
@@ -116,9 +106,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, producer events.Produ
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 
-			inv, err := prov.GetByID(id)
+			inv, err := proc.GetByID(id)
 			if err != nil {
-				if errors.Is(err, ErrNotFound) {
+				if errors.Is(err, server.ErrNotFound) {
 					server.WriteError(w, server.ErrNotFound)
 					return
 				}
@@ -130,22 +120,14 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, producer events.Produ
 				server.WriteError(w, err)
 				return
 			}
+			// Token-level owner gate (fast path)
 			if err := authz.RequireOwner(identity); err != nil {
 				server.WriteError(w, err)
 				return
 			}
-			// Authoritative DB check
-			actorMem, err := memProv.GetByFleetAndUser(inv.FleetID(), identity.UserID)
-			if err != nil {
-				if errors.Is(err, membership.ErrNotFound) {
-					server.WriteError(w, server.ErrForbidden)
-					return
-				}
+			// Authoritative DB check via processor (stale-claim guard, design §9)
+			if err := ownerCheck.RequireOwnerInFleet(inv.FleetID(), identity.UserID); err != nil {
 				server.WriteError(w, err)
-				return
-			}
-			if actorMem.Role() != "owner" {
-				server.WriteError(w, server.ErrForbidden)
 				return
 			}
 
@@ -161,9 +143,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, producer events.Produ
 			identity := auth.IdentityFromContext(req.Context())
 			token := chi.URLParam(req, "token")
 
-			inv, err := prov.GetByToken(token)
+			inv, err := proc.GetByToken(token)
 			if err != nil {
-				if errors.Is(err, ErrNotFound) {
+				if errors.Is(err, server.ErrNotFound) {
 					server.WriteError(w, server.ErrNotFound)
 					return
 				}
@@ -176,7 +158,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, producer events.Produ
 				return
 			}
 
-			updated, err := adm.Accept(inv, identity.UserID, producer)
+			updated, err := adm.Accept(inv, identity.UserID)
 			if err != nil {
 				server.WriteError(w, err)
 				return

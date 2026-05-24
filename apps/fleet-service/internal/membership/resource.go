@@ -14,19 +14,11 @@ import (
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 )
 
-// membershipProc bundles the full-featured provider for handlers that need it.
-type membershipProc struct {
-	proc *Processor
-	prov Provider
-	adm  Administrator
-}
-
 // InitializeRoutes wires the JWT-protected membership endpoints under a fleet.
 func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 	prov := NewProvider(db)
 	adm := NewAdministrator(db)
 	proc := NewProcessor(log, prov)
-	mp := &membershipProc{proc: proc, prov: prov, adm: adm}
 	return func(r chi.Router) {
 		// GET /fleets/{id}/members — list fleet memberships (fleet-scoped)
 		r.Get("/fleets/{id}/members", func(w http.ResponseWriter, req *http.Request) {
@@ -36,7 +28,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 				server.WriteError(w, err)
 				return
 			}
-			ms, err := mp.prov.ListByFleetID(fleetID)
+			ms, err := proc.ListMembers(fleetID)
 			if err != nil {
 				server.WriteError(w, err)
 				return
@@ -59,25 +51,16 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 				server.WriteError(w, err)
 				return
 			}
-			// Authoritative DB check: confirm actor is still owner (stale-token guard)
-			actorMem, err := mp.prov.GetByFleetAndUser(fleetID, identity.UserID)
-			if err != nil {
-				if errors.Is(err, ErrNotFound) {
-					server.WriteError(w, server.ErrForbidden)
-					return
-				}
+			// Authoritative DB check via processor (stale-claim guard, design §9)
+			if err := proc.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
 				server.WriteError(w, err)
 				return
 			}
-			if actorMem.Role() != "owner" {
-				server.WriteError(w, server.ErrForbidden)
-				return
-			}
 
-			// Fetch the target membership
-			targetMem, err := mp.prov.GetByFleetAndUser(fleetID, targetUserID)
+			// Fetch the target membership via processor
+			targetMem, err := proc.GetMember(fleetID, targetUserID)
 			if err != nil {
-				if errors.Is(err, ErrNotFound) {
+				if errors.Is(err, server.ErrNotFound) {
 					server.WriteError(w, server.ErrNotFound)
 					return
 				}
@@ -86,12 +69,12 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 			}
 
 			// Sole-owner self-removal guard
-			if err := mp.proc.ValidateRemoval(fleetID, identity.UserID, targetUserID, targetMem.Role()); err != nil {
+			if err := proc.ValidateRemoval(fleetID, identity.UserID, targetUserID, targetMem.Role()); err != nil {
 				server.WriteError(w, err)
 				return
 			}
 
-			if err := mp.adm.Delete(targetMem.ID()); err != nil {
+			if err := adm.Delete(targetMem.ID()); err != nil {
 				server.WriteError(w, err)
 				return
 			}

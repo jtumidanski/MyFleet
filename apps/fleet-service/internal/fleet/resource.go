@@ -19,9 +19,16 @@ type OnboardingAdmin interface {
 	CreateFleetWithOwner(db *gorm.DB, fleetName, userID string) (Model, error)
 }
 
+// OwnerChecker performs the authoritative DB-level owner check (stale-claim guard,
+// design §9). Satisfied by *membership.Processor.
+type OwnerChecker interface {
+	RequireOwnerInFleet(fleetID, userID string) error
+}
+
 // InitializeRoutes wires the fleet REST endpoints. The onboardAdmin is the
 // membership administrator which owns the cross-domain onboarding transaction.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, onboardAdmin OnboardingAdmin) func(chi.Router) {
+// ownerCheck is injected for the authoritative DB owner recheck on mutations.
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, onboardAdmin OnboardingAdmin, ownerCheck OwnerChecker) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
 	return func(r chi.Router) {
 		// POST /fleets — onboarding: create fleet + owner membership in one tx
@@ -67,7 +74,13 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, onboardAdmin Onboardi
 				server.WriteError(w, err)
 				return
 			}
+			// Token-level gate (fast path)
 			if err := authz.RequireOwner(identity); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			// Authoritative DB check via processor (stale-claim guard, design §9)
+			if err := ownerCheck.RequireOwnerInFleet(id, identity.UserID); err != nil {
 				server.WriteError(w, err)
 				return
 			}

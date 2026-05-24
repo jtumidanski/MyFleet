@@ -41,10 +41,8 @@ func main() {
 	jwksURL := config.MustGet("JWKS_URL")
 	keyfn := mustJWKSKeyfunc(log, jwksURL, 10, 3*time.Second)
 
-	// Use NoopProducer for now; real Kafka producer wired in Phase 11.
-	producer := events.NoopProducer{}
-
 	membershipAdmin := membership.NewAdministrator(db)
+	membershipProc := membership.NewProcessor(log, membership.NewProvider(db))
 
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
@@ -54,9 +52,9 @@ func main() {
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
-				fleet.InitializeRoutes(log, db, membershipAdmin)(pr)
+				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
-				invite.InitializeRoutes(log, db, producer)(pr)
+				invite.InitializeRoutes(log, db, membershipProc)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {

@@ -14,8 +14,8 @@ type Administrator interface {
 	Insert(Model) (Model, error)
 	Delete(id string) error
 	// Accept stamps accepted_at and creates an active membership in one transaction.
-	// Emits a member.invited event via the injected Producer.
-	Accept(inv Model, userID string, producer events.Producer) (Model, error)
+	// Enqueues a member.invited event in the transactional outbox.
+	Accept(inv Model, userID string) (Model, error)
 }
 
 type dbAdministrator struct{ db *gorm.DB }
@@ -39,7 +39,7 @@ func (a *dbAdministrator) Delete(id string) error {
 //  1. Stamp accepted_at on the invite row.
 //  2. Create an active membership for the accepting user.
 //  3. Enqueue a member.invited event in the outbox.
-func (a *dbAdministrator) Accept(inv Model, userID string, producer events.Producer) (Model, error) {
+func (a *dbAdministrator) Accept(inv Model, userID string) (Model, error) {
 	now := time.Now()
 	var updated Model
 	err := a.db.Transaction(func(tx *gorm.DB) error {
@@ -78,6 +78,11 @@ func (a *dbAdministrator) Accept(inv Model, userID string, producer events.Produ
 			OccurredAt:  now,
 			FleetID:     inv.FleetID(),
 			ActorUserID: userID,
+			Data: map[string]any{
+				"invite_id": inv.ID(),
+				"email":     inv.Email(),
+				"role":      inv.Role(),
+			},
 		}
 		return events.Enqueue(tx, env)
 	})
