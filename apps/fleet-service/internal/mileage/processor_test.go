@@ -9,7 +9,10 @@ import (
 
 type fakeVehicleMileage struct{ set int }
 
-func (f *fakeVehicleMileage) UpdateCurrentMileage(vehicleID string, m int) error { f.set = m; return nil }
+func (f *fakeVehicleMileage) UpdateCurrentMileage(vehicleID string, m int) error {
+	f.set = m
+	return nil
+}
 
 func TestAppend_updatesCurrentMileageWhenHigher(t *testing.T) {
 	vm := &fakeVehicleMileage{set: 1000}

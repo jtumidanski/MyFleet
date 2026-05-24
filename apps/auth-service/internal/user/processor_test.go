@@ -6,7 +6,10 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type fakeProvider struct{ byID map[string]Model; bySub map[string]Model }
+type fakeProvider struct {
+	byID  map[string]Model
+	bySub map[string]Model
+}
 
 func (f *fakeProvider) GetBySub(sub string) (Model, error) {
 	if m, ok := f.bySub[sub]; ok {

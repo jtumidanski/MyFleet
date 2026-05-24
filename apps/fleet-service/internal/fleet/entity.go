@@ -8,9 +8,9 @@ import (
 
 // Entity maps to fleet.fleets (PRD §6).
 type Entity struct {
-	ID              string         `gorm:"type:uuid;primaryKey"`
-	Name            string         `gorm:"not null"`
-	CreatedByUserID string         `gorm:"not null"`
+	ID              string `gorm:"type:uuid;primaryKey"`
+	Name            string `gorm:"not null"`
+	CreatedByUserID string `gorm:"not null"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DeletedAt       gorm.DeletedAt `gorm:"index"`

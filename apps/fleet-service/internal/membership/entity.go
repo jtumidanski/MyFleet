@@ -8,11 +8,11 @@ import (
 
 // Entity maps to fleet.fleet_memberships (PRD §6).
 type Entity struct {
-	ID        string    `gorm:"type:uuid;primaryKey"`
-	FleetID   string    `gorm:"type:uuid;not null;uniqueIndex:idx_fleet_user"`
-	UserID    string    `gorm:"not null;uniqueIndex:idx_fleet_user"`
-	Role      string    `gorm:"not null"` // owner | member | viewer
-	Status    string    `gorm:"not null"` // active
+	ID        string `gorm:"type:uuid;primaryKey"`
+	FleetID   string `gorm:"type:uuid;not null;uniqueIndex:idx_fleet_user"`
+	UserID    string `gorm:"not null;uniqueIndex:idx_fleet_user"`
+	Role      string `gorm:"not null"` // owner | member | viewer
+	Status    string `gorm:"not null"` // active
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

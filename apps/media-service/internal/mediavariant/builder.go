@@ -17,11 +17,11 @@ func NewBuilder() *Builder {
 }
 
 func (b *Builder) SetMediaObjectID(id string) *Builder { b.m.mediaObjectID = id; return b }
-func (b *Builder) SetVariant(v Variant) *Builder        { b.m.variant = v; return b }
-func (b *Builder) SetObjectKey(key string) *Builder     { b.m.objectKey = key; return b }
-func (b *Builder) SetWidth(w int) *Builder              { b.m.width = w; return b }
-func (b *Builder) SetHeight(h int) *Builder             { b.m.height = h; return b }
-func (b *Builder) SetContentType(ct string) *Builder    { b.m.contentType = ct; return b }
+func (b *Builder) SetVariant(v Variant) *Builder       { b.m.variant = v; return b }
+func (b *Builder) SetObjectKey(key string) *Builder    { b.m.objectKey = key; return b }
+func (b *Builder) SetWidth(w int) *Builder             { b.m.width = w; return b }
+func (b *Builder) SetHeight(h int) *Builder            { b.m.height = h; return b }
+func (b *Builder) SetContentType(ct string) *Builder   { b.m.contentType = ct; return b }
 
 // Build validates invariants and returns the model or a validation error (422).
 func (b *Builder) Build() (Model, error) {

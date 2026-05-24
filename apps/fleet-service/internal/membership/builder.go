@@ -14,10 +14,10 @@ func NewBuilder() *Builder {
 	return &Builder{m: Model{id: uuid.NewString(), status: "active"}}
 }
 
-func (b *Builder) SetFleetID(id string) *Builder  { b.m.fleetID = id; return b }
-func (b *Builder) SetUserID(id string) *Builder   { b.m.userID = id; return b }
-func (b *Builder) SetRole(role string) *Builder   { b.m.role = role; return b }
-func (b *Builder) SetStatus(s string) *Builder    { b.m.status = s; return b }
+func (b *Builder) SetFleetID(id string) *Builder { b.m.fleetID = id; return b }
+func (b *Builder) SetUserID(id string) *Builder  { b.m.userID = id; return b }
+func (b *Builder) SetRole(role string) *Builder  { b.m.role = role; return b }
+func (b *Builder) SetStatus(s string) *Builder   { b.m.status = s; return b }
 
 // Build returns the Model. Callers supply valid roles; no runtime error needed
 // here since all call-sites are internal and use role constants.

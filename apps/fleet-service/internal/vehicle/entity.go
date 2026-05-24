@@ -8,20 +8,20 @@ import (
 
 // Entity maps to fleet.vehicles (PRD §6).
 type Entity struct {
-	ID                  string         `gorm:"type:uuid;primaryKey"`
-	FleetID             string         `gorm:"type:uuid;not null;index"`
+	ID                  string `gorm:"type:uuid;primaryKey"`
+	FleetID             string `gorm:"type:uuid;not null;index"`
 	Nickname            string
-	Make                string         `gorm:"not null"`
-	Model               string         `gorm:"not null"`
+	Make                string `gorm:"not null"`
+	Model               string `gorm:"not null"`
 	Trim                string
-	Year                int            `gorm:"not null"`
+	Year                int `gorm:"not null"`
 	VIN                 string
 	CurrentMileage      int
 	PrimaryImageMediaID string
 	Notes               string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
-	DeletedAt           *time.Time     `gorm:"index"`
+	DeletedAt           *time.Time `gorm:"index"`
 	PurgeAfter          *time.Time
 }
 

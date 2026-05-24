@@ -9,7 +9,9 @@ import (
 )
 
 // Provider is the read-only interface for user data access.
-type Provider interface{ GetBySub(sub string) (Model, error) }
+type Provider interface {
+	GetBySub(sub string) (Model, error)
+}
 
 type dbProvider struct{ db *gorm.DB }
 

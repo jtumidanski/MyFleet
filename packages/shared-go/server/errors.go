@@ -3,12 +3,12 @@ package server
 import "errors"
 
 var (
-	ErrUnauthorized = errors.New("unauthorized")    // 401
-	ErrForbidden    = errors.New("forbidden")       // 403
-	ErrNotFound     = errors.New("not found")       // 404
-	ErrConflict     = errors.New("conflict")        // 409
-	ErrGone         = errors.New("gone")            // 410
-	ErrValidation   = errors.New("validation")      // 422
+	ErrUnauthorized = errors.New("unauthorized") // 401
+	ErrForbidden    = errors.New("forbidden")    // 403
+	ErrNotFound     = errors.New("not found")    // 404
+	ErrConflict     = errors.New("conflict")     // 409
+	ErrGone         = errors.New("gone")         // 410
+	ErrValidation   = errors.New("validation")   // 422
 )
 
 func StatusFor(err error) int {

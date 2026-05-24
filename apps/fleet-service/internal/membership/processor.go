@@ -9,7 +9,9 @@ import (
 )
 
 // OwnerCounter is satisfied by both Provider (real) and stubProvider (test).
-type OwnerCounter interface{ CountOwners(fleetID string) (int, error) }
+type OwnerCounter interface {
+	CountOwners(fleetID string) (int, error)
+}
 
 // Processor contains membership business logic.
 type Processor struct {

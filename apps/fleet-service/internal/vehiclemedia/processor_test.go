@@ -28,10 +28,10 @@ type fakeAdministrator struct {
 	// rows mirrors fakeProvider.rows and is updated atomically by SetPrimaryAtomic.
 	rows []Model
 	// lastVehicleID and lastMediaID capture the mirror-update arguments.
-	lastVehicleID  string
-	lastTargetID   string
-	lastMediaID    string
-	lastClearIDs   []string
+	lastVehicleID string
+	lastTargetID  string
+	lastMediaID   string
+	lastClearIDs  []string
 }
 
 func (f *fakeAdministrator) Insert(m Model) (Model, error) { return m, nil }

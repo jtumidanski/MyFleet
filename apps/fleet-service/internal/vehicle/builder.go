@@ -11,15 +11,15 @@ type Builder struct{ m Model }
 
 func NewBuilder() *Builder { return &Builder{m: Model{id: uuid.NewString()}} }
 
-func (b *Builder) SetFleetID(fleetID string) *Builder        { b.m.fleetID = fleetID; return b }
-func (b *Builder) SetNickname(nickname string) *Builder      { b.m.nickname = nickname; return b }
-func (b *Builder) SetMake(make string) *Builder              { b.m.make = make; return b }
-func (b *Builder) SetModel(model string) *Builder            { b.m.model = model; return b }
-func (b *Builder) SetTrim(trim string) *Builder              { b.m.trim = trim; return b }
-func (b *Builder) SetYear(year int) *Builder                 { b.m.year = year; return b }
-func (b *Builder) SetVIN(vin string) *Builder                { b.m.vin = vin; return b }
-func (b *Builder) SetCurrentMileage(miles int) *Builder      { b.m.currentMileage = miles; return b }
-func (b *Builder) SetNotes(notes string) *Builder            { b.m.notes = notes; return b }
+func (b *Builder) SetFleetID(fleetID string) *Builder   { b.m.fleetID = fleetID; return b }
+func (b *Builder) SetNickname(nickname string) *Builder { b.m.nickname = nickname; return b }
+func (b *Builder) SetMake(make string) *Builder         { b.m.make = make; return b }
+func (b *Builder) SetModel(model string) *Builder       { b.m.model = model; return b }
+func (b *Builder) SetTrim(trim string) *Builder         { b.m.trim = trim; return b }
+func (b *Builder) SetYear(year int) *Builder            { b.m.year = year; return b }
+func (b *Builder) SetVIN(vin string) *Builder           { b.m.vin = vin; return b }
+func (b *Builder) SetCurrentMileage(miles int) *Builder { b.m.currentMileage = miles; return b }
+func (b *Builder) SetNotes(notes string) *Builder       { b.m.notes = notes; return b }
 
 // Build validates invariants and returns the model or a validation error.
 func (b *Builder) Build() (Model, error) {
