@@ -7,12 +7,10 @@ import { VehiclesPage } from './pages/VehiclesPage';
 import { VehicleDetailPage } from './pages/VehicleDetailPage';
 import { ActivityPage } from './pages/ActivityPage';
 import { NotificationsPage } from './pages/NotificationsPage';
-import {
-  DashboardPage,
-  MaintenancePage,
-  FuelPage,
-  SettingsPage,
-} from './pages/PlaceholderPage';
+import { DashboardPage } from './pages/DashboardPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { InviteAcceptPage } from './pages/InviteAcceptPage';
+import { MaintenancePage, FuelPage } from './pages/PlaceholderPage';
 
 export function App() {
   return (
@@ -20,6 +18,16 @@ export function App() {
       <Routes>
         {/* Public */}
         <Route path="/login" element={<LoginPage />} />
+
+        {/* Invite accept — requires auth (user must be logged in to accept) */}
+        <Route
+          path="/invites/:token/accept"
+          element={
+            <RequireAuth>
+              <InviteAcceptPage />
+            </RequireAuth>
+          }
+        />
 
         {/* Authenticated-but-fleetless onboarding (guarded, allowed without a fleet) */}
         <Route

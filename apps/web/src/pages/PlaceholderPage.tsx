@@ -1,4 +1,4 @@
-// Placeholder pages for route areas implemented in later phases (Phase 15).
+// Placeholder pages for route areas not yet fully implemented.
 // Keeps the router shell complete and navigable.
 export function PlaceholderPage({ title }: { title: string }) {
   return (
@@ -9,9 +9,9 @@ export function PlaceholderPage({ title }: { title: string }) {
   );
 }
 
-export const DashboardPage = () => <PlaceholderPage title="Dashboard" />;
-export const MaintenancePage = () => <PlaceholderPage title="Maintenance" />;
-export const FuelPage = () => <PlaceholderPage title="Fuel" />;
+// DashboardPage → apps/web/src/pages/DashboardPage.tsx (Task 15.7)
 // ActivityPage → apps/web/src/pages/ActivityPage.tsx (Task 15.5)
 // NotificationsPage → apps/web/src/pages/NotificationsPage.tsx (Task 15.6)
-export const SettingsPage = () => <PlaceholderPage title="Settings" />;
+// SettingsPage → apps/web/src/pages/SettingsPage.tsx (Task 15.8)
+export const MaintenancePage = () => <PlaceholderPage title="Maintenance" />;
+export const FuelPage = () => <PlaceholderPage title="Fuel" />;
