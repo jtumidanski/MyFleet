@@ -36,6 +36,7 @@ func main() {
 		mediaobject.Migration,
 		mediavariant.Migration,
 		processedevents.Migration,
+		events.MigrateOutbox,
 	))
 	if err != nil {
 		log.WithError(err).Fatal("db connect")
@@ -53,8 +54,9 @@ func main() {
 		log.WithError(err).Fatal("minio connect")
 	}
 
-	// Real Kafka producer for media.uploaded (design A7). Self-contained in
-	// media-service; does not depend on fleet-service's outbox.
+	// Kafka producer for the outbox relay (design A8). The relay loop reads
+	// unsent outbox rows and publishes them; Confirm no longer calls Publish
+	// directly so the status update and the outbox row are always atomic.
 	brokers := strings.Split(config.MustGet("KAFKA_BROKERS"), ",")
 	producer := events.NewKafkaProducer(brokers)
 	defer producer.Close()
@@ -95,12 +97,22 @@ func main() {
 		return err
 	})
 
+	// Transactional-outbox relay (design A8): every 2s, publish unsent outbox
+	// rows to Kafka and mark them sent. Runs under an advisory lock so only one
+	// replica relays per tick (design A9), preventing duplicate publishes.
+	go jobs.Every(ctx, 2*time.Second, func(ctx context.Context) error {
+		_, err := database.WithLeaderLock(db, "media-outbox", func() error {
+			return events.RelayOnce(ctx, log, db, producer)
+		})
+		return err
+	})
+
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
-				mediaobject.InitializeRoutes(log, db, store, producer)(pr)
+				mediaobject.InitializeRoutes(log, db, store)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	dtoevents "github.com/jtumidanski/myfleet/packages/dto-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/events"
@@ -61,18 +62,18 @@ func MarkReady(m Model) (Model, error) {
 }
 
 // Processor contains media-object business logic, injected with Provider,
-// Administrator, a presigner (MinIO), and an events.Producer (real Kafka per
-// design A7).
+// Administrator, and a presigner (MinIO). Event publication is handled by the
+// transactional-outbox relay (design A8); the processor never calls Publish
+// directly.
 type Processor struct {
-	log      logrus.FieldLogger
-	p        Provider
-	a        Administrator
-	storage  Presigner
-	producer events.Producer
+	log     logrus.FieldLogger
+	p       Provider
+	a       Administrator
+	storage Presigner
 }
 
-func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st Presigner, producer events.Producer) *Processor {
-	return &Processor{log: log, p: p, a: a, storage: st, producer: producer}
+func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st Presigner) *Processor {
+	return &Processor{log: log, p: p, a: a, storage: st}
 }
 
 // InitUpload creates a media-object row in the uploaded state and returns it
@@ -105,8 +106,10 @@ func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (
 	return created, url, nil
 }
 
-// Confirm transitions the object uploaded → processing and publishes a
-// media.uploaded event so the worker pool generates variants. Fleet-scoped.
+// Confirm transitions the object uploaded → processing and enqueues a
+// media.uploaded event in the outbox atomically (design A8). The outbox relay
+// delivers it to Kafka asynchronously; the variant worker pool consumes it.
+// Fleet-scoped.
 func (pr *Processor) Confirm(ctx context.Context, id, identityFleetID string) (Model, error) {
 	m, err := pr.getActive(id)
 	if err != nil {
@@ -119,25 +122,29 @@ func (pr *Processor) Confirm(ctx context.Context, id, identityFleetID string) (M
 	if err != nil {
 		return Model{}, err
 	}
-	updated, err := pr.a.Update(processing)
-	if err != nil {
-		return Model{}, err
-	}
+	// Build the envelope before opening the transaction so any marshalling
+	// errors are caught outside the tx (no rollback needed).
 	env := events.Envelope{
-		EventID:     uuid.NewString(),
-		Type:        EventTypeMediaUploaded,
-		Version:     1,
-		OccurredAt:  time.Now().UTC(),
-		FleetID:     updated.FleetID(),
-		ActorUserID: updated.UploadedByUserID(),
+		EventID:    uuid.NewString(),
+		Type:       EventTypeMediaUploaded,
+		Version:    1,
+		OccurredAt: time.Now().UTC(),
+		FleetID:    processing.FleetID(),
+		// ActorUserID is the uploader; TraceID propagates the HTTP correlation.
+		ActorUserID: processing.UploadedByUserID(),
 		TraceID:     telemetry.CorrelationIDFromContext(ctx),
 		Data: mustData(dtoevents.MediaUploadedData{
-			MediaID:     updated.ID(),
-			ContentType: updated.ContentType(),
+			MediaID:     processing.ID(),
+			ContentType: processing.ContentType(),
 		}),
 	}
-	if err := pr.producer.Publish(ctx, env); err != nil {
-		pr.log.WithError(err).WithField("media_id", updated.ID()).Error("publish media.uploaded failed")
+	// Status update + outbox enqueue in one atomic transaction (design A8).
+	// If either write fails the whole tx rolls back; the object stays in
+	// uploaded and Confirm can be retried.
+	updated, err := pr.a.UpdateInTx(processing, func(tx *gorm.DB) error {
+		return events.Enqueue(tx, env)
+	})
+	if err != nil {
 		return Model{}, err
 	}
 	return updated, nil

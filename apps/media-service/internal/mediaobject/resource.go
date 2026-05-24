@@ -7,7 +7,6 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
-	"github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"gorm.io/gorm"
 )
@@ -22,10 +21,10 @@ func requireWrite(id auth.Identity) error {
 }
 
 // InitializeRoutes wires the JWT-protected media-object endpoints. Paths are
-// bare (the gateway strips /api/media). The processor is injected with the
-// MinIO presigner and the real Kafka producer (design A7).
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st Presigner, producer events.Producer) func(chi.Router) {
-	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db), st, producer)
+// bare (the gateway strips /api/media). Event emission uses the transactional
+// outbox (design A8); no Kafka producer is needed here.
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st Presigner) func(chi.Router) {
+	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db), st)
 	return func(r chi.Router) {
 		// POST /media — init upload: create row (uploaded) + presigned PUT URL.
 		r.Post("/media", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {

@@ -11,6 +11,9 @@ import (
 type Administrator interface {
 	Insert(Model) (Model, error)
 	Update(Model) (Model, error)
+	// UpdateInTx saves the model and runs hook on the same transaction so the
+	// status change and outbox enqueue commit/rollback atomically (design A8).
+	UpdateInTx(m Model, hook func(tx *gorm.DB) error) (Model, error)
 	SoftDelete(id string) (Model, error)
 }
 
@@ -33,6 +36,24 @@ func (a *dbAdministrator) Update(m Model) (Model, error) {
 		return Model{}, err
 	}
 	return Make(e), nil
+}
+
+// UpdateInTx saves m and runs hook inside a single db.Transaction. If the hook
+// returns an error the entire transaction rolls back (design A8).
+func (a *dbAdministrator) UpdateInTx(m Model, hook func(tx *gorm.DB) error) (Model, error) {
+	var updated Model
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		e := m.ToEntity()
+		if err := tx.Save(&e).Error; err != nil {
+			return err
+		}
+		updated = Make(e)
+		return hook(tx)
+	})
+	if err != nil {
+		return Model{}, err
+	}
+	return updated, nil
 }
 
 // SoftDelete stamps deleted_at and purge_after on the media object.

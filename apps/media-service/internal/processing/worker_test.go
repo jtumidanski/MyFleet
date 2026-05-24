@@ -42,6 +42,10 @@ func (f *fakeObjectAdmin) Update(m mediaobject.Model) (mediaobject.Model, error)
 	f.updated = append(f.updated, m)
 	return m, nil
 }
+func (f *fakeObjectAdmin) UpdateInTx(m mediaobject.Model, hook func(tx *gorm.DB) error) (mediaobject.Model, error) {
+	f.updated = append(f.updated, m)
+	return m, nil
+}
 func (f *fakeObjectAdmin) SoftDelete(_ string) (mediaobject.Model, error) {
 	return mediaobject.Model{}, nil
 }
