@@ -5,6 +5,8 @@
 *.test
 *.out
 bin/
+# Pinned lint tooling downloaded by tools/lint.sh
+.cache/
 # Node
 node_modules/
 dist/
