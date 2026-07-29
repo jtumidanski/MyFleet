@@ -45,7 +45,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleProc VehicleGe
 		r.Post("/vehicles/{id}/media", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			MediaID   string `json:"mediaId"`
 			SortOrder int    `json:"sortOrder"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			vehicleID := chi.URLParam(req, "id")
 

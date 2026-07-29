@@ -4,14 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { mileageSchema, type MileageFormInput } from '../../../../lib/schemas/mileage';
 import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '../../../ui/form';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
 
 interface MileageFormProps {
   defaultMileage?: number;
@@ -24,12 +17,7 @@ interface MileageFormProps {
  * Form for logging a manual mileage record.
  * defaultMileage is pre-filled from the latest record (auto-fill feature).
  */
-export function MileageForm({
-  defaultMileage,
-  onSubmit,
-  onCancel,
-  submitting,
-}: MileageFormProps) {
+export function MileageForm({ defaultMileage, onSubmit, onCancel, submitting }: MileageFormProps) {
   const form = useForm<MileageFormInput>({
     resolver: zodResolver(mileageSchema),
     defaultValues: {

@@ -4,14 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { fuelSchema, type FuelFormInput } from '../../../../lib/schemas/fuel';
 import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '../../../ui/form';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
 
 interface FuelFormProps {
   /** Pre-filled from latest mileage record (auto-fill). */

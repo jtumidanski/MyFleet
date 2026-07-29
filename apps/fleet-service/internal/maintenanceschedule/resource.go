@@ -62,7 +62,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			RecurrenceType string `json:"recurrenceType"`
 			IntervalMonths int    `json:"intervalMonths"`
 			IntervalMiles  int    `json:"intervalMiles"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			vehicleID := chi.URLParam(req, "id")
 			v, err := vehicleAccessor.GetByID(vehicleID)
@@ -120,7 +121,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			IntervalMonths *int    `json:"intervalMonths"`
 			IntervalMiles  *int    `json:"intervalMiles"`
 			Active         *bool   `json:"active"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			current, err := proc.GetByID(id)
@@ -191,7 +193,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 		r.Post("/maintenance-schedules/{id}/complete", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			Date          string `json:"date"`
 			LatestMileage *int   `json:"latestMileage"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			sched, err := proc.GetByID(id)

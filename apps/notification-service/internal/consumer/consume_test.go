@@ -19,6 +19,7 @@ type fakeInbox struct {
 func (f *fakeInbox) Exists(eventID, consumer string) (bool, error) {
 	return f.seen[eventID+":"+consumer], nil
 }
+
 func (f *fakeInbox) Mark(eventID, consumer string) error {
 	f.seen[eventID+":"+consumer] = true
 	return nil

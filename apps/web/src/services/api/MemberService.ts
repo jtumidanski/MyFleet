@@ -27,10 +27,9 @@ class MemberService extends BaseService<MembershipAttributes> {
    * Returns 204 on success, 409 on sole-owner guard violation.
    */
   async removeMember(fleetId: string, userId: string): Promise<void> {
-    await apiClient.request<null>(
-      `/api/fleet/fleets/${fleetId}/members/${userId}`,
-      { method: 'DELETE' },
-    );
+    await apiClient.request<null>(`/api/fleet/fleets/${fleetId}/members/${userId}`, {
+      method: 'DELETE',
+    });
   }
 }
 

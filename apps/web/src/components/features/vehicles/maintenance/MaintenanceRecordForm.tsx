@@ -1,25 +1,15 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
-import { maintenanceRecordSchema, type MaintenanceRecordFormInput } from '../../../../lib/schemas/maintenanceRecord';
+import {
+  maintenanceRecordSchema,
+  type MaintenanceRecordFormInput,
+} from '../../../../lib/schemas/maintenanceRecord';
 import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Textarea } from '../../../ui/textarea';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '../../../ui/form';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../../ui/select';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
 import type { MaintenanceCategory } from '../../../../types/models/maintenanceCategory';
 
 interface MaintenanceRecordFormProps {

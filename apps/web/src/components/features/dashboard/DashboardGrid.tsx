@@ -29,7 +29,10 @@ interface GridWidget {
   height: number;
 }
 
-function toGridWidget(w: { id: string; attributes: { type: string; positionX: number; positionY: number; width: number; height: number } }): GridWidget | null {
+function toGridWidget(w: {
+  id: string;
+  attributes: { type: string; positionX: number; positionY: number; width: number; height: number };
+}): GridWidget | null {
   if (!WIDGET_CATALOG.includes(w.attributes.type as WidgetType)) return null;
   return {
     id: w.id,
@@ -68,10 +71,13 @@ export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
 
   const widgets = localWidgets ?? serverWidgets;
 
-  const save = useCallback((next: GridWidget[]) => {
-    setLocalWidgets(next);
-    saveLayout.mutate(toWidgetInputs(next));
-  }, [saveLayout]);
+  const save = useCallback(
+    (next: GridWidget[]) => {
+      setLocalWidgets(next);
+      saveLayout.mutate(toWidgetInputs(next));
+    },
+    [saveLayout],
+  );
 
   const addWidget = (type: WidgetType) => {
     const entry = widgetRegistry[type];
@@ -134,11 +140,7 @@ export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Dashboard</h2>
           <div className="relative">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowAddMenu((v) => !v)}
-            >
+            <Button variant="outline" size="sm" onClick={() => setShowAddMenu((v) => !v)}>
               <Plus className="mr-1 h-4 w-4" />
               Add Widget
             </Button>

@@ -70,7 +70,7 @@ func (c *Client) getJSON(ctx context.Context, url string, dst any) error {
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
 		return fmt.Errorf("fleet internal %s: status %d", url, res.StatusCode)
 	}

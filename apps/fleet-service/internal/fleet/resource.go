@@ -34,7 +34,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, onboardAdmin Onboardi
 		// POST /fleets — onboarding: create fleet + owner membership in one tx
 		r.Post("/fleets", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			Name string `json:"name"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			if identity.UserID == "" {
 				server.WriteError(w, server.ErrUnauthorized)
@@ -67,7 +68,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, onboardAdmin Onboardi
 		// PATCH /fleets/{id} — rename, owner-only (token gate + authoritative DB check)
 		r.Patch("/fleets/{id}", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			Name string `json:"name"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			if err := authz.RequireSameFleet(identity, id); err != nil {

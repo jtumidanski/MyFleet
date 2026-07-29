@@ -67,7 +67,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			VIN            string `json:"vin"`
 			CurrentMileage int    `json:"currentMileage"`
 			Notes          string `json:"notes"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
 			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
@@ -125,7 +126,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			Nickname       *string `json:"nickname"`
 			CurrentMileage *int    `json:"currentMileage"`
 			Notes          *string `json:"notes"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			// Fetch first to get fleetID for authz, then mutate.
@@ -222,7 +224,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		// rows, sets exactly one is_primary=true, and mirrors to vehicles row.
 		r.Put("/vehicles/{id}/primary-image", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			MediaID string `json:"mediaId"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			current, err := proc.GetByID(id)

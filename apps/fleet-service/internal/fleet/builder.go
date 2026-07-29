@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"github.com/google/uuid"
+
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 

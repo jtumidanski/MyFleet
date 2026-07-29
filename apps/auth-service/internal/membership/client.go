@@ -29,7 +29,7 @@ func (c *Client) Active(ctx context.Context, userID string) (Membership, error) 
 	if err != nil {
 		return Membership{}, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode == http.StatusNotFound {
 		return Membership{}, nil
 	}

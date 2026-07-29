@@ -70,7 +70,8 @@ func InitializeRoutes(
 		// PUT /fleets/{id}/dashboard — replace widget layout (per-user).
 		r.Put("/fleets/{id}/dashboard", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			Widgets []WidgetInput `json:"widgets"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
 

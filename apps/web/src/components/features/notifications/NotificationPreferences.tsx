@@ -57,7 +57,10 @@ export function NotificationPreferences() {
               const labelId = `pref-${pref.id}`;
               return (
                 <li key={pref.id} className="flex items-center justify-between gap-4">
-                  <Label htmlFor={labelId} className="flex-1 cursor-pointer text-sm text-foreground">
+                  <Label
+                    htmlFor={labelId}
+                    className="flex-1 cursor-pointer text-sm text-foreground"
+                  >
                     {getTypeLabel(type)}
                   </Label>
                   <Switch

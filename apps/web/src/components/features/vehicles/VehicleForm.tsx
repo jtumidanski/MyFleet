@@ -5,14 +5,7 @@ import { vehicleSchema, type VehicleFormInput } from '../../../lib/schemas/vehic
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '../../ui/form';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../ui/form';
 
 interface VehicleFormProps {
   // 'create' shows all fields; 'edit' only the server-mutable subset

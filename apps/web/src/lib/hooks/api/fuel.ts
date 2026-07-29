@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fuelService } from '../../../services/api/FuelService';
-import type { CreateFuelLogAttributes, UpdateFuelLogAttributes } from '../../../types/models/fuelLog';
+import type {
+  CreateFuelLogAttributes,
+  UpdateFuelLogAttributes,
+} from '../../../types/models/fuelLog';
 
 // ---------------------------------------------------------------------------
 // Query key factory
@@ -60,8 +63,7 @@ export function useFuelLog(id: string | null | undefined) {
 export function useCreateFuelLog(vehicleId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (attrs: CreateFuelLogAttributes) =>
-      fuelService.createForVehicle(vehicleId, attrs),
+    mutationFn: (attrs: CreateFuelLogAttributes) => fuelService.createForVehicle(vehicleId, attrs),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: fuelKeys.lists() });
     },

@@ -1,9 +1,6 @@
 import type { JsonApiDocument, JsonApiResource } from '@myfleet/shared-ts';
 import { apiClient } from '../../lib/api/client';
-import type {
-  VehicleMediaAttributes,
-  AddVehicleMediaAttributes,
-} from '../../types/models/media';
+import type { VehicleMediaAttributes, AddVehicleMediaAttributes } from '../../types/models/media';
 
 /**
  * Vehicle-media service — wraps the fleet-service vehicle-media endpoints.
@@ -19,9 +16,7 @@ class VehicleMediaService {
   private readonly basePath = '/api/fleet/vehicles';
 
   /** GET /api/fleet/vehicles/{vehicleId}/media — list media refs. */
-  async listByVehicle(
-    vehicleId: string,
-  ): Promise<Array<JsonApiResource<VehicleMediaAttributes>>> {
+  async listByVehicle(vehicleId: string): Promise<Array<JsonApiResource<VehicleMediaAttributes>>> {
     const doc = await apiClient.request<
       JsonApiDocument<Array<JsonApiResource<VehicleMediaAttributes>>>
     >(`${this.basePath}/${vehicleId}/media`);
@@ -33,12 +28,13 @@ class VehicleMediaService {
     vehicleId: string,
     attrs: AddVehicleMediaAttributes,
   ): Promise<JsonApiResource<VehicleMediaAttributes>> {
-    const doc = await apiClient.request<
-      JsonApiDocument<JsonApiResource<VehicleMediaAttributes>>
-    >(`${this.basePath}/${vehicleId}/media`, {
-      method: 'POST',
-      body: JSON.stringify({ data: { type: 'vehicleMedia', attributes: attrs } }),
-    });
+    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<VehicleMediaAttributes>>>(
+      `${this.basePath}/${vehicleId}/media`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ data: { type: 'vehicleMedia', attributes: attrs } }),
+      },
+    );
     return doc.data;
   }
 

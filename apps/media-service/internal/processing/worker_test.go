@@ -24,6 +24,7 @@ type fakeObjectStore struct{ errGet error }
 func (f *fakeObjectStore) GetObject(_ context.Context, _ string) (io.ReadCloser, error) {
 	return nil, f.errGet
 }
+
 func (f *fakeObjectStore) PutObject(_ context.Context, _ string, _ io.Reader, _ int64, _ string) error {
 	return nil
 }
@@ -42,10 +43,12 @@ func (f *fakeObjectAdmin) Update(m mediaobject.Model) (mediaobject.Model, error)
 	f.updated = append(f.updated, m)
 	return m, nil
 }
+
 func (f *fakeObjectAdmin) UpdateInTx(m mediaobject.Model, hook func(tx *gorm.DB) error) (mediaobject.Model, error) {
 	f.updated = append(f.updated, m)
 	return m, nil
 }
+
 func (f *fakeObjectAdmin) SoftDelete(_ string) (mediaobject.Model, error) {
 	return mediaobject.Model{}, nil
 }

@@ -202,7 +202,7 @@ func (w *Worker) decodeOriginal(ctx context.Context, key string) (image.Image, e
 	if err != nil {
 		return nil, err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	img, _, err := image.Decode(rc)
 	if err != nil {
 		return nil, err

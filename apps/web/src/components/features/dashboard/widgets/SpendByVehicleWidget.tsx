@@ -56,15 +56,20 @@ export function SpendByVehicleWidget({ fleetId }: SpendByVehicleWidgetProps) {
             ))}
           </div>
         </div>
-        {(!rows || rows.length === 0) ? (
+        {!rows || rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No spend data for this period.</p>
         ) : (
           <ul className="space-y-1">
             {rows
               .sort((a, b) => b.totalCost - a.totalCost)
               .map((row) => (
-                <li key={row.vehicleId} className="flex items-center justify-between text-sm border-b py-1 last:border-0">
-                  <span className="text-xs text-muted-foreground truncate max-w-[60%]">{row.vehicleId}</span>
+                <li
+                  key={row.vehicleId}
+                  className="flex items-center justify-between text-sm border-b py-1 last:border-0"
+                >
+                  <span className="text-xs text-muted-foreground truncate max-w-[60%]">
+                    {row.vehicleId}
+                  </span>
                   <span className="font-medium">${row.totalCost.toFixed(2)}</span>
                 </li>
               ))}

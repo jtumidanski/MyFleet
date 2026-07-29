@@ -39,10 +39,7 @@ export function SettingsPage() {
             {isLoading ? (
               <Skeleton className="h-10 w-64" />
             ) : (
-              <FleetNameForm
-                fleetId={activeFleetId}
-                currentName={fleet?.attributes.name ?? ''}
-              />
+              <FleetNameForm fleetId={activeFleetId} currentName={fleet?.attributes.name ?? ''} />
             )}
           </CardContent>
         </Card>

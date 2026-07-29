@@ -69,7 +69,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			Gallons        float64 `json:"gallons"`
 			TotalCost      float64 `json:"totalCost"`
 			PricePerGallon float64 `json:"pricePerGallon"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			vehicleID := chi.URLParam(req, "id")
 
@@ -155,7 +156,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			Gallons        *float64 `json:"gallons"`
 			TotalCost      *float64 `json:"totalCost"`
 			PricePerGallon *float64 `json:"pricePerGallon"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			current, err := proc.GetByID(id)

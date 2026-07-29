@@ -2,10 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { mediaService } from '../../../services/api/MediaService';
 import { vehicleMediaService } from '../../../services/api/VehicleMediaService';
 import type { JsonApiResource } from '@myfleet/shared-ts';
-import type {
-  MediaObjectAttributes,
-  InitMediaUploadAttributes,
-} from '../../../types/models/media';
+import type { MediaObjectAttributes, InitMediaUploadAttributes } from '../../../types/models/media';
 
 // Hierarchical query-key factory.
 // all                       -> ['media']
@@ -132,8 +129,7 @@ export function useUploadMedia(vehicleId: string) {
 export function useAddVehicleMedia(vehicleId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (mediaId: string) =>
-      vehicleMediaService.addMedia(vehicleId, { mediaId }),
+    mutationFn: (mediaId: string) => vehicleMediaService.addMedia(vehicleId, { mediaId }),
     onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: mediaKeys.vehicleMedia(vehicleId),
@@ -149,8 +145,7 @@ export function useAddVehicleMedia(vehicleId: string) {
 export function useSetPrimaryImage(vehicleId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (mediaId: string) =>
-      vehicleMediaService.setPrimaryImage(vehicleId, mediaId),
+    mutationFn: (mediaId: string) => vehicleMediaService.setPrimaryImage(vehicleId, mediaId),
     onSettled: () => {
       void queryClient.invalidateQueries({
         queryKey: mediaKeys.vehicleMedia(vehicleId),

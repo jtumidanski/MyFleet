@@ -79,23 +79,13 @@ export function ActivityFeed({
 
         {totalPages > 1 && (
           <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onPrev}
-              disabled={page <= 1}
-            >
+            <Button variant="outline" size="sm" onClick={onPrev} disabled={page <= 1}>
               Previous
             </Button>
             <span>
               Page {page} of {totalPages}
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onNext}
-              disabled={!hasNextPage}
-            >
+            <Button variant="outline" size="sm" onClick={onNext} disabled={!hasNextPage}>
               Next
             </Button>
           </div>

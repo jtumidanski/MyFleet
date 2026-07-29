@@ -14,7 +14,14 @@ type Handler func(ctx context.Context, e Envelope) error
 // Dedup/idempotency is the handler's responsibility (processed_events, design §7).
 func Consume(ctx context.Context, log logrus.FieldLogger, brokers []string, group, topic string, h Handler) {
 	r := kafka.NewReader(kafka.ReaderConfig{Brokers: brokers, GroupID: group, Topic: topic})
-	defer r.Close()
+	defer func() {
+		// Close commits pending offsets; a failure here means the group may
+		// redeliver on restart, which consumers must already tolerate. Worth
+		// surfacing, not worth failing shutdown over.
+		if err := r.Close(); err != nil {
+			log.WithError(err).WithField("topic", topic).Warn("closing kafka reader")
+		}
+	}()
 	for {
 		m, err := r.FetchMessage(ctx)
 		if err != nil {

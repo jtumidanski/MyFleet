@@ -147,7 +147,7 @@ export function VehicleMaintenanceSection({
             </div>
           )}
 
-          {(!schedules || schedules.length === 0) ? (
+          {!schedules || schedules.length === 0 ? (
             <p className="text-sm text-muted-foreground">No maintenance schedules defined.</p>
           ) : (
             <div className="space-y-3">
@@ -221,7 +221,7 @@ export function VehicleMaintenanceSection({
             </div>
           )}
 
-          {(!records || records.length === 0) ? (
+          {!records || records.length === 0 ? (
             <p className="text-sm text-muted-foreground">No maintenance records yet.</p>
           ) : (
             <div className="space-y-2">
@@ -236,9 +236,7 @@ export function VehicleMaintenanceSection({
                       {new Date(record.attributes.performedAt).toLocaleDateString()}
                       {' · '}
                       {record.attributes.mileage.toLocaleString()} mi
-                      {record.attributes.cost > 0
-                        ? ` · $${record.attributes.cost.toFixed(2)}`
-                        : ''}
+                      {record.attributes.cost > 0 ? ` · $${record.attributes.cost.toFixed(2)}` : ''}
                     </p>
                     {record.attributes.vendor && (
                       <p className="text-xs text-muted-foreground">{record.attributes.vendor}</p>

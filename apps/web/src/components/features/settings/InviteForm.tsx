@@ -9,21 +9,8 @@ import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { createInviteSchema, type CreateInviteInput } from '../../../lib/schemas/fleetSettings';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '../../ui/form';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../ui/select';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../ui/form';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { useCreateInvite } from '../../../lib/hooks/api/invites';
 
 interface InviteFormProps {

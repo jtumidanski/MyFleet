@@ -14,7 +14,11 @@ export interface RenameFleetAttributes {
   name: string;
 }
 
-class FleetSettingsService extends BaseService<FleetAttributes, FleetAttributes, RenameFleetAttributes> {
+class FleetSettingsService extends BaseService<
+  FleetAttributes,
+  FleetAttributes,
+  RenameFleetAttributes
+> {
   protected readonly resourceType = 'fleets';
   protected readonly basePath = '/api/fleet/fleets';
 

@@ -1,6 +1,7 @@
 package events
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -19,7 +20,7 @@ func TestEnvelope_roundTrips(t *testing.T) {
 
 func TestNoopProducer_neverErrors(t *testing.T) {
 	p := NoopProducer{}
-	if err := p.Publish(nil, Envelope{Type: "x"}); err != nil {
+	if err := p.Publish(context.Background(), Envelope{Type: "x"}); err != nil {
 		t.Fatalf("noop producer must not error: %v", err)
 	}
 }

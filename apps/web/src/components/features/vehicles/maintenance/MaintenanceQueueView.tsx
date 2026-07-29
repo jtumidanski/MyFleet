@@ -36,7 +36,7 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
       <Card>
         <CardContent className="pt-6">
           <h2 className="mb-4 text-base font-semibold text-red-700">Overdue Maintenance</h2>
-          {(!overdue || overdue.length === 0) ? (
+          {!overdue || overdue.length === 0 ? (
             <p className="text-sm text-muted-foreground">No overdue maintenance items.</p>
           ) : (
             <div className="space-y-3">
@@ -72,7 +72,7 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
       <Card>
         <CardContent className="pt-6">
           <h2 className="mb-4 text-base font-semibold text-amber-700">Upcoming Maintenance</h2>
-          {(!upcoming || upcoming.length === 0) ? (
+          {!upcoming || upcoming.length === 0 ? (
             <p className="text-sm text-muted-foreground">No upcoming maintenance items.</p>
           ) : (
             <div className="space-y-3">

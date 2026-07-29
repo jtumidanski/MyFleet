@@ -32,21 +32,20 @@ class MaintenanceRecordService extends BaseService<
 
   /** POST /api/fleet/vehicles/{vehicleId}/maintenance-records */
   createForVehicle(vehicleId: string, attributes: CreateMaintenanceRecordAttributes) {
-    return this.createAt(
-      `/api/fleet/vehicles/${vehicleId}/maintenance-records`,
-      attributes,
-    );
+    return this.createAt(`/api/fleet/vehicles/${vehicleId}/maintenance-records`, attributes);
   }
 
   /** POST /api/fleet/maintenance-records/{id} with documentMediaIds append */
-  async appendDocumentMedia(id: string, mediaId: string): Promise<JsonApiResource<MaintenanceRecordAttributes>> {
-    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MaintenanceRecordAttributes>>>(
-      `${this.basePath}/${id}/document-media`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ data: { type: 'mediaRefs', attributes: { mediaId } } }),
-      },
-    );
+  async appendDocumentMedia(
+    id: string,
+    mediaId: string,
+  ): Promise<JsonApiResource<MaintenanceRecordAttributes>> {
+    const doc = await apiClient.request<
+      JsonApiDocument<JsonApiResource<MaintenanceRecordAttributes>>
+    >(`${this.basePath}/${id}/document-media`, {
+      method: 'POST',
+      body: JSON.stringify({ data: { type: 'mediaRefs', attributes: { mediaId } } }),
+    });
     return doc.data;
   }
 }

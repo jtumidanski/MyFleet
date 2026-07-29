@@ -1,8 +1,9 @@
 package membership
 
 import (
-	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 	"gorm.io/gorm"
+
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 )
 
 // Administrator is the write interface for membership data access.

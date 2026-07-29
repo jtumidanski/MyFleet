@@ -5,7 +5,11 @@ import { formatMileage } from '@myfleet/ui-components';
 import { Card, CardContent } from '../../../ui/card';
 import { Button } from '../../../ui/button';
 import { Skeleton } from '../../../ui/skeleton';
-import { useMileageRecords, useCreateMileageRecord, getLatestMileage } from '../../../../lib/hooks/api/mileage';
+import {
+  useMileageRecords,
+  useCreateMileageRecord,
+  getLatestMileage,
+} from '../../../../lib/hooks/api/mileage';
 import { MileageSparkline } from './MileageSparkline';
 import { MileageForm } from './MileageForm';
 import type { MileageFormInput } from '../../../../lib/schemas/mileage';
@@ -55,12 +59,7 @@ export function VehicleMileageSection({
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold">Mileage History</h2>
           {canWrite && !showForm && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setShowForm(true)}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={() => setShowForm(true)}>
               Log Mileage
             </Button>
           )}

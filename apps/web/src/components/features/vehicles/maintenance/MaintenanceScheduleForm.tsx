@@ -1,24 +1,14 @@
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
-import { maintenanceScheduleSchema, type MaintenanceScheduleFormInput } from '../../../../lib/schemas/maintenanceSchedule';
+import {
+  maintenanceScheduleSchema,
+  type MaintenanceScheduleFormInput,
+} from '../../../../lib/schemas/maintenanceSchedule';
 import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '../../../ui/form';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../../ui/select';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
 import type { MaintenanceCategory } from '../../../../types/models/maintenanceCategory';
 
 interface MaintenanceScheduleFormProps {

@@ -3,7 +3,11 @@ import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { Skeleton } from '../../../ui/skeleton';
 import { Button } from '../../../ui/button';
 import { Card, CardContent } from '../../../ui/card';
-import { useVehicleMedia, useSetPrimaryImage, useDeleteMedia } from '../../../../lib/hooks/api/media';
+import {
+  useVehicleMedia,
+  useSetPrimaryImage,
+  useDeleteMedia,
+} from '../../../../lib/hooks/api/media';
 import { MediaThumbnail } from './MediaThumbnail';
 import { MediaUploadButton } from './MediaUploadButton';
 

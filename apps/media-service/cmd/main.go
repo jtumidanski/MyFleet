@@ -59,7 +59,13 @@ func main() {
 	// directly so the status update and the outbox row are always atomic.
 	brokers := strings.Split(config.MustGet("KAFKA_BROKERS"), ",")
 	producer := events.NewKafkaProducer(brokers)
-	defer producer.Close()
+	defer func() {
+		// Close flushes buffered writes; unflushed rows stay unsent in the
+		// outbox and the relay retries them on the next boot, so log and move on.
+		if err := producer.Close(); err != nil {
+			log.WithError(err).Warn("closing kafka producer")
+		}
+	}()
 
 	// media-service validates auth-service JWTs via JWKS. Bounded retry so it
 	// waits for auth-service readiness (same approach as fleet-service).

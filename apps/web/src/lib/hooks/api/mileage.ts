@@ -67,8 +67,7 @@ export function useMileageRecords(params: UseMileageParams | null | undefined) {
 export function useCreateMileageRecord(vehicleId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (attrs: CreateMileageAttributes) =>
-      mileageService.create(vehicleId, attrs),
+    mutationFn: (attrs: CreateMileageAttributes) => mileageService.create(vehicleId, attrs),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: mileageKeys.lists() });
     },

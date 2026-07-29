@@ -36,12 +36,13 @@ class MileageService {
     vehicleId: string,
     attrs: CreateMileageAttributes,
   ): Promise<JsonApiResource<MileageRecordAttributes>> {
-    const doc = await apiClient.request<
-      JsonApiDocument<JsonApiResource<MileageRecordAttributes>>
-    >(`${this.basePath}/${vehicleId}/mileage`, {
-      method: 'POST',
-      body: JSON.stringify({ data: { type: 'mileageRecords', attributes: attrs } }),
-    });
+    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MileageRecordAttributes>>>(
+      `${this.basePath}/${vehicleId}/mileage`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ data: { type: 'mileageRecords', attributes: attrs } }),
+      },
+    );
     return doc.data;
   }
 }

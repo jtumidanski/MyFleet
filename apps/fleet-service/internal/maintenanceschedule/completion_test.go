@@ -18,10 +18,12 @@ func (c *captureCompletion) CreateRecord(vehicleID, categoryID string, date time
 	c.recordCreated = true
 	return "rec-1", nil
 }
+
 func (c *captureCompletion) AppendMileage(vehicleID string, miles int, src, ref string) error {
 	c.mileageAppended = true
 	return nil
 }
+
 func (c *captureCompletion) AdvanceSchedule(scheduleID string, date time.Time, miles int) error {
 	c.lastDate, c.lastMiles = date, miles
 	return nil

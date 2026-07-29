@@ -87,15 +87,12 @@ export function VehicleFuelSection({
           </div>
         )}
 
-        {(!logs || logs.length === 0) ? (
+        {!logs || logs.length === 0 ? (
           <p className="text-sm text-muted-foreground">No fuel logs yet.</p>
         ) : (
           <div className="space-y-2">
             {logs.map((log) => (
-              <div
-                key={log.id}
-                className="flex items-start justify-between rounded-md border p-3"
-              >
+              <div key={log.id} className="flex items-start justify-between rounded-md border p-3">
                 <div className="min-w-0 flex-1 space-y-0.5">
                   <p className="text-sm font-medium">
                     {new Date(log.attributes.date).toLocaleDateString()}
@@ -104,7 +101,8 @@ export function VehicleFuelSection({
                     {log.attributes.gallons.toFixed(3)} gal
                     {' · '}${log.attributes.pricePerGallon.toFixed(3)}/gal
                     {' · '}Total: ${log.attributes.totalCost.toFixed(2)}
-                    {' · '}{log.attributes.mileage.toLocaleString()} mi
+                    {' · '}
+                    {log.attributes.mileage.toLocaleString()} mi
                   </p>
                 </div>
               </div>

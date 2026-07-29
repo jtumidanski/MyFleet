@@ -118,7 +118,11 @@ describe('mutation invalidation contracts — real hooks', () => {
       result.current.mutate('user-1');
     });
 
-    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+    await waitFor(() =>
+      expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(
+        true,
+      ),
+    );
 
     // Assert both invalidation calls were made with the correct query keys.
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
@@ -138,7 +142,11 @@ describe('mutation invalidation contracts — real hooks', () => {
       result.current.mutate('New Name');
     });
 
-    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+    await waitFor(() =>
+      expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(
+        true,
+      ),
+    );
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
@@ -157,7 +165,11 @@ describe('mutation invalidation contracts — real hooks', () => {
       result.current.mutate({ email: 'a@b.com', role: 'member' });
     });
 
-    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+    await waitFor(() =>
+      expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(
+        true,
+      ),
+    );
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));
@@ -175,7 +187,11 @@ describe('mutation invalidation contracts — real hooks', () => {
       result.current.mutate('inv-1');
     });
 
-    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+    await waitFor(() =>
+      expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(
+        true,
+      ),
+    );
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));
@@ -193,7 +209,11 @@ describe('mutation invalidation contracts — real hooks', () => {
       result.current.mutate('tok-abc');
     });
 
-    await waitFor(() => expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(true));
+    await waitFor(() =>
+      expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(
+        true,
+      ),
+    );
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.all }));

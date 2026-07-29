@@ -1,8 +1,9 @@
 package telemetry
 
 import (
-	"github.com/jtumidanski/myfleet/packages/shared-go/config"
 	"github.com/sirupsen/logrus"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/config"
 )
 
 // NewLogger returns a JSON structured logger; level from LOG_LEVEL.

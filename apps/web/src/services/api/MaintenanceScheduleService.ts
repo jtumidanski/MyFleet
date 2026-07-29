@@ -41,10 +41,7 @@ class MaintenanceScheduleService extends BaseService<
 
   /** POST /api/fleet/vehicles/{vehicleId}/maintenance-schedules */
   createForVehicle(vehicleId: string, attributes: CreateMaintenanceScheduleAttributes) {
-    return this.createAt(
-      `/api/fleet/vehicles/${vehicleId}/maintenance-schedules`,
-      attributes,
-    );
+    return this.createAt(`/api/fleet/vehicles/${vehicleId}/maintenance-schedules`, attributes);
   }
 
   /** POST /api/fleet/maintenance-schedules/{id}/complete */

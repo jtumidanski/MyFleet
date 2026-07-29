@@ -7,7 +7,6 @@ import (
 )
 
 type fakeProvider struct {
-	byID  map[string]Model
 	bySub map[string]Model
 }
 

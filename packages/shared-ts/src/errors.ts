@@ -24,7 +24,13 @@ export function createErrorFromUnknown(e: unknown): ApiError {
   const env = e as EnvelopeShape;
   const first = env?.body?.errors?.[0];
   if (first) {
-    return new ApiError(env.status ?? Number(first.status) ?? 0, first.code, first.title, first.detail, first.source?.pointer);
+    return new ApiError(
+      env.status ?? Number(first.status) ?? 0,
+      first.code,
+      first.title,
+      first.detail,
+      first.source?.pointer,
+    );
   }
   if (e instanceof Error) return new ApiError(0, 'unknown', e.message);
   return new ApiError(0, 'unknown', 'Unknown error');

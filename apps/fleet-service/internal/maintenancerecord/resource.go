@@ -63,7 +63,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			Vendor           string   `json:"vendor"`
 			Notes            string   `json:"notes"`
 			DocumentMediaIDs []string `json:"documentMediaIds"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			vehicleID := chi.URLParam(req, "id")
 
@@ -142,7 +143,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			Cost        *float64 `json:"cost"`
 			Vendor      *string  `json:"vendor"`
 			Notes       *string  `json:"notes"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			current, err := proc.GetByID(id)

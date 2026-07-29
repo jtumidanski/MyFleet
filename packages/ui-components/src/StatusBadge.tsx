@@ -8,5 +8,9 @@ const VARIANT: Record<VehicleStatus, string> = {
 };
 
 export function StatusBadge({ status }: { status: VehicleStatus }) {
-  return <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${VARIANT[status]}`}>{status}</span>;
+  return (
+    <span className={`inline-flex rounded px-2 py-0.5 text-xs font-medium ${VARIANT[status]}`}>
+      {status}
+    </span>
+  );
 }

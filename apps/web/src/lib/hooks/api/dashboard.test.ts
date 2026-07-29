@@ -13,7 +13,10 @@
  */
 import { describe, it, expect } from 'vitest';
 import { dashboardKeys } from './dashboard';
-import { widgetManifest, WIDGET_CATALOG } from '../../../components/features/dashboard/widgetManifest';
+import {
+  widgetManifest,
+  WIDGET_CATALOG,
+} from '../../../components/features/dashboard/widgetManifest';
 
 // ---------------------------------------------------------------------------
 // dashboardKeys hierarchy

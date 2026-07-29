@@ -31,8 +31,7 @@ export function MileageSparkline({
   // Sort chronologically (backend returns chronological order, but sort defensively)
   const sorted = [...records].sort(
     (a, b) =>
-      new Date(a.attributes.recordedAt).getTime() -
-      new Date(b.attributes.recordedAt).getTime(),
+      new Date(a.attributes.recordedAt).getTime() - new Date(b.attributes.recordedAt).getTime(),
   );
 
   const times = sorted.map((r) => new Date(r.attributes.recordedAt).getTime());
@@ -78,15 +77,7 @@ export function MileageSparkline({
       {/* Dots at each data point */}
       {points.map((pt, i) => {
         const [x, y] = pt.split(',').map(Number);
-        return (
-          <circle
-            key={i}
-            cx={x}
-            cy={y}
-            r={2.5}
-            className="fill-primary"
-          />
-        );
+        return <circle key={i} cx={x} cy={y} r={2.5} className="fill-primary" />;
       })}
     </svg>
   );

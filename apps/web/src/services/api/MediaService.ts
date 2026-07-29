@@ -1,9 +1,6 @@
 import type { JsonApiDocument, JsonApiResource } from '@myfleet/shared-ts';
 import { apiClient } from '../../lib/api/client';
-import type {
-  MediaObjectAttributes,
-  InitMediaUploadAttributes,
-} from '../../types/models/media';
+import type { MediaObjectAttributes, InitMediaUploadAttributes } from '../../types/models/media';
 
 /**
  * Media service — wraps the media-service endpoints (gateway prefix /api/media).
@@ -24,14 +21,15 @@ class MediaService {
   async initUpload(
     attrs: InitMediaUploadAttributes,
   ): Promise<JsonApiResource<MediaObjectAttributes>> {
-    const doc = await apiClient.request<
-      JsonApiDocument<JsonApiResource<MediaObjectAttributes>>
-    >(this.basePath, {
-      method: 'POST',
-      body: JSON.stringify({
-        data: { type: 'media-objects', attributes: attrs },
-      }),
-    });
+    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MediaObjectAttributes>>>(
+      this.basePath,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          data: { type: 'media-objects', attributes: attrs },
+        }),
+      },
+    );
     return doc.data;
   }
 
@@ -52,20 +50,21 @@ class MediaService {
 
   /** POST /api/media/{id}/confirm — move from uploaded → processing. */
   async confirm(id: string): Promise<JsonApiResource<MediaObjectAttributes>> {
-    const doc = await apiClient.request<
-      JsonApiDocument<JsonApiResource<MediaObjectAttributes>>
-    >(`${this.basePath}/${id}/confirm`, {
-      method: 'POST',
-      body: JSON.stringify({ data: { type: 'media-objects', id, attributes: {} } }),
-    });
+    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MediaObjectAttributes>>>(
+      `${this.basePath}/${id}/confirm`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ data: { type: 'media-objects', id, attributes: {} } }),
+      },
+    );
     return doc.data;
   }
 
   /** GET /api/media/{id} — poll for status (uploaded → processing → ready). */
   async get(id: string): Promise<JsonApiResource<MediaObjectAttributes>> {
-    const doc = await apiClient.request<
-      JsonApiDocument<JsonApiResource<MediaObjectAttributes>>
-    >(`${this.basePath}/${id}`);
+    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MediaObjectAttributes>>>(
+      `${this.basePath}/${id}`,
+    );
     return doc.data;
   }
 
@@ -74,9 +73,9 @@ class MediaService {
    * attributes.downloadUrl. Use downloadUrl as the <img src>.
    */
   async getDownloadUrl(id: string): Promise<JsonApiResource<MediaObjectAttributes>> {
-    const doc = await apiClient.request<
-      JsonApiDocument<JsonApiResource<MediaObjectAttributes>>
-    >(`${this.basePath}/${id}/download`);
+    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MediaObjectAttributes>>>(
+      `${this.basePath}/${id}/download`,
+    );
     return doc.data;
   }
 

@@ -37,7 +37,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 		r.Put("/notification-preferences", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			Type         string `json:"type"`
 			InAppEnabled *bool  `json:"inAppEnabled"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			if identity.UserID == "" {
 				server.WriteError(w, server.ErrUnauthorized)

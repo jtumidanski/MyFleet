@@ -1,7 +1,6 @@
 package mediaobject
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -298,14 +297,3 @@ func TestConfirm_outboxRollsBackOnEnqueueError(t *testing.T) {
 		t.Fatalf("after rollback want 0 outbox rows, got %d", len(rows))
 	}
 }
-
-// fakePresigner satisfies the Presigner interface for Processor unit tests.
-type fakePresigner struct{ bucket string }
-
-func (f *fakePresigner) PresignPut(_ context.Context, _ string, _ time.Duration) (string, error) {
-	return "https://presign-put", nil
-}
-func (f *fakePresigner) PresignGet(_ context.Context, _ string, _ time.Duration) (string, error) {
-	return "https://presign-get", nil
-}
-func (f *fakePresigner) Bucket() string { return f.bucket }

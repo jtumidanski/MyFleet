@@ -54,7 +54,9 @@ describe('RequireAuth', () => {
   });
 
   it('renders children when authenticated with an active fleet', () => {
-    mockAuth.mockReturnValue(baseAuth({ isAuthenticated: true, activeFleetId: 'f1', role: 'owner' }));
+    mockAuth.mockReturnValue(
+      baseAuth({ isAuthenticated: true, activeFleetId: 'f1', role: 'owner' }),
+    );
     renderGuarded('/');
     expect(screen.getByText('protected content')).toBeInTheDocument();
   });

@@ -9,7 +9,7 @@ import (
 
 func TestActive_parsesFleetAndRole(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"fleet_id":"f1","role":"owner"}`))
+		_, _ = w.Write([]byte(`{"fleet_id":"f1","role":"owner"}`))
 	}))
 	defer srv.Close()
 	c := NewClient(srv.URL)

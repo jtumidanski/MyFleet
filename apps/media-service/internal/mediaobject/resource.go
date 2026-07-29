@@ -6,9 +6,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
 
+	"gorm.io/gorm"
+
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
-	"gorm.io/gorm"
 )
 
 // requireWrite allows member|owner; viewer is read-only (403). media-service
@@ -30,7 +31,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st Presigner) func(ch
 		r.Post("/media", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			ContentType      string `json:"contentType"`
 			OriginalFilename string `json:"originalFilename"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			if identity.ActiveFleetID == "" {
 				server.WriteError(w, server.ErrForbidden)

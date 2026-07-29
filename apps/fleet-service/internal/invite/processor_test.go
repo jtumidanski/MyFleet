@@ -23,12 +23,14 @@ func (s *stubProvider) GetByID(id string) (Model, error) {
 	}
 	return Model{}, ErrNotFound
 }
+
 func (s *stubProvider) GetByToken(token string) (Model, error) {
 	if m, ok := s.byToken[token]; ok {
 		return m, nil
 	}
 	return Model{}, ErrNotFound
 }
+
 func (s *stubProvider) ListByFleetID(fleetID string) ([]Model, error) {
 	return s.byFleet[fleetID], nil
 }

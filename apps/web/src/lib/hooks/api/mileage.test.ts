@@ -6,11 +6,7 @@ describe('mileageKeys', () => {
   it('is hierarchical', () => {
     expect(mileageKeys.all).toEqual(['mileage']);
     expect(mileageKeys.lists()).toEqual(['mileage', 'list']);
-    expect(mileageKeys.list({ vehicleId: 'v1' })).toEqual([
-      'mileage',
-      'list',
-      { vehicleId: 'v1' },
-    ]);
+    expect(mileageKeys.list({ vehicleId: 'v1' })).toEqual(['mileage', 'list', { vehicleId: 'v1' }]);
     expect(mileageKeys.list({ vehicleId: 'v1', from: '2024-01-01T00:00:00Z' })).toEqual([
       'mileage',
       'list',
