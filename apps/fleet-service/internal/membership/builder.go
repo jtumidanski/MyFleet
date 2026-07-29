@@ -5,6 +5,12 @@ import "github.com/google/uuid"
 // validRoles is the allowed set of membership roles.
 var validRoles = map[string]bool{"owner": true, "member": true, "viewer": true}
 
+// IsValidRole reports whether role is one of the roles this domain recognises.
+// Membership owns the role vocabulary, so callers that accept a role from
+// user input (invite creation) validate through here rather than duplicating
+// the set.
+func IsValidRole(role string) bool { return validRoles[role] }
+
 // Builder constructs a Membership model. Build() returns Model (no error)
 // because callers always supply validated role values from constants; the
 // role validation is enforced in the administrator layer before calling Build.

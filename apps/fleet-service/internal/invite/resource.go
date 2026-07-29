@@ -16,6 +16,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 )
 
 const defaultExpiry = 7 * 24 * time.Hour
@@ -38,7 +39,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Post("/fleets/{id}/invites", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			Email string `json:"email"`
 			Role  string `json:"role"`
-		}) {
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
 
@@ -57,7 +59,11 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			if attrs.Email == "" || attrs.Role == "" {
+			// Role is copied verbatim onto the membership created at accept
+			// time, so an unrecognised value would mint a membership whose
+			// role no authz gate understands. Validate against the vocabulary
+			// membership owns.
+			if attrs.Email == "" || !membership.IsValidRole(attrs.Role) {
 				server.WriteError(w, server.ErrValidation)
 				return
 			}

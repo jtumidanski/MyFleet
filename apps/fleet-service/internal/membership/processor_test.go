@@ -76,3 +76,20 @@ func TestRequireOwnerInFleet_okWhenOwner(t *testing.T) {
 		t.Fatalf("owner must pass, got %v", err)
 	}
 }
+
+// IsValidRole guards the role vocabulary at the one place a role reaches the
+// system from user input: invite creation. An unrecognised value would be
+// copied verbatim onto the membership created at accept time, producing a
+// membership whose role no authz gate understands.
+func TestIsValidRole(t *testing.T) {
+	for _, role := range []string{"owner", "member", "viewer"} {
+		if !IsValidRole(role) {
+			t.Errorf("%q must be a valid role", role)
+		}
+	}
+	for _, role := range []string{"", "admin", "Owner", "superuser", "owner "} {
+		if IsValidRole(role) {
+			t.Errorf("%q must be rejected", role)
+		}
+	}
+}
