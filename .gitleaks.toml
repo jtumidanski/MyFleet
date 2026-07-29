@@ -14,6 +14,16 @@ paths = [
   # but skip the binary dist artifacts if they were ever committed
   '''dist/.*''',
   '''node_modules/.*''',
+  # Template env files hold documented placeholders by design (empty values,
+  # vendor defaults like minioadmin, and *-change-me strings). Real .env files
+  # are gitignored and still scanned by the rules below.
+  '''.*\.env\.example$''',
+]
+regexes = [
+  # GitHub Actions secret references — placeholders, not real values
+  '''\$\{\{\s*secrets\.[A-Z_]+\s*\}\}''',
+  # Renovate/CI placeholder strings
+  '''(your[_-]?secret|changeme|replace[_-]?me|TODO|FIXME)''',
 ]
 
 # Scan these path patterns explicitly (coverage assertion for reviewers)
@@ -41,9 +51,3 @@ regex = '''(?i)(secret|password|passwd|api[_-]?key|token|jwt)[^\n]{0,40}:\s*['"]
 path = '''.*\.(yml|yaml)'''
 tags = ["yaml", "secret"]
 severity = "HIGH"
-
-[allowlist.regexes]
-# Allow GitHub Actions secret references — these are placeholders, not real values
-"github-actions-secret-ref" = '''\$\{\{\s*secrets\.[A-Z_]+\s*\}\}'''
-# Allow Renovate/CI placeholder strings
-"placeholder-value" = '''(your[_-]?secret|changeme|replace[_-]?me|TODO|FIXME)'''
