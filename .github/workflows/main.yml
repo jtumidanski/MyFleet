@@ -82,6 +82,9 @@ jobs:
     needs: publish
     runs-on: ubuntu-latest
     strategy:
+      # Scan every service even when one fails — fail-fast cancels the siblings
+      # and hides their findings until the first failure is fixed.
+      fail-fast: false
       matrix:
         service: [auth-service, fleet-service, media-service, notification-service]
     steps:
