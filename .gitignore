@@ -10,6 +10,7 @@ node_modules/
 dist/
 # Env / secrets
 .env
+.envrc
 *.local
 # MinIO/data
 deploy/compose/data/
