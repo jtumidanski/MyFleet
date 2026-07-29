@@ -505,3 +505,55 @@ Post-deploy, on bee:
 
 - Cloudflare DNS record; Pi-hole DNS record; Google Cloud Console redirect URI;
   Postgres DDL; MinIO bucket, user and policy; four Kubernetes Secrets
+
+---
+
+## 10. Amendments
+
+### A1 — Media bytes are proxied through media-service (approved during planning)
+
+Found while writing `plan.md`: §4.3's move of `MINIO_ENDPOINT` to
+`minio.minio.svc.cluster.local:9000` is incompatible with the presigned-URL
+upload flow this design left in place.
+
+- `POST /api/media` presigns a PUT URL built from `MINIO_ENDPOINT`
+  (`apps/media-service/internal/storage/minio.go:106-107`).
+- The browser PUTs the bytes straight to that URL
+  (`apps/web/src/services/api/MediaService.ts:37-41`).
+- `minio.minio.svc.cluster.local` does not resolve in a browser, and the S3 v4
+  signature covers the `Host` header, so the URL cannot be rewritten client-side.
+
+As designed, uploads and thumbnails both fail and §8's "a media upload lands an
+object in the `myfleet-media` bucket" cannot pass.
+
+**Decision: proxy the bytes through media-service. Do not expose MinIO
+publicly** — neither on its own hostname nor on a path under the MyFleet hosts,
+because the shared MinIO also holds the `atlas-*` buckets and proxying the S3
+API would expose that surface as well.
+
+Changes this makes to the sections above:
+
+| Section | Amendment |
+|---|---|
+| §4.3 | Adds `MEDIA_MAX_UPLOAD_BYTES` (default `26214400` = 25 MiB) to the media-service config. `MINIO_ENDPOINT` stays internal, so server-side S3 traffic never leaves the cluster. |
+| §4.4 | Unaffected — no topic or consumer-group changes. |
+| §7 | The Cloudflare body-size note is no longer hypothetical: uploads now traverse the edge. The service returns `413` at its own limit; the edge rejects earlier. |
+| §8 | Post-deploy media-upload check stands, and now can actually pass. |
+| §9 | Adds `apps/media-service` (new content routes, presign plumbing deleted), `packages/shared-ts` (`ApiClient.requestBlob`), and `apps/web` (proxied upload + object-URL thumbnails) to the MyFleet-repo deliverables. |
+
+New API surface, replacing the presigned flow:
+
+- `PUT /api/media/{id}/content` — streams the body to object storage under the
+  `MEDIA_MAX_UPLOAD_BYTES` bound. Content type comes from the row created at
+  init, never from the request.
+- `GET /api/media/{id}/content` — streams the bytes after fleet authorization.
+- Removed: `GET /api/media/{id}/download`, `attributes.uploadUrl`,
+  `attributes.downloadUrl`, `storage.Client.PresignPut`/`PresignGet`.
+
+One non-obvious consequence: MyFleet authenticates with an `Authorization:
+Bearer` header rather than a session cookie, and browsers do not attach that
+header to `<img src>` requests. Thumbnails therefore fetch their bytes through
+the API client and render an object URL, which is why this amendment also touches
+`packages/shared-ts`.
+
+Implementation lands in `plan.md` Tasks 3–6.
