@@ -1,2 +1,20 @@
 # Task worktrees (siblings of the main repo, created by /spec-task)
 .worktrees/
+
+# Go
+*.test
+*.out
+bin/
+# Pinned lint tooling downloaded by tools/lint.sh
+.cache/
+# Node
+node_modules/
+dist/
+# Env / secrets
+.env
+.envrc
+*.local
+# MinIO/data
+deploy/compose/data/
+# Local-only compose overrides (e.g. host-port remaps for machine-specific collisions)
+deploy/compose/docker-compose.*.yml

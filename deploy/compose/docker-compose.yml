@@ -1,0 +1,213 @@
+name: myfleet
+services:
+  traefik:
+    image: traefik:v3.1
+    command: --configFile=/etc/traefik/traefik.yml
+    ports: ["80:80", "8081:8080"]
+    volumes:
+      - ./traefik:/etc/traefik:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports: ["5432:5432"]
+    volumes:
+      - ./data/pg:/var/lib/postgresql/data
+      - ./init-schemas.sql:/docker-entrypoint-initdb.d/init-schemas.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports: ["9000:9000", "9001:9001"]
+    volumes:
+      - ./data/minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || curl -fsS http://localhost:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redpanda:
+    image: redpandadata/redpanda:latest
+    command:
+      - redpanda start
+      - --smp 1
+      - --overprovisioned
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:9092
+    ports: ["9092:9092"]
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health -X brokers=localhost:9092 | grep -q 'Healthy:.*true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  auth-service:
+    build:
+      context: ../..
+      dockerfile: apps/auth-service/Dockerfile
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWKS_URL: http://auth-service:8080/.well-known/jwks.json
+      FLEET_SERVICE_URL: http://fleet-service:8080
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_AUDIENCE: ${JWT_AUDIENCE}
+      JWT_KID: ${JWT_KID:-kid-1}
+      JWT_PRIVATE_KEY_PEM: ${JWT_PRIVATE_KEY_PEM}
+      OIDC_STATE_SECRET: ${OIDC_STATE_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    labels:
+      - "traefik.enable=true"
+      # Route /api/auth/* to this service and strip the /api/auth prefix so the
+      # service sees its own /auth/* (and /.well-known/jwks.json) routes.
+      - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth.entrypoints=web"
+      - "traefik.http.routers.auth.middlewares=auth-stripprefix"
+      - "traefik.http.middlewares.auth-stripprefix.stripprefix.prefixes=/api/auth"
+      - "traefik.http.services.auth.loadbalancer.server.port=8080"
+
+  fleet-service:
+    build:
+      context: ../..
+      dockerfile: apps/fleet-service/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWKS_URL: http://auth-service:8080/.well-known/jwks.json
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    labels:
+      - "traefik.enable=true"
+      # Route /api/fleet/* to this service and strip the /api/fleet prefix so
+      # the service sees bare paths (/fleets, /invites, /internal/...).
+      - "traefik.http.routers.fleet.rule=PathPrefix(`/api/fleet`)"
+      - "traefik.http.routers.fleet.entrypoints=web"
+      - "traefik.http.routers.fleet.middlewares=fleet-stripprefix"
+      - "traefik.http.middlewares.fleet-stripprefix.stripprefix.prefixes=/api/fleet"
+      - "traefik.http.services.fleet.loadbalancer.server.port=8080"
+
+  media-service:
+    build:
+      context: ../..
+      dockerfile: apps/media-service/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWKS_URL: http://auth-service:8080/.well-known/jwks.json
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_USE_SSL: "false"
+      MEDIA_BUCKET: ${MEDIA_BUCKET}
+      MEDIA_WORKERS: ${MEDIA_WORKERS:-2}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      # Route /api/media/* to this service and strip the /api/media prefix so
+      # the service sees bare paths (/media, /media/{id}/confirm, ...).
+      - "traefik.http.routers.media.rule=PathPrefix(`/api/media`)"
+      - "traefik.http.routers.media.entrypoints=web"
+      - "traefik.http.routers.media.middlewares=media-stripprefix"
+      - "traefik.http.middlewares.media-stripprefix.stripprefix.prefixes=/api/media"
+      - "traefik.http.services.media.loadbalancer.server.port=8080"
+
+  notification-service:
+    build:
+      context: ../..
+      dockerfile: apps/notification-service/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWKS_URL: http://auth-service:8080/.well-known/jwks.json
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      FLEET_INTERNAL_URL: http://fleet-service:8080
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      fleet-service:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      # Route /api/notifications/* to this service and strip the prefix so the
+      # service sees bare paths (/notifications, /notification-preferences, ...).
+      - "traefik.http.routers.notifications.rule=PathPrefix(`/api/notifications`)"
+      - "traefik.http.routers.notifications.entrypoints=web"
+      - "traefik.http.routers.notifications.middlewares=notifications-stripprefix"
+      - "traefik.http.middlewares.notifications-stripprefix.stripprefix.prefixes=/api/notifications"
+      - "traefik.http.services.notifications.loadbalancer.server.port=8080"
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - auth-service
+      - fleet-service
+      - media-service
+      - notification-service
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/ >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    labels:
+      - "traefik.enable=true"
+      # Catch-all for the SPA at the root path. Low priority so the more
+      # specific /api/* PathPrefix routers (auth/fleet/media/notifications)
+      # always win; only paths they don't match fall through to the SPA,
+      # whose nginx serves index.html for client-side routing.
+      - "traefik.http.routers.web.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.web.entrypoints=web"
+      - "traefik.http.routers.web.priority=1"
+      - "traefik.http.services.web.loadbalancer.server.port=80"

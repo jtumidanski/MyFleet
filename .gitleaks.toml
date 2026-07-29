@@ -1,0 +1,53 @@
+# Gitleaks configuration for MyFleet
+# Extends the default ruleset and scans source code, YAML/env configs, Dockerfiles, and workflow files.
+
+title = "MyFleet Gitleaks Config"
+
+[extend]
+# Use the upstream default rules as the base
+useDefault = true
+
+[allowlist]
+description = "Global allowlists"
+paths = [
+  # lock files and generated assets can be noisy; still scan them
+  # but skip the binary dist artifacts if they were ever committed
+  '''dist/.*''',
+  '''node_modules/.*''',
+  # Template env files hold documented placeholders by design (empty values,
+  # vendor defaults like minioadmin, and *-change-me strings). Real .env files
+  # are gitignored and still scanned by the rules below.
+  '''.*\.env\.example$''',
+]
+regexes = [
+  # GitHub Actions secret references — placeholders, not real values
+  '''\$\{\{\s*secrets\.[A-Z_]+\s*\}\}''',
+  # Renovate/CI placeholder strings
+  '''(your[_-]?secret|changeme|replace[_-]?me|TODO|FIXME)''',
+]
+
+# Scan these path patterns explicitly (coverage assertion for reviewers)
+# gitleaks scans the entire git tree by default; these patterns are informational.
+# - apps/**/*.go      — Go source
+# - packages/**/*.go  — shared Go packages
+# - apps/**/*.env*    — env config files
+# - **/*.yml          — YAML (compose, CI, k8s manifests)
+# - **/*.yaml         — YAML (alternate extension)
+# - **/Dockerfile*    — Dockerfiles
+# - .github/**        — workflow files
+
+[[rules]]
+id = "myfleet-env-generic-secret"
+description = "Generic secret in .env files"
+regex = '''(?i)(secret|password|passwd|api[_-]?key|token|auth)[^\n]{0,40}=\s*[^\s]{8,}'''
+path = '''.*\.env.*'''
+tags = ["env", "secret"]
+severity = "CRITICAL"
+
+[[rules]]
+id = "myfleet-yaml-secret"
+description = "Potential secret value in YAML config"
+regex = '''(?i)(secret|password|passwd|api[_-]?key|token|jwt)[^\n]{0,40}:\s*['"]?[A-Za-z0-9/+=]{16,}['"]?'''
+path = '''.*\.(yml|yaml)'''
+tags = ["yaml", "secret"]
+severity = "HIGH"

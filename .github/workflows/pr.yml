@@ -1,0 +1,104 @@
+name: pr
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Vet
+        run: make vet
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+  # tools/lint.sh --check is the single source of truth for both formatting
+  # (gofumpt + goimports) and linting (golangci-lint `standard` group). These
+  # jobs mirror what developers run locally; both are enforced tree-wide
+  # against a zero-finding baseline. gofmt is subsumed by the formatter layer.
+  lint-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Cache lint tooling
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/golangci-lint
+            .cache/tools/bin
+          key: lint-tools-${{ runner.os }}-${{ hashFiles('tools/lint.versions') }}
+
+      - name: Lint & format guard (Go)
+        run: ./tools/lint.sh --check --go
+
+  lint-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint & format guard (web)
+        run: ./tools/lint.sh --check --web
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm run -w @myfleet/web test
+
+      - name: Build
+        run: npm run -w @myfleet/web build
+
+  containers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, fleet-service, media-service, notification-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ${{ matrix.service }} image
+        run: docker build -f apps/${{ matrix.service }}/Dockerfile -t myfleet-${{ matrix.service }}:ci .
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

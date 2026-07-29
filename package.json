@@ -1,0 +1,20 @@
+{
+  "name": "myfleet",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "apps/web",
+    "packages/shared-ts",
+    "packages/ui-components"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --write \"apps/web/src/**/*.{ts,tsx,css}\" \"apps/web/*.{ts,js}\" \"packages/shared-ts/src/**/*.{ts,tsx}\" \"packages/ui-components/src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"apps/web/src/**/*.{ts,tsx,css}\" \"apps/web/*.{ts,js}\" \"packages/shared-ts/src/**/*.{ts,tsx}\" \"packages/ui-components/src/**/*.{ts,tsx}\""
+  },
+  "devDependencies": {
+    "prettier": "3.9.6"
+  }
+}

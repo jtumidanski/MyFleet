@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fleet-service-config
+  namespace: myfleet
+data:
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  JWKS_URL: "http://auth-service:8080/.well-known/jwks.json"
+  KAFKA_BROKERS: "redpanda:9092"

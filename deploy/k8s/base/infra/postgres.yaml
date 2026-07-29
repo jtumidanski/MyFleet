@@ -1,0 +1,122 @@
+---
+# PostgreSQL init SQL — creates per-service schemas
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-sql
+  namespace: myfleet
+data:
+  init-schemas.sql: |
+    CREATE SCHEMA IF NOT EXISTS auth;
+    CREATE SCHEMA IF NOT EXISTS fleet;
+    CREATE SCHEMA IF NOT EXISTS media;
+    CREATE SCHEMA IF NOT EXISTS notification;
+
+---
+# PostgreSQL Secrets — PLACEHOLDER VALUES
+# Inject real values at deploy time via:
+#   kubectl create secret generic postgres-secret \
+#     --from-literal=POSTGRES_USER='...' \
+#     --from-literal=POSTGRES_PASSWORD='...' \
+#     --from-literal=POSTGRES_DB='myfleet' \
+#     --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-secret
+  namespace: myfleet
+type: Opaque
+stringData:
+  POSTGRES_USER: "PLACEHOLDER_POSTGRES_USER"
+  POSTGRES_PASSWORD: "PLACEHOLDER_POSTGRES_PASSWORD"
+  POSTGRES_DB: "myfleet"
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: myfleet
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: myfleet
+  labels:
+    app: postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          envFrom:
+            - secretRef:
+                name: postgres-secret
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "$(POSTGRES_USER)"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: init-sql
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+        - name: init-sql
+          configMap:
+            name: postgres-init-sql
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: myfleet
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres

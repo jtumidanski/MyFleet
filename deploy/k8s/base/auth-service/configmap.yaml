@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+  namespace: myfleet
+data:
+  APP_BASE_URL: "http://localhost"
+  PORT: "8080"
+  LOG_LEVEL: "info"
+  JWT_ISSUER: "https://myfleet.example.com"
+  JWT_AUDIENCE: "myfleet"
+  JWT_KID: "kid-1"
+  GOOGLE_REDIRECT_URL: "http://localhost/api/auth/auth/google/callback"
+  FLEET_SERVICE_URL: "http://fleet-service:8080"
+  COOKIE_SECURE: "false"

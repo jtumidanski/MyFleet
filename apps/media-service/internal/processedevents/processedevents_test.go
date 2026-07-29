@@ -1,0 +1,96 @@
+package processedevents
+
+import (
+	"testing"
+
+	"github.com/sirupsen/logrus"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+)
+
+func newTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	// The entity's TableName is schema-qualified (media.processed_events) for
+	// Postgres. SQLite has no schemas, so attach an in-memory database aliased
+	// "media" to make the qualified name resolve in the test.
+	if err := db.Exec("ATTACH DATABASE ':memory:' AS media").Error; err != nil {
+		t.Fatalf("attach media schema: %v", err)
+	}
+	if err := db.AutoMigrate(&Entity{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	return db
+}
+
+func TestExists(t *testing.T) {
+	db := newTestDB(t)
+	store := New(logrus.New(), db)
+
+	// Unknown event must not exist.
+	exists, err := store.Exists("evt-unknown")
+	if err != nil {
+		t.Fatalf("Exists on unknown event: %v", err)
+	}
+	if exists {
+		t.Fatal("Exists must return false for an unrecorded event")
+	}
+
+	// Record the event via MarkProcessed.
+	if _, err := store.MarkProcessed("evt-known"); err != nil {
+		t.Fatalf("MarkProcessed: %v", err)
+	}
+
+	// Now Exists must return true.
+	exists, err = store.Exists("evt-known")
+	if err != nil {
+		t.Fatalf("Exists after MarkProcessed: %v", err)
+	}
+	if !exists {
+		t.Fatal("Exists must return true for a recorded event")
+	}
+
+	// A different event is still unknown.
+	exists, err = store.Exists("evt-other")
+	if err != nil {
+		t.Fatalf("Exists on different event: %v", err)
+	}
+	if exists {
+		t.Fatal("Exists must return false for a different unrecorded event")
+	}
+}
+
+func TestMarkProcessed_idempotent(t *testing.T) {
+	db := newTestDB(t)
+	store := New(logrus.New(), db)
+
+	// First mark: not previously processed.
+	already, err := store.MarkProcessed("evt-1")
+	if err != nil {
+		t.Fatalf("first mark: %v", err)
+	}
+	if already {
+		t.Fatal("first mark must report alreadyProcessed=false")
+	}
+
+	// Second mark of the same event: reported as already processed.
+	already, err = store.MarkProcessed("evt-1")
+	if err != nil {
+		t.Fatalf("second mark: %v", err)
+	}
+	if !already {
+		t.Fatal("re-processing the same event must report alreadyProcessed=true")
+	}
+
+	// A different event is fresh.
+	already, err = store.MarkProcessed("evt-2")
+	if err != nil {
+		t.Fatalf("third mark: %v", err)
+	}
+	if already {
+		t.Fatal("a new event must report alreadyProcessed=false")
+	}
+}
