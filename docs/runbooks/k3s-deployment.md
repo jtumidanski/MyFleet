@@ -243,20 +243,32 @@ curl -H 'Host: myfleet.home' http://192.168.23.230/ -o /dev/null -w '%{http_code
 curl -H 'Host: myfleet.home' http://192.168.23.230/vehicles -o /dev/null -w '%{http_code}\n'
 curl -H 'Host: myfleet.home' --path-as-is \
   http://192.168.23.230/api/fleet/internal/maintenance/due -o /dev/null -w '%{http_code}\n'
+curl -H 'Host: myfleet.home' --path-as-is \
+  http://192.168.23.230/api/fleetinternal/maintenance/due -o /dev/null -w '%{http_code}\n'
 ```
 
 Expected: all five Deployments `Available` with no `ImagePullBackOff`;
 AutoMigrate completes against the `auth` schema; `/api/fleet/healthz` returns
 200; `/` and the deep link `/vehicles` both return 200 — the deep link proves
-the catch-all priority is right; `/api/fleet/internal/...` returns **403** —
-that proves the `internal-deny` router is in front of the `/api/fleet` router.
+the catch-all priority is right; both `/api/fleet/internal/...` and
+`/api/fleetinternal/...` return **403**. The second is not redundant: it has
+no `/` between `fleet` and `internal`, which is exactly the shape a
+mandatory-slash edit to the deny regex's `[^/]*/*` would stop catching, since
+`fleet-stripprefix` strips the literal string `/api/fleet` rather than a path
+segment.
 
-A 200 there is a security incident, not a cosmetic bug: fleet-service's
+A 200 on either is a security incident, not a cosmetic bug: fleet-service's
 `/internal/*` routes carry no JWT, and `/internal/maintenance/due` returns every
-non-ok maintenance schedule across every fleet with no parameters at all. If it
-returns 200, check that the `internal-deny` Middleware exists in the `myfleet`
-namespace (`kubectl -n myfleet get middleware internal-deny`) and that the
-deny route still has a higher `priority` than the `/api/fleet` route.
+non-ok maintenance schedule across every fleet with no parameters at all. These
+two checks are not optional: the control fails open — if the `internal-deny`
+Middleware object is missing while the IngressRoute still exists (first Argo
+CD sync ordering, or a partial prune), Traefik logs that the middleware
+doesn't exist and disables the whole router rather than just refusing
+traffic, so the request falls through to the priority-100 `/api/fleet` route
+and comes back 200 with the same unauthenticated cross-fleet dump. If either
+curl returns 200, check that the `internal-deny` Middleware exists in the
+`myfleet` namespace (`kubectl -n myfleet get middleware internal-deny`) and
+that the deny route still has a higher `priority` than the `/api/fleet` route.
 
 Then, in a browser on `https://myfleet.tumidanski.com`:
 
