@@ -140,8 +140,17 @@ jobs:
 
   # ── Bump the deployed image SHAs ──────────────────────────────────────────────
   bump-overlay:
-    needs: publish
+    needs: [publish, trivy]
     runs-on: ubuntu-latest
+    # Serialize bump-overlay across overlapping runs (e.g. two merges to main in
+    # quick succession) so a later run's push can never be undone by an earlier
+    # run finishing after it. Scoped to this job, not the whole workflow, so
+    # build-test/publish/trivy for different commits can still run in parallel —
+    # only the overlay-pinning push needs to be a single queue. Never cancel a
+    # queued/running bump: cancelling mid-push risks a half-written commit.
+    concurrency:
+      group: bump-overlay
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -150,6 +159,16 @@ jobs:
       - name: Pin overlay images to this commit
         run: |
           set -euo pipefail
+          # Stale-run guard: main may have moved past the commit this run built
+          # if a later merge's bump-overlay already landed while this run was
+          # still going through build-test/publish/trivy. Rewriting to this
+          # run's (older) SHA would roll the overlay backwards while every step
+          # still stays green, so bail out loudly instead of pinning stale bits.
+          tip="$(git rev-parse HEAD)"
+          if [ "$tip" != "${{ github.sha }}" ]; then
+            echo "main's tip is now $tip, not this run's ${{ github.sha }} — a newer push already landed (or will bump the overlay itself). Skipping to avoid rewriting the overlay to a stale SHA."
+            exit 0
+          fi
           f=deploy/k8s/overlays/main/kustomization.yaml
           # Rewrite every `newTag:` in the images block to this commit's SHA.
           # Argo CD then sees a real manifest diff and rolls the Deployments.
