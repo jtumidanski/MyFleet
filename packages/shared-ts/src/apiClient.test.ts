@@ -2,6 +2,59 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ApiClient } from './apiClient';
 import { ApiError } from './errors';
 
+describe('ApiClient.request', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function stubJsonFetch() {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { id: 'm1', type: 'media-objects', attributes: {} } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  function makeClient() {
+    return new ApiClient({
+      baseUrl: '',
+      getAccessToken: () => 'tok-123',
+      onRefresh: async () => null,
+    });
+  }
+
+  it('applies the JSON:API content type when the caller supplies none', async () => {
+    const fetchMock = stubJsonFetch();
+
+    await makeClient().request('/api/media/m1');
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/vnd.api+json');
+  });
+
+  it("lets a caller's Content-Type override the JSON:API default", async () => {
+    // This is the invariant the binary media PUT rests on
+    // (apps/web/src/services/api/MediaService.ts putContent): `init.headers` is
+    // spread last in fetchAuthenticated, so a caller-supplied Content-Type
+    // displaces `application/vnd.api+json`. Reordering that spread would send
+    // image bytes labelled as JSON:API.
+    const fetchMock = stubJsonFetch();
+
+    await makeClient().request('/api/media/m1/content', {
+      method: 'PUT',
+      body: new Blob(['bytes'], { type: 'image/jpeg' }),
+      headers: { 'Content-Type': 'image/jpeg' },
+    });
+
+    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('image/jpeg');
+    // The override must not cost the bearer token.
+    expect(headers.Authorization).toBe('Bearer tok-123');
+  });
+});
+
 describe('ApiClient.requestBlob', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
