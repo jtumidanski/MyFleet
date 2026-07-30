@@ -11,3 +11,4 @@ data:
   MINIO_USE_SSL: "false"
   MEDIA_BUCKET: "myfleet-media"
   MEDIA_WORKERS: "2"
+  MEDIA_MAX_UPLOAD_BYTES: "26214400"

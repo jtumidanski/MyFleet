@@ -1,12 +1,16 @@
 package mediaobject
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
@@ -295,5 +299,83 @@ func TestConfirm_outboxRollsBackOnEnqueueError(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("after rollback want 0 outbox rows, got %d", len(rows))
+	}
+}
+
+// fakeStore records what was written so the proxy path can be asserted without
+// a live MinIO.
+type fakeStore struct {
+	bucket  string
+	putKey  string
+	putBody []byte
+	putSize int64
+	putCT   string
+	putErr  error
+}
+
+func (f *fakeStore) Bucket() string { return f.bucket }
+
+func (f *fakeStore) PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
+	if f.putErr != nil {
+		return f.putErr
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	f.putKey, f.putBody, f.putSize, f.putCT = key, b, size, contentType
+	return nil
+}
+
+func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media"}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	body := []byte("jpeg-bytes")
+	updated, err := pr.StoreContent(context.Background(), created.ID(), "fleet-a", bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("store content: %v", err)
+	}
+
+	if store.putKey != created.ObjectKey() {
+		t.Fatalf("wrote to key %q, want %q", store.putKey, created.ObjectKey())
+	}
+	if string(store.putBody) != string(body) {
+		t.Fatalf("wrote body %q, want %q", store.putBody, body)
+	}
+	// The content type must come from the row created at init, not the request.
+	if store.putCT != "image/jpeg" {
+		t.Fatalf("wrote content-type %q, want image/jpeg", store.putCT)
+	}
+	if updated.Size() != int64(len(body)) {
+		t.Fatalf("size = %d, want %d", updated.Size(), len(body))
+	}
+	if updated.Status() != StatusUploaded {
+		t.Fatalf("status = %q, want uploaded (confirm does the transition)", updated.Status())
+	}
+}
+
+func TestStoreContent_crossFleetIs404(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media"}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	_, err = pr.StoreContent(context.Background(), created.ID(), "fleet-b", bytes.NewReader([]byte("x")), 1)
+	if !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("cross-fleet write must be 404, got %v", err)
+	}
+	if store.putKey != "" {
+		t.Fatalf("cross-fleet write must not touch storage, wrote key %q", store.putKey)
 	}
 }

@@ -86,6 +86,9 @@ func main() {
 	if workerCount < 1 {
 		workerCount = 1
 	}
+	// Cap proxied uploads. 25 MiB sits under Cloudflare's free-plan request-body
+	// ceiling, so the edge is not the first thing a user discovers.
+	maxUploadBytes := int64(config.GetInt("MEDIA_MAX_UPLOAD_BYTES", 26214400))
 	for i := 0; i < workerCount; i++ {
 		go worker.Run(ctx, brokers, "media-variant-workers")
 	}
@@ -118,7 +121,7 @@ func main() {
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
-				mediaobject.InitializeRoutes(log, db, store)(pr)
+				mediaobject.InitializeRoutes(log, db, store, maxUploadBytes)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {

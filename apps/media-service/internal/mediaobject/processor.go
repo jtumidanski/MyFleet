@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,14 +23,20 @@ import (
 // confirmed; the variant worker pool consumes it (design §7/§8.3).
 const EventTypeMediaUploaded = "media.uploaded"
 
-// presignTTL is the lifetime of presigned upload/download URLs (design §8.3).
+// presignTTL is the lifetime of the presigned GET URL DownloadURL still hands
+// out. Deliberately NOT part of ObjectStore (see below) — Task 4 replaces
+// DownloadURL and this constant with a proxied Content method, at which point
+// this goes away too.
 const presignTTL = 15 * time.Minute
 
-// Presigner is the subset of storage.Client the processor needs. Implemented by
-// *storage.Client; kept as an interface so the processor is unit-testable.
-type Presigner interface {
-	PresignPut(ctx context.Context, key string, ttl time.Duration) (string, error)
-	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
+// ObjectStore is the subset of storage.Client the processor needs. Implemented
+// by *storage.Client; kept as an interface so the processor is unit-testable.
+//
+// Bytes are proxied through this service rather than handed to the browser as
+// presigned URLs: MinIO is a shared cluster service that also holds other
+// applications' buckets, so it is never exposed outside the cluster.
+type ObjectStore interface {
+	PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
 	Bucket() string
 }
 
@@ -69,17 +76,17 @@ type Processor struct {
 	log     logrus.FieldLogger
 	p       Provider
 	a       Administrator
-	storage Presigner
+	storage ObjectStore
 }
 
-func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st Presigner) *Processor {
+func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore) *Processor {
 	return &Processor{log: log, p: p, a: a, storage: st}
 }
 
-// InitUpload creates a media-object row in the uploaded state and returns it
-// alongside a short-lived presigned PUT URL the client uses to upload the bytes
-// directly to MinIO (design §8.3).
-func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (Model, string, error) {
+// InitUpload creates a media-object row in the uploaded state. The client then
+// PUTs the bytes to /media/{id}/content; this service proxies them to object
+// storage so MinIO is never reachable from the browser.
+func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (Model, error) {
 	id := uuid.NewString()
 	key := storage.ObjectKey(fleetID, id, filename)
 	m, err := NewBuilder().
@@ -93,17 +100,35 @@ func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (
 		SetStatus(StatusUploaded).
 		Build()
 	if err != nil {
-		return Model{}, "", err
+		return Model{}, err
 	}
 	created, err := pr.a.Insert(m)
 	if err != nil {
-		return Model{}, "", err
+		return Model{}, err
 	}
-	url, err := pr.storage.PresignPut(context.Background(), created.ObjectKey(), presignTTL)
+	return created, nil
+}
+
+// StoreContent streams the request body into object storage for an object still
+// in the uploaded state and records the byte count. Fleet-scoped; the content
+// type comes from the row created at init, never from the request, so a client
+// cannot relabel someone else's bytes. The status transition and the
+// media.uploaded event stay in Confirm.
+func (pr *Processor) StoreContent(ctx context.Context, id, identityFleetID string, r io.Reader, size int64) (Model, error) {
+	m, err := pr.getActive(id)
 	if err != nil {
-		return Model{}, "", err
+		return Model{}, err
 	}
-	return created, url, nil
+	if err := AuthorizeAccess(m, identityFleetID); err != nil {
+		return Model{}, err
+	}
+	if m.Status() != StatusUploaded {
+		return Model{}, server.ErrConflict
+	}
+	if err := pr.storage.PutObject(ctx, m.ObjectKey(), r, size, m.ContentType()); err != nil {
+		return Model{}, err
+	}
+	return pr.a.Update(m.WithSize(size))
 }
 
 // Confirm transitions the object uploaded → processing and enqueues a
@@ -162,13 +187,32 @@ func (pr *Processor) GetByID(id, identityFleetID string) (Model, error) {
 	return m, nil
 }
 
+// presigner is the narrow, download-only capability DownloadURL needs. It is
+// deliberately NOT folded into ObjectStore: PutObject-based callers (and the
+// fakeStore test double) have no reason to implement it, and Task 4 deletes
+// this method, presigner, and DownloadURL together when the download route
+// moves to the same proxy-through-the-service model as upload.
+type presigner interface {
+	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
+}
+
 // DownloadURL authorizes by fleet and returns a short-lived presigned GET URL.
+//
+// TEMPORARY: this still hands the browser a presigned MinIO URL, which is
+// exactly the pattern this task replaces for uploads (MinIO's in-cluster host
+// is unresolvable from a browser) — download is no more broken by this change
+// than it already was. Task 4 replaces this with a proxied Content method; see
+// design.md Amendment A1 / plan.md Task 4.
 func (pr *Processor) DownloadURL(id, identityFleetID string) (string, error) {
 	m, err := pr.GetByID(id, identityFleetID)
 	if err != nil {
 		return "", err
 	}
-	return pr.storage.PresignGet(context.Background(), m.ObjectKey(), presignTTL)
+	p, ok := pr.storage.(presigner)
+	if !ok {
+		return "", errors.New("object store does not support presigned downloads")
+	}
+	return p.PresignGet(context.Background(), m.ObjectKey(), presignTTL)
 }
 
 // SoftDelete marks an object deleted (sets deleted_at + purge_after), scoped to
