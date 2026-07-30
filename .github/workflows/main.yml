@@ -3,6 +3,11 @@ name: main
 on:
   push:
     branches: [main]
+    # Guard 1 of 2 against a self-retrigger loop: the bump-overlay job below
+    # pushes a commit that touches only this path. Guard 2 is [skip ci] in that
+    # commit's message.
+    paths-ignore:
+      - 'deploy/k8s/overlays/main/**'
 
 permissions:
   contents: write
@@ -51,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [auth-service, fleet-service, media-service, notification-service]
+        service: [auth-service, fleet-service, media-service, notification-service, web]
     steps:
       - uses: actions/checkout@v4
 
@@ -86,7 +91,7 @@ jobs:
       # and hides their findings until the first failure is fixed.
       fail-fast: false
       matrix:
-        service: [auth-service, fleet-service, media-service, notification-service]
+        service: [auth-service, fleet-service, media-service, notification-service, web]
     steps:
       - uses: actions/checkout@v4
 
@@ -132,3 +137,36 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${{ steps.semver.outputs.tag }}"
           git push origin "${{ steps.semver.outputs.tag }}"
+
+  # ── Bump the deployed image SHAs ──────────────────────────────────────────────
+  bump-overlay:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pin overlay images to this commit
+        run: |
+          set -euo pipefail
+          f=deploy/k8s/overlays/main/kustomization.yaml
+          # Rewrite every `newTag:` in the images block to this commit's SHA.
+          # Argo CD then sees a real manifest diff and rolls the Deployments.
+          sed -i -E "s/^(    newTag: ).*$/\1${{ github.sha }}/" "$f"
+          # `if` guards the check so a clean diff does not trip `set -e`.
+          if git diff --quiet "$f"; then
+            echo "already pinned to this SHA — nothing to bump"
+            exit 0
+          fi
+          # Fail loudly if the rewrite missed an image rather than deploying a
+          # partially-pinned overlay.
+          test "$(grep -c "    newTag: ${{ github.sha }}" "$f")" -eq 5
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$f"
+          # [skip ci] is guard 2 of 2 against retriggering this workflow;
+          # paths-ignore on the push trigger is guard 1.
+          git commit -m "chore(deploy): pin main overlay to ${{ github.sha }} [skip ci]"
+          git push origin main
