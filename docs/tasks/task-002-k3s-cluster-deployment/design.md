@@ -213,7 +213,7 @@ Applied in `overlays/main` as ConfigMap patches over the base values.
 | `MEDIA_BUCKET` | media | `myfleet-media` | unchanged |
 | `APP_BASE_URL` | auth | `http://localhost` | `https://myfleet.tumidanski.com` |
 | `JWT_ISSUER` | auth | `https://myfleet.example.com` | `https://myfleet.tumidanski.com` |
-| `GOOGLE_REDIRECT_URL` | auth | *(wrong — see §4.5)* | `https://myfleet.tumidanski.com/api/auth/auth/callback` |
+| `GOOGLE_REDIRECT_URL` | auth | *(wrong — see §4.5)* | ~~`https://myfleet.tumidanski.com/api/auth/auth/callback`~~ → **`https://myfleet.tumidanski.com/api/auth/callback`** (superseded by A2) |
 | `COOKIE_SECURE` | auth | `false` | `true` |
 | `JWKS_URL`, `FLEET_SERVICE_URL`, `FLEET_INTERNAL_URL` | various | in-cluster DNS | unchanged |
 
@@ -245,6 +245,12 @@ Routes are registered on the root chi router with no base mount
 (`packages/shared-go/server/handler.go:33`), and the OIDC callback is `/auth/callback`
 (`apps/auth-service/internal/oidc/resource.go:50`). With `/api/auth` stripped, the only
 correct public callback path is **`/api/auth/auth/callback`**.
+
+> **SUPERSEDED BY A2 (§10).** This paragraph assumed `auth-stripprefix` strips
+> the whole `/api/auth`. A maintainer ruling during execution changed it to
+> strip only `/api`, which makes the correct public callback
+> **`/api/auth/callback`**. Everything below in this subsection describes the
+> pre-ruling state. Do not act on it — see A2.
 
 Both committed configs are wrong, in different ways:
 
@@ -417,9 +423,11 @@ same origin as `tumidanski.com`), and a Pi-hole record for `myfleet.home` →
 `192.168.23.230` on both Pi-hole servers.
 
 **5. Google Cloud Console** — register
-`https://myfleet.tumidanski.com/api/auth/auth/callback` as an authorised redirect URI.
-This is external and cannot be automated or verified from the repo; login stays broken
-until it is done.
+`https://myfleet.tumidanski.com/api/auth/callback` as an authorised redirect URI
+(**corrected by A2** — an earlier draft of this line said `/api/auth/auth/callback`,
+which is now wrong and will make login fail silently). This is external and cannot be
+automated or verified from the repo; login stays broken until it is done. The runbook
+`docs/runbooks/k3s-deployment.md` §"Google Cloud Console" is the authoritative copy.
 
 **6. Argo CD** — `kubectl apply -f argocd-myfleet.yml` from the bee repo.
 
@@ -557,3 +565,66 @@ the API client and render an object URL, which is why this amendment also touche
 `packages/shared-ts`.
 
 Implementation lands in `plan.md` Tasks 3–6.
+
+### A2 — `auth-stripprefix` and `media-stripprefix` strip only `/api` (maintainer ruling during execution)
+
+§4.5 diagnosed a real bug — both committed `GOOGLE_REDIRECT_URL` values pointed
+at routes that do not exist — but fixed it on the wrong side. It kept
+`auth-stripprefix` stripping the whole `/api/auth` and compensated by doubling
+the segment in the redirect URL, giving `/api/auth/auth/callback`.
+
+**Ruling: fix the gateway, not the URL.** `auth-stripprefix` and
+`media-stripprefix` now strip only `/api`
+(`deploy/k8s/base/routing/middlewares.yaml`). Both services already register
+their own `/auth/...` and `/media/...` segments
+(`apps/auth-service/internal/oidc/resource.go`,
+`apps/media-service/internal/mediaobject/resource.go`), so stripping the whole
+mount point was double-stripping. `fleet-stripprefix` and
+`notifications-stripprefix` are unchanged: fleet's routes are bare, and the
+frontend already doubles the notifications segment.
+
+**Consequences:**
+
+| Section | Amendment |
+|---|---|
+| §4.3 | `GOOGLE_REDIRECT_URL` (main overlay) is `https://myfleet.tumidanski.com/api/auth/callback`. Base is `http://localhost/api/auth/callback`. |
+| §4.5 | Superseded in full. `/api/auth/auth/callback` is **wrong** — it strips to `/auth/auth/callback`, which does not exist. |
+| §6 step 5 | The Google Cloud Console redirect URI to register is `https://myfleet.tumidanski.com/api/auth/callback`. |
+
+Registering the doubled form in Google Cloud Console is the failure mode this
+amendment exists to prevent: Google redirects to a path that 404s and login
+fails with no useful error. `docs/runbooks/k3s-deployment.md` carries the
+correct value and is authoritative for anyone actually performing the deploy.
+
+`plan.md` is a historical artifact of the pre-ruling design and is knowingly
+left stale.
+
+### A3 — `/api/fleet/internal/*` is blocked at the gateway (final review)
+
+fleet-service registers its `/internal/*` routes without JWT
+(`apps/fleet-service/cmd/main.go`), documented as "network-restricted". Putting
+fleet-service behind a public hostname invalidated that: without an explicit
+block, `https://myfleet.tumidanski.com/api/fleet/internal/maintenance/due`
+returns every non-ok maintenance schedule across every fleet, unauthenticated
+and with no parameters.
+
+`overlays/main/ingressroute.yaml` gains an `internal-deny` Middleware
+(`ipAllowList` over an unroutable `/32`, reject `403`) and a `priority: 200`
+router that terminates on this rule:
+
+```
+(Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathRegexp(`(?i)^/+api/+fleet[^/]*/*internal`)
+```
+
+The regex shape is deliberate and was checked against traefik 3.6.13 (bee's
+version) in front of a chi v5.3.0 router: Traefik percent-decodes and lexically
+cleans the path before matching, and `fleet-stripprefix` removes the literal
+string `/api/fleet` rather than a path segment — so `/api/fleetinternal/…`
+reached the handler as `/internal/…` and a rule requiring a slash separator
+would have been bypassable.
+
+Routing-layer only — the Go services are unchanged. In-cluster callers
+(auth-service `FLEET_SERVICE_URL`, notification-service `FLEET_INTERNAL_URL`,
+both `http://fleet-service:8080`) never traverse Traefik and are unaffected.
+Moving these endpoints behind service-to-service authentication remains open
+work; this closes the internet exposure only.

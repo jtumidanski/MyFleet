@@ -209,10 +209,16 @@ Recorded as Amendment A1 in design.md §10.
 4. **Deleting the base Secrets breaks `overlays/local`** — every service
    `envFrom`s a `*-secret`. They move to `infra-local/secrets-local.yaml`; the
    main overlay ships none.
-5. **`/api/auth/auth/callback` is not a typo.** Traefik strips `/api/auth` and
-   the OIDC route is `/auth/callback`. Both committed configs were wrong in
-   different ways (`/auth/google/callback` and `/callback` — neither route
-   exists), apparently conflating the login path with the callback.
+5. **The public OAuth callback is `/api/auth/callback`.** *(Corrected — this
+   entry originally read "`/api/auth/auth/callback` is not a typo", which is the
+   opposite of the truth. See design.md amendment A2.)* Both committed configs
+   were wrong in different ways (`/auth/google/callback` and `/callback` —
+   neither route exists), apparently conflating the login path with the
+   callback. A maintainer ruling during execution fixed this on the gateway
+   side: `auth-stripprefix` strips only `/api`, not the whole `/api/auth`, and
+   the OIDC route is `/auth/callback` — so the correct public path is
+   `/api/auth/callback`. Register **that** in Google Cloud Console;
+   `docs/runbooks/k3s-deployment.md` is authoritative.
 6. **The bump-overlay job must not retrigger itself.** `[skip ci]` **and**
    `paths-ignore` — either alone is fragile.
 7. **`kustomize` `newTag` seeding.** The overlay ships `latest` and CI rewrites
