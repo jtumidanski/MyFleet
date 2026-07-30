@@ -24,7 +24,9 @@ COPY apps/web ./apps/web
 RUN npm run -w @myfleet/web build
 
 # --- Stage 2: static server -------------------------------------------------
-FROM nginx:alpine
+# Unprivileged nginx (UID 101, binds :8080) so the container runs with the same
+# hardened securityContext as the Go services: runAsNonRoot + readOnlyRootFilesystem.
+FROM nginxinc/nginx-unprivileged:alpine
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 8080
