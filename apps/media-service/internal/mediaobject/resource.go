@@ -78,13 +78,27 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUp
 				server.WriteError(w, err)
 				return
 			}
+			// A client that advertises more than the cap has told us up front
+			// the body is too large: answer 413 immediately, before any bytes
+			// are read and before a multipart upload is opened against object
+			// storage. Downgrading this to the unknown-length sentinel instead
+			// would hand the SDK a body it must size-guess for, which is both
+			// wasteful and (historically) the path that let one request
+			// allocate more memory than the pod is allowed.
+			if req.ContentLength > maxUploadBytes {
+				server.WriteError(w, server.ErrRequestEntityTooLarge)
+				return
+			}
+
 			body := http.MaxBytesReader(w, req.Body, maxUploadBytes)
 			defer func() { _ = body.Close() }()
 
 			// Content-Length is advisory here: MaxBytesReader is the real
-			// bound. -1 lets the SDK stream an unknown-length body.
+			// bound on bytes actually read. A chunked body has no
+			// Content-Length and arrives as -1; that is legitimate, and the
+			// store bounds the SDK's buffer for it (storage.uploadPartSize).
 			size := req.ContentLength
-			if size < 0 || size > maxUploadBytes {
+			if size < 0 {
 				size = -1
 			}
 			m, err := proc.StoreContent(req.Context(), id, identity.ActiveFleetID, body, size)
@@ -141,6 +155,12 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUp
 			}
 			defer func() { _ = rc.Close() }()
 
+			// proc.Content has already proven the object is readable (the
+			// store issues its GET before returning), so committing 200 here
+			// no longer risks answering an empty body for bytes that were
+			// never stored. A copy that fails *after* this point is a genuine
+			// mid-stream failure; the status is on the wire and cannot be
+			// changed, so it is logged and the client sees a short read.
 			if ct := m.ContentType(); ct != "" {
 				w.Header().Set("Content-Type", ct)
 			}

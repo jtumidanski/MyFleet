@@ -17,6 +17,8 @@ import (
 	dtoevents "github.com/jtumidanski/myfleet/packages/dto-go/events"
 	sharedevents "github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/storage"
 )
 
 func TestAuthorizeAccess_404CrossFleet(t *testing.T) {
@@ -305,12 +307,13 @@ func TestConfirm_outboxRollsBackOnEnqueueError(t *testing.T) {
 // fakeStore records what was written so the proxy path can be asserted without
 // a live MinIO.
 type fakeStore struct {
-	bucket  string
-	putKey  string
-	putBody []byte
-	putSize int64
-	putCT   string
-	putErr  error
+	bucket   string
+	putCalls int
+	putKey   string
+	putBody  []byte
+	putSize  int64
+	putCT    string
+	putErr   error
 
 	getKey  string
 	getBody []byte
@@ -320,6 +323,7 @@ type fakeStore struct {
 func (f *fakeStore) Bucket() string { return f.bucket }
 
 func (f *fakeStore) PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
+	f.putCalls++
 	if f.putErr != nil {
 		return f.putErr
 	}
@@ -506,5 +510,51 @@ func TestContent_crossFleetIs404(t *testing.T) {
 	}
 	if store.getKey != "" {
 		t.Fatalf("cross-fleet read must not touch storage, read key %q", store.getKey)
+	}
+}
+
+// TestContent_missingObjectIs404 verifies the store's "the bytes are not there"
+// signal becomes a 404 rather than being handed to the caller as a readable
+// stream. This is the state POST /media leaves behind before any content is
+// PUT, and the state a failed PUT leaves behind (see
+// TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched).
+func TestContent_missingObjectIs404(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getErr: storage.ErrObjectNotFound}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	_, rc, err := pr.Content(context.Background(), created.ID(), "fleet-a")
+	if !errors.Is(err, server.ErrNotFound) {
+		if rc != nil {
+			_ = rc.Close()
+		}
+		t.Fatalf("content for an object with no stored bytes = %v, want ErrNotFound (404)", err)
+	}
+	if rc != nil {
+		t.Fatal("no reader may be returned alongside the error")
+	}
+}
+
+// TestContent_otherStorageFailuresAreNot404 keeps the mapping narrow: only a
+// genuinely absent object becomes 404. Anything else must stay a 500 so a
+// broken MinIO is not reported to clients as "your media does not exist".
+func TestContent_otherStorageFailuresAreNot404(t *testing.T) {
+	db := newConfirmTestDB(t)
+	boom := errors.New("simulated minio outage")
+	store := &fakeStore{bucket: "myfleet-media", getErr: boom}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-a"); !errors.Is(err, boom) {
+		t.Fatalf("content = %v, want the underlying storage error passed through", err)
 	}
 }

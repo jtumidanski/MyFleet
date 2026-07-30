@@ -29,6 +29,10 @@ const EventTypeMediaUploaded = "media.uploaded"
 // Bytes are proxied through this service rather than handed to the browser as
 // presigned URLs: MinIO is a shared cluster service that also holds other
 // applications' buckets, so it is never exposed outside the cluster.
+//
+// GetObject must have determined that the object is actually readable before
+// it returns — callers commit an HTTP status line on the strength of its nil
+// error — and must report a missing key as storage.ErrObjectNotFound.
 type ObjectStore interface {
 	PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
 	GetObject(ctx context.Context, key string) (io.ReadCloser, error)
@@ -212,6 +216,15 @@ func (pr *Processor) Content(ctx context.Context, id, identityFleetID string) (M
 	}
 	rc, err := pr.storage.GetObject(ctx, m.ObjectKey())
 	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			// The row exists but its bytes do not: InitUpload creates the row
+			// before any content is PUT, and a PUT that fails leaves exactly
+			// that state. 404 rather than 500 because nothing is broken
+			// server-side — this sub-resource simply does not exist yet — and
+			// it matches what the client used to see when it followed a
+			// presigned URL straight to MinIO.
+			return Model{}, nil, server.ErrNotFound
+		}
 		return Model{}, nil, err
 	}
 	return m, rc, nil
