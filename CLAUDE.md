@@ -36,11 +36,22 @@ kustomize build deploy/k8s/overlays/main    # bee: shared infra, no PVCs, no Sec
 ```
 
 The `main` overlay must render with no PersistentVolumeClaims, no Secrets, no
-ClusterRole and no placeholder values. Against a reachable cluster, also run:
+ClusterRole and no placeholder values. Against a reachable cluster, also run
+**both** server dry-runs — rendering alone does not catch namespace or
+cross-resource-reference errors:
 
 ```sh
-kustomize build deploy/k8s/overlays/main | kubectl apply --dry-run=server -f -
+kustomize build deploy/k8s/overlays/main  | kubectl apply --dry-run=server -f -
+kustomize build deploy/k8s/overlays/local | kubectl apply --dry-run=server -f -
 ```
+
+`--dry-run=server` validates against the API server without persisting
+anything, so it is safe to point at the shared `bee` context; it needs the
+`traefik.io` CRDs present, which bee has. The local overlay is not exempt: a
+missing `namespace:` in `deploy/k8s/infra-local/kustomization.yaml` made
+`kubectl apply -k deploy/k8s/overlays/local` fail outright (`ClusterRoleBinding
+"myfleet-traefik" is invalid: subjects[0].namespace: Required value`) and slipped
+through ten reviews because only the `main` dry-run was ever run.
 
 Container builds: `docker build -f apps/<service>/Dockerfile .` (context is the
 repo root for every service, including `apps/web`).
