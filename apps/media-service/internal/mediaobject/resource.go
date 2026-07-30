@@ -22,6 +22,19 @@ func requireWrite(id auth.Identity) error {
 	return server.ErrForbidden
 }
 
+// classifyUploadError maps the error http.MaxBytesReader produces once a body
+// exceeds its cap to the 413 sentinel; every other error passes through
+// unchanged so the caller's existing error handling (404/409/500, ...) still
+// applies. Split out as its own function so the mapping is unit-testable
+// without standing up a full HTTP round trip.
+func classifyUploadError(err error) error {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		return server.ErrRequestEntityTooLarge
+	}
+	return err
+}
+
 // InitializeRoutes wires the JWT-protected media-object endpoints. Paths are
 // bare (the gateway strips /api/media). Event emission uses the transactional
 // outbox (design A8); no Kafka producer is needed here.
@@ -73,9 +86,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUp
 			}
 			m, err := proc.StoreContent(req.Context(), id, identity.ActiveFleetID, body, size)
 			if err != nil {
-				var maxErr *http.MaxBytesError
-				if errors.As(err, &maxErr) {
-					server.WriteError(w, server.ErrRequestEntityTooLarge)
+				if mapped := classifyUploadError(err); errors.Is(mapped, server.ErrRequestEntityTooLarge) {
+					server.WriteError(w, mapped)
 					return
 				}
 				log.WithError(err).Error("media content upload failed")

@@ -379,3 +379,71 @@ func TestStoreContent_crossFleetIs404(t *testing.T) {
 		t.Fatalf("cross-fleet write must not touch storage, wrote key %q", store.putKey)
 	}
 }
+
+// TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched verifies that
+// when the object store fails mid-write, StoreContent returns that error and
+// never persists a size — a failed upload must leave the row consistent
+// (still zero, not partially/incorrectly updated).
+func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T) {
+	db := newConfirmTestDB(t)
+	injectErr := errors.New("simulated minio put failure")
+	store := &fakeStore{bucket: "myfleet-media", putErr: injectErr}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	_, err = pr.StoreContent(context.Background(), created.ID(), "fleet-a", bytes.NewReader([]byte("jpeg-bytes")), 10)
+	if !errors.Is(err, injectErr) {
+		t.Fatalf("store content: want %v, got %v", injectErr, err)
+	}
+
+	provider := NewProvider(db)
+	persisted, err := provider.GetByID(created.ID())
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if persisted.Size() != 0 {
+		t.Fatalf("size after failed store: want 0 (untouched), got %d", persisted.Size())
+	}
+}
+
+// TestStoreContent_unknownLengthRecordsActualByteCount verifies that when the
+// caller passes size=-1 (mirroring resource.go's handling of chunked or
+// over-advertised request bodies), PutObject still receives -1 unchanged (the
+// SDK needs it to stream an unknown-length body) but the size recorded on the
+// row is the real number of bytes read, not the -1 sentinel.
+func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media"}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	body := []byte("a body whose length the caller chose not to advertise")
+	updated, err := pr.StoreContent(context.Background(), created.ID(), "fleet-a", bytes.NewReader(body), -1)
+	if err != nil {
+		t.Fatalf("store content: %v", err)
+	}
+
+	if store.putSize != -1 {
+		t.Fatalf("PutObject must still receive the unknown-length sentinel, got %d", store.putSize)
+	}
+	if updated.Size() != int64(len(body)) {
+		t.Fatalf("recorded size = %d, want actual byte count %d", updated.Size(), len(body))
+	}
+
+	provider := NewProvider(db)
+	persisted, err := provider.GetByID(created.ID())
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if persisted.Size() != int64(len(body)) {
+		t.Fatalf("persisted size = %d, want %d", persisted.Size(), len(body))
+	}
+}

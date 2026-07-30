@@ -109,11 +109,30 @@ func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (
 	return created, nil
 }
 
+// countingReader wraps an io.Reader and tallies the bytes actually read, so
+// the caller can learn the true length of a stream whose advertised size is
+// unknown (or untrustworthy) up front.
+type countingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
 // StoreContent streams the request body into object storage for an object still
 // in the uploaded state and records the byte count. Fleet-scoped; the content
 // type comes from the row created at init, never from the request, so a client
 // cannot relabel someone else's bytes. The status transition and the
 // media.uploaded event stay in Confirm.
+//
+// size is passed through to PutObject exactly as given — including -1 for a
+// body of unknown/untrusted length, which lets the SDK stream it — but the
+// value persisted via WithSize is always the number of bytes this method
+// actually read, counted while streaming, never the caller-supplied size.
 func (pr *Processor) StoreContent(ctx context.Context, id, identityFleetID string, r io.Reader, size int64) (Model, error) {
 	m, err := pr.getActive(id)
 	if err != nil {
@@ -125,10 +144,11 @@ func (pr *Processor) StoreContent(ctx context.Context, id, identityFleetID strin
 	if m.Status() != StatusUploaded {
 		return Model{}, server.ErrConflict
 	}
-	if err := pr.storage.PutObject(ctx, m.ObjectKey(), r, size, m.ContentType()); err != nil {
+	counted := &countingReader{r: r}
+	if err := pr.storage.PutObject(ctx, m.ObjectKey(), counted, size, m.ContentType()); err != nil {
 		return Model{}, err
 	}
-	return pr.a.Update(m.WithSize(size))
+	return pr.a.Update(m.WithSize(counted.n))
 }
 
 // Confirm transitions the object uploaded → processing and enqueues a
