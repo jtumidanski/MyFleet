@@ -84,9 +84,7 @@ describe('ApiClient.requestBlob', () => {
       onRefresh: async () => null,
     });
 
-    await expect(client.requestBlob('/api/media/missing/content')).rejects.toBeInstanceOf(
-      ApiError,
-    );
+    await expect(client.requestBlob('/api/media/missing/content')).rejects.toBeInstanceOf(ApiError);
 
     try {
       await client.requestBlob('/api/media/missing/content');
