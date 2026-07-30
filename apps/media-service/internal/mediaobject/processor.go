@@ -64,7 +64,7 @@ func MarkReady(m Model) (Model, error) {
 }
 
 // Processor contains media-object business logic, injected with Provider,
-// Administrator, and a presigner (MinIO). Event publication is handled by the
+// Administrator, and an ObjectStore (MinIO). Event publication is handled by the
 // transactional-outbox relay (design A8); the processor never calls Publish
 // directly.
 type Processor struct {
