@@ -5,19 +5,20 @@ import type { MediaObjectAttributes, InitMediaUploadAttributes } from '../../typ
 /**
  * Media service — wraps the media-service endpoints (gateway prefix /api/media).
  * Backend routes (apps/media-service/internal/mediaobject/resource.go):
- *   POST   /api/media              — init upload: returns media row + presigned PUT URL
- *   POST   /api/media/{id}/confirm — mark uploaded→processing
- *   GET    /api/media/{id}         — get metadata
- *   GET    /api/media/{id}/download — get metadata + presigned GET URL (downloadUrl)
- *   DELETE /api/media/{id}         — soft delete
+ *   POST   /api/media               — init upload: creates the row (uploaded)
+ *   PUT    /api/media/{id}/content  — upload the raw bytes (proxied to MinIO)
+ *   POST   /api/media/{id}/confirm  — mark uploaded→processing
+ *   GET    /api/media/{id}          — get metadata
+ *   GET    /api/media/{id}/content  — stream the bytes (proxied from MinIO)
+ *   DELETE /api/media/{id}          — soft delete
  *
- * NOTE: The presigned PUT to MinIO is NOT routed through apiClient — it is a
- * raw fetch() with no auth header and no /api prefix.
+ * Bytes are proxied through media-service, not presigned: MinIO is a shared
+ * cluster service and is never reachable from the browser.
  */
 class MediaService {
   private readonly basePath = '/api/media';
 
-  /** POST /api/media — init upload; returns a resource with uploadUrl in attributes. */
+  /** POST /api/media — init upload; creates the media row in the uploaded state. */
   async initUpload(
     attrs: InitMediaUploadAttributes,
   ): Promise<JsonApiResource<MediaObjectAttributes>> {
@@ -34,18 +35,25 @@ class MediaService {
   }
 
   /**
-   * PUT the raw file bytes directly to MinIO via the presigned URL.
-   * This intentionally bypasses apiClient (no auth header, no /api prefix).
+   * PUT /api/media/{id}/content — upload the raw bytes through the API. Goes
+   * via apiClient so the bearer token and 401-refresh apply; the Content-Type
+   * override replaces the default JSON:API media type.
    */
-  async putToPresignedUrl(presignedUrl: string, file: File): Promise<void> {
-    const res = await fetch(presignedUrl, {
-      method: 'PUT',
-      body: file,
-      headers: { 'Content-Type': file.type },
-    });
-    if (!res.ok) {
-      throw new Error(`Presigned PUT failed: ${res.status} ${res.statusText}`);
-    }
+  async putContent(id: string, file: File): Promise<JsonApiResource<MediaObjectAttributes>> {
+    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MediaObjectAttributes>>>(
+      `${this.basePath}/${id}/content`,
+      {
+        method: 'PUT',
+        body: file,
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      },
+    );
+    return doc.data;
+  }
+
+  /** GET /api/media/{id}/content — the raw bytes, authenticated. */
+  async getContentBlob(id: string): Promise<Blob> {
+    return apiClient.requestBlob(`${this.basePath}/${id}/content`);
   }
 
   /** POST /api/media/{id}/confirm — move from uploaded → processing. */
@@ -64,17 +72,6 @@ class MediaService {
   async get(id: string): Promise<JsonApiResource<MediaObjectAttributes>> {
     const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MediaObjectAttributes>>>(
       `${this.basePath}/${id}`,
-    );
-    return doc.data;
-  }
-
-  /**
-   * GET /api/media/{id}/download — returns metadata + presigned GET URL in
-   * attributes.downloadUrl. Use downloadUrl as the <img src>.
-   */
-  async getDownloadUrl(id: string): Promise<JsonApiResource<MediaObjectAttributes>> {
-    const doc = await apiClient.request<JsonApiDocument<JsonApiResource<MediaObjectAttributes>>>(
-      `${this.basePath}/${id}/download`,
     );
     return doc.data;
   }

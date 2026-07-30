@@ -1,5 +1,5 @@
 import { Skeleton } from '../../../ui/skeleton';
-import { useMediaDownloadUrl } from '../../../../lib/hooks/api/media';
+import { useMediaContentUrl, useMediaObject } from '../../../../lib/hooks/api/media';
 
 interface MediaThumbnailProps {
   mediaId: string;
@@ -8,18 +8,19 @@ interface MediaThumbnailProps {
 }
 
 /**
- * Fetches the presigned GET URL for a media object and renders it as an <img>.
- * While loading, shows a skeleton placeholder.
+ * Renders a media object's bytes, fetched through the API and held as an object
+ * URL. Metadata comes from the separate detail query (both are cached by React
+ * Query, so a gallery re-render costs no extra requests).
  */
 export function MediaThumbnail({ mediaId, isPrimary, className }: MediaThumbnailProps) {
-  const { data, isLoading } = useMediaDownloadUrl(mediaId);
+  const { url, isLoading } = useMediaContentUrl(mediaId);
+  const { data: meta } = useMediaObject(mediaId);
 
   if (isLoading) {
     return <Skeleton className={className ?? 'h-24 w-24 rounded'} />;
   }
 
-  const src = data?.attributes.downloadUrl;
-  if (!src) {
+  if (!url) {
     return (
       <div
         className={`flex items-center justify-center rounded bg-muted text-xs text-muted-foreground ${className ?? 'h-24 w-24'}`}
@@ -32,8 +33,8 @@ export function MediaThumbnail({ mediaId, isPrimary, className }: MediaThumbnail
   return (
     <div className="relative">
       <img
-        src={src}
-        alt={data?.attributes.originalFilename ?? 'Vehicle photo'}
+        src={url}
+        alt={meta?.attributes.originalFilename ?? 'Vehicle photo'}
         className={`rounded object-cover ${className ?? 'h-24 w-24'}`}
       />
       {isPrimary && (

@@ -11,8 +11,8 @@ interface MediaUploadButtonProps {
 
 /**
  * File-picker button that drives the three-step upload flow:
- *  1. POST /api/media (init) → presigned PUT URL
- *  2. PUT file bytes directly to MinIO presigned URL
+ *  1. POST /api/media (init) → media row
+ *  2. PUT file bytes to /api/media/{id}/content (proxied to MinIO)
  *  3. POST /api/media/{id}/confirm
  *  4. POST /api/fleet/vehicles/{id}/media to attach the media ref
  *

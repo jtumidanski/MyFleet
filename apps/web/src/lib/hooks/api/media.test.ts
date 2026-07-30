@@ -6,94 +6,60 @@ describe('mediaKeys', () => {
   it('is hierarchical', () => {
     expect(mediaKeys.all).toEqual(['media']);
     expect(mediaKeys.detail('m1')).toEqual(['media', 'detail', 'm1']);
-    expect(mediaKeys.download('m1')).toEqual(['media', 'download', 'm1']);
+    expect(mediaKeys.content('m1')).toEqual(['media', 'content', 'm1']);
   });
 });
 
 describe('performMediaUpload', () => {
   beforeEach(() => vi.restoreAllMocks());
 
-  it('calls init → presigned PUT → confirm in order', async () => {
+  it('calls init → putContent → confirm in order', async () => {
     const calls: string[] = [];
 
     const mockInit = vi.fn().mockImplementation(async () => {
       calls.push('init');
       return {
-        id: 'media-001',
+        id: 'm1',
         type: 'media-objects',
         attributes: {
           fleetId: 'f1',
           uploadedByUserId: 'u1',
-          bucket: 'bucket',
-          objectKey: 'key',
+          bucket: 'myfleet-media',
+          objectKey: 'f1/m1/photo.jpg',
           status: 'uploaded',
-          uploadUrl: 'https://minio.example.com/presigned-put',
-          contentType: 'image/jpeg',
-          originalFilename: 'photo.jpg',
         },
       };
     });
 
     const mockPut = vi.fn().mockImplementation(async () => {
-      calls.push('presigned-put');
+      calls.push('put-content');
+      return {
+        id: 'm1',
+        type: 'media-objects',
+        attributes: { status: 'uploaded' },
+      };
     });
 
     const mockConfirm = vi.fn().mockImplementation(async () => {
       calls.push('confirm');
       return {
-        id: 'media-001',
+        id: 'm1',
         type: 'media-objects',
-        attributes: {
-          fleetId: 'f1',
-          uploadedByUserId: 'u1',
-          bucket: 'bucket',
-          objectKey: 'key',
-          status: 'processing',
-          contentType: 'image/jpeg',
-          originalFilename: 'photo.jpg',
-        },
+        attributes: { status: 'processing' },
       };
     });
 
-    const fakeFile = new File(['data'], 'photo.jpg', { type: 'image/jpeg' });
+    const fakeFile = new File(['bytes'], 'photo.jpg', { type: 'image/jpeg' });
 
     const result = await performMediaUpload(fakeFile, {
       initUpload: mockInit,
-      putToPresignedUrl: mockPut,
+      putContent: mockPut,
       confirm: mockConfirm,
     });
 
-    expect(calls).toEqual(['init', 'presigned-put', 'confirm']);
-    expect(mockInit).toHaveBeenCalledWith({
-      contentType: 'image/jpeg',
-      originalFilename: 'photo.jpg',
-    });
-    expect(mockPut).toHaveBeenCalledWith('https://minio.example.com/presigned-put', fakeFile);
-    expect(mockConfirm).toHaveBeenCalledWith('media-001');
-    expect(result.id).toBe('media-001');
-  });
-
-  it('throws if init returns no uploadUrl', async () => {
-    const mockInit = vi.fn().mockResolvedValue({
-      id: 'media-001',
-      type: 'media-objects',
-      attributes: {
-        fleetId: 'f1',
-        uploadedByUserId: 'u1',
-        bucket: 'bucket',
-        objectKey: 'key',
-        status: 'uploaded',
-        // uploadUrl is missing
-      },
-    });
-    const fakeFile = new File(['data'], 'photo.jpg', { type: 'image/jpeg' });
-
-    await expect(
-      performMediaUpload(fakeFile, {
-        initUpload: mockInit,
-        putToPresignedUrl: vi.fn(),
-        confirm: vi.fn(),
-      }),
-    ).rejects.toThrow('No upload URL returned from init');
+    expect(calls).toEqual(['init', 'put-content', 'confirm']);
+    // The bytes go to the media row's own id — never to an external URL.
+    expect(mockPut).toHaveBeenCalledWith('m1', fakeFile);
+    expect(result.attributes.status).toBe('processing');
   });
 });

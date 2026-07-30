@@ -2,8 +2,8 @@ import type { JsonApiResource } from '@myfleet/shared-ts';
 
 /**
  * Mirrors apps/media-service/internal/mediaobject/rest.go Attributes.
- * uploadUrl is present only on the init-upload response.
- * downloadUrl is present only on the /download endpoint response.
+ * Bytes are fetched from /api/media/{id}/content, not from a URL in the
+ * payload — see MediaService.
  */
 export interface MediaObjectAttributes {
   fleetId: string;
@@ -15,8 +15,6 @@ export interface MediaObjectAttributes {
   originalFilename?: string;
   /** 'uploaded' | 'processing' | 'ready' | 'error' */
   status: string;
-  uploadUrl?: string;
-  downloadUrl?: string;
 }
 
 export type MediaObject = JsonApiResource<MediaObjectAttributes>;
