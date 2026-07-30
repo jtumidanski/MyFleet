@@ -9,6 +9,9 @@ data:
   JWT_ISSUER: "https://myfleet.example.com"
   JWT_AUDIENCE: "myfleet"
   JWT_KID: "kid-1"
-  GOOGLE_REDIRECT_URL: "http://localhost/api/auth/auth/google/callback"
+  # Traefik strips /api/auth, and the OIDC callback route is /auth/callback
+  # (apps/auth-service/internal/oidc/resource.go), so the public path is
+  # /api/auth/auth/callback. The main overlay swaps in the public host.
+  GOOGLE_REDIRECT_URL: "http://localhost/api/auth/auth/callback"
   FLEET_SERVICE_URL: "http://fleet-service:8080"
   COOKIE_SECURE: "false"
