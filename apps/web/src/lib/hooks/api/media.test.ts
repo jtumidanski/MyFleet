@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ApiError } from '@myfleet/shared-ts';
 import { mediaKeys, useMediaContentUrl } from './media';
-import { performMediaUpload } from './media';
+import { performMediaUpload, MEDIA_MAX_UPLOAD_BYTES, MEDIA_TOO_LARGE_CODE } from './media';
 import { mediaService } from '../../../services/api/MediaService';
 
 // useMediaContentUrl goes through mediaService.getContentBlob; mock the
@@ -75,6 +76,45 @@ describe('performMediaUpload', () => {
     expect(mockPut).toHaveBeenCalledWith('m1', fakeFile);
     expect(result.attributes.status).toBe('processing');
   });
+
+  it('rejects an oversized file before any request, with a message naming the limit', async () => {
+    const deps = {
+      initUpload: vi.fn(),
+      putContent: vi.fn(),
+      confirm: vi.fn(),
+    };
+
+    const bigFile = new File(['x'], 'huge.jpg', { type: 'image/jpeg' });
+    // File size is read-only in jsdom; define it rather than allocating 25 MiB.
+    Object.defineProperty(bigFile, 'size', { value: MEDIA_MAX_UPLOAD_BYTES + 1 });
+
+    await expect(performMediaUpload(bigFile, deps)).rejects.toMatchObject({
+      status: 413,
+      code: MEDIA_TOO_LARGE_CODE,
+      // Naming the limit is the whole point: the server's 413 never does.
+      message: expect.stringContaining('25 MB'),
+    });
+
+    // Nothing hit the network, so no orphaned media row was created either.
+    expect(deps.initUpload).not.toHaveBeenCalled();
+    expect(deps.putContent).not.toHaveBeenCalled();
+    expect(deps.confirm).not.toHaveBeenCalled();
+  });
+
+  it('allows a file exactly at the limit', async () => {
+    const media = { id: 'm1', type: 'media-objects', attributes: { status: 'uploaded' } };
+    const deps = {
+      initUpload: vi.fn().mockResolvedValue(media),
+      putContent: vi.fn().mockResolvedValue(media),
+      confirm: vi.fn().mockResolvedValue({ ...media, attributes: { status: 'processing' } }),
+    };
+
+    const file = new File(['x'], 'edge.jpg', { type: 'image/jpeg' });
+    Object.defineProperty(file, 'size', { value: MEDIA_MAX_UPLOAD_BYTES });
+
+    await expect(performMediaUpload(file, deps)).resolves.toBeDefined();
+    expect(deps.initUpload).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -139,6 +179,21 @@ describe('useMediaContentUrl', () => {
     await waitFor(() => expect(result.current.url).not.toBeNull());
 
     expect(renders.some((r) => !r.isLoading && r.url === null)).toBe(false);
+  });
+
+  it('surfaces isError/error so a failed fetch is distinguishable from "no image"', async () => {
+    const failure = new ApiError(403, 'forbidden', 'Forbidden');
+    vi.mocked(mediaService.getContentBlob).mockRejectedValue(failure);
+
+    const { result } = renderHook(() => useMediaContentUrl('m1'), {
+      wrapper: makeQueryWrapper(queryClient, false),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    expect(result.current.url).toBeNull();
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.error).toBe(failure);
   });
 
   it('revokes the previous URL exactly once when the id changes, and the new URL survives', async () => {

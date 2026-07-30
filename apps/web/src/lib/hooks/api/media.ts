@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { mediaService } from '../../../services/api/MediaService';
 import { vehicleMediaService } from '../../../services/api/VehicleMediaService';
-import type { JsonApiResource } from '@myfleet/shared-ts';
+import { ApiError, type JsonApiResource } from '@myfleet/shared-ts';
 import type { MediaObjectAttributes, InitMediaUploadAttributes } from '../../../types/models/media';
 
 // Hierarchical query-key factory.
@@ -24,6 +24,29 @@ export const mediaKeys = {
 // Upload helper (pure function — injectable for testing)
 // ---------------------------------------------------------------------------
 
+/**
+ * Client-side mirror of the media-service `MEDIA_MAX_UPLOAD_BYTES` config key
+ * (`deploy/k8s/base/media-service/configmap.yaml`, default in
+ * `apps/media-service/cmd/main.go`). 26214400 bytes = 25 MiB.
+ *
+ * This is a UX affordance, NOT a security control: the server enforces the real
+ * cap with `http.MaxBytesReader` and will still reject an oversized body if this
+ * constant ever drifts above the deployed value. Its only job is to fail fast
+ * with a message that names the limit, because the server's 413 closes the
+ * connection without draining the in-flight body — which a browser mid-upload
+ * usually surfaces as an opaque `TypeError: Failed to fetch`.
+ */
+export const MEDIA_MAX_UPLOAD_BYTES = 26214400;
+
+/** JSON:API-style code used for the client-side size rejection. */
+export const MEDIA_TOO_LARGE_CODE = 'payload_too_large';
+
+/** Bytes → a human-readable MB string ("25 MB", "31.5 MB"). */
+export function formatUploadSize(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return `${Number.isInteger(mb) ? mb : mb.toFixed(1)} MB`;
+}
+
 export interface UploadDeps {
   initUpload: (attrs: InitMediaUploadAttributes) => Promise<JsonApiResource<MediaObjectAttributes>>;
   putContent: (id: string, file: File) => Promise<JsonApiResource<MediaObjectAttributes>>;
@@ -37,11 +60,22 @@ export interface UploadDeps {
  *  3. Confirm — transitions the row from uploaded → processing.
  *
  * After confirm, the caller should poll GET /media/{id} until status === 'ready'.
+ *
+ * Oversized files are rejected here, before step 1, so nothing reaches the
+ * network and no orphaned media row is created.
  */
 export async function performMediaUpload(
   file: File,
   deps: UploadDeps,
 ): Promise<JsonApiResource<MediaObjectAttributes>> {
+  if (file.size > MEDIA_MAX_UPLOAD_BYTES) {
+    throw new ApiError(
+      413,
+      MEDIA_TOO_LARGE_CODE,
+      `"${file.name}" is ${formatUploadSize(file.size)}. The maximum upload size is ${formatUploadSize(MEDIA_MAX_UPLOAD_BYTES)}.`,
+    );
+  }
+
   const media = await deps.initUpload({
     contentType: file.type,
     originalFilename: file.name,
@@ -84,7 +118,7 @@ export function useMediaObject(id: string | null | undefined) {
  * frame whenever the blob changes (id switch or refetch), which is accepted.
  */
 export function useMediaContentUrl(id: string | null | undefined) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: mediaKeys.content(id ?? ''),
     queryFn: () => mediaService.getContentBlob(id as string),
     enabled: !!id,
@@ -110,7 +144,11 @@ export function useMediaContentUrl(id: string | null | undefined) {
   // handed back.
   const url = entry && entry.blob === data ? entry.url : null;
 
-  return { url, isLoading: isLoading || (!!data && url === null) };
+  // `isError`/`error` are passed straight through from the query so callers can
+  // tell a real failure (403/404/5xx) from "this media has no bytes"; without
+  // them both render identically. Note `isLoading` stays true for the one frame
+  // where `data` has arrived but the object URL has not been created yet.
+  return { url, isLoading: isLoading || (!!data && url === null), isError, error };
 }
 
 /** GET /api/fleet/vehicles/{vehicleId}/media — list media refs for a vehicle. */
