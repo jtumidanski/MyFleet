@@ -27,8 +27,8 @@ metadata:
   namespace: myfleet
 type: Opaque
 stringData:
-  POSTGRES_USER: "PLACEHOLDER_POSTGRES_USER"
-  POSTGRES_PASSWORD: "PLACEHOLDER_POSTGRES_PASSWORD"
+  POSTGRES_USER: "myfleet"
+  POSTGRES_PASSWORD: "myfleet"
   POSTGRES_DB: "myfleet"
 
 ---
@@ -40,6 +40,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  storageClassName: longhorn
   resources:
     requests:
       storage: 5Gi

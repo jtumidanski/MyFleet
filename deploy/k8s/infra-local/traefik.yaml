@@ -1,10 +1,16 @@
 ---
+# Dev-only Traefik. This MUST NOT be applied to a shared cluster: the
+# ClusterRole below grants a cluster-wide watch on Traefik CRDs, and bee's
+# k3s Traefik already runs --providers.kubernetescrd cluster-wide. Two
+# controllers reconciling the same IngressRoutes would fight over every
+# route on the cluster, atlas's included. Referenced only by overlays/local.
+
+---
 # ServiceAccount for Traefik so it can watch Kubernetes resources
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: traefik
-  namespace: myfleet
 
 ---
 # ClusterRole granting Traefik read access to services, endpoints, secrets, and Traefik CRDs
@@ -47,14 +53,12 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: traefik
-    namespace: myfleet
 
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: traefik
-  namespace: myfleet
   labels:
     app: traefik
 spec:
@@ -109,7 +113,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: traefik
-  namespace: myfleet
   labels:
     app: traefik
 spec:
@@ -124,88 +127,3 @@ spec:
     - port: 8080
       targetPort: 8080
       name: dashboard
-
----
-# Strip-prefix Middlewares for each service path prefix
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: auth-stripprefix
-  namespace: myfleet
-spec:
-  stripPrefix:
-    prefixes:
-      - /api/auth
-
----
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: fleet-stripprefix
-  namespace: myfleet
-spec:
-  stripPrefix:
-    prefixes:
-      - /api/fleet
-
----
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: media-stripprefix
-  namespace: myfleet
-spec:
-  stripPrefix:
-    prefixes:
-      - /api/media
-
----
-apiVersion: traefik.io/v1alpha1
-kind: Middleware
-metadata:
-  name: notifications-stripprefix
-  namespace: myfleet
-spec:
-  stripPrefix:
-    prefixes:
-      - /api/notifications
-
----
-# IngressRoute — routes all /api/<service>/* paths to the respective ClusterIP services
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: myfleet-routes
-  namespace: myfleet
-spec:
-  entryPoints:
-    - web
-  routes:
-    - match: PathPrefix(`/api/auth`)
-      kind: Rule
-      middlewares:
-        - name: auth-stripprefix
-      services:
-        - name: auth-service
-          port: 8080
-    - match: PathPrefix(`/api/fleet`)
-      kind: Rule
-      middlewares:
-        - name: fleet-stripprefix
-      services:
-        - name: fleet-service
-          port: 8080
-    - match: PathPrefix(`/api/media`)
-      kind: Rule
-      middlewares:
-        - name: media-stripprefix
-      services:
-        - name: media-service
-          port: 8080
-    - match: PathPrefix(`/api/notifications`)
-      kind: Rule
-      middlewares:
-        - name: notifications-stripprefix
-      services:
-        - name: notification-service
-          port: 8080

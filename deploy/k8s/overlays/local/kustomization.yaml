@@ -1,9 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Reference base
 resources:
   - ../../base
+  - ../../infra-local
 
 # All service deployments run as a single replica in local dev
 replicas:

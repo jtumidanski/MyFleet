@@ -1,0 +1,41 @@
+---
+# Strip-prefix Middlewares for each gateway path prefix. Needed by both the
+# local overlay (its own Traefik) and the main overlay (bee's cluster Traefik).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: auth-stripprefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /api/auth
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: fleet-stripprefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /api/fleet
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: media-stripprefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /api/media
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: notifications-stripprefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /api/notifications

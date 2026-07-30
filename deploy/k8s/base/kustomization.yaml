@@ -3,33 +3,25 @@ kind: Kustomization
 
 namespace: myfleet
 
+# Apps only. Bundled dev infrastructure lives in ../infra-local and is
+# referenced solely by overlays/local. Secrets are NOT here — the main overlay
+# takes them out-of-band (see ../secrets.example.yaml).
 resources:
-  # Namespace first
   - namespace.yaml
+  - routing/middlewares.yaml
 
-  # Infrastructure
-  - infra/postgres.yaml
-  - infra/minio.yaml
-  - infra/redpanda.yaml
-  - infra/traefik.yaml
-
-  # Application services
   - auth-service/configmap.yaml
-  - auth-service/secret.yaml
   - auth-service/deployment.yaml
   - auth-service/service.yaml
 
   - fleet-service/configmap.yaml
-  - fleet-service/secret.yaml
   - fleet-service/deployment.yaml
   - fleet-service/service.yaml
 
   - media-service/configmap.yaml
-  - media-service/secret.yaml
   - media-service/deployment.yaml
   - media-service/service.yaml
 
   - notification-service/configmap.yaml
-  - notification-service/secret.yaml
   - notification-service/deployment.yaml
   - notification-service/service.yaml

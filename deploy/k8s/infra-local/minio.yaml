@@ -12,8 +12,8 @@ metadata:
   namespace: myfleet
 type: Opaque
 stringData:
-  MINIO_ROOT_USER: "PLACEHOLDER_MINIO_ROOT_USER"
-  MINIO_ROOT_PASSWORD: "PLACEHOLDER_MINIO_ROOT_PASSWORD"
+  MINIO_ROOT_USER: "myfleet"
+  MINIO_ROOT_PASSWORD: "myfleet-local-dev"
 
 ---
 apiVersion: v1
@@ -24,6 +24,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  storageClassName: longhorn
   resources:
     requests:
       storage: 10Gi

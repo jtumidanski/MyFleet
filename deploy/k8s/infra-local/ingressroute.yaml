@@ -1,0 +1,39 @@
+---
+# Local-dev routing: no Host match, since local dev hits the NodePort directly.
+# The main overlay ships its own host-matched IngressRoute.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: myfleet-routes
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: PathPrefix(`/api/auth`)
+      kind: Rule
+      middlewares:
+        - name: auth-stripprefix
+      services:
+        - name: auth-service
+          port: 8080
+    - match: PathPrefix(`/api/fleet`)
+      kind: Rule
+      middlewares:
+        - name: fleet-stripprefix
+      services:
+        - name: fleet-service
+          port: 8080
+    - match: PathPrefix(`/api/media`)
+      kind: Rule
+      middlewares:
+        - name: media-stripprefix
+      services:
+        - name: media-service
+          port: 8080
+    - match: PathPrefix(`/api/notifications`)
+      kind: Rule
+      middlewares:
+        - name: notifications-stripprefix
+      services:
+        - name: notification-service
+          port: 8080
