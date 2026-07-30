@@ -22,7 +22,10 @@ function describeError(err: unknown): { short: string; label: string } {
   if (apiError.status === 404) {
     return { short: 'Missing', label: 'Photo unavailable: it no longer exists' };
   }
-  return { short: 'Load failed', label: 'Photo could not be loaded. Reload the page to try again.' };
+  return {
+    short: 'Load failed',
+    label: 'Photo could not be loaded. Reload the page to try again.',
+  };
 }
 
 /**
