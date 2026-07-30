@@ -45,10 +45,10 @@ jobs:
         run: npm ci
 
       - name: Frontend test
-        run: npm run -w @myfleet/web test
+        run: make fe-test
 
       - name: Frontend build
-        run: npm run -w @myfleet/web build
+        run: make fe-build
 
   # ── Publish container images to GHCR ─────────────────────────────────────────
   publish:
