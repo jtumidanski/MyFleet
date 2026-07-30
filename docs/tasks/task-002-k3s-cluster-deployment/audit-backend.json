@@ -1,0 +1,56 @@
+{
+  "service": "media-service",
+  "path": "apps/media-service",
+  "range": "16e4aa7..a8d5221",
+  "date": "2026-07-30",
+  "build": "pass",
+  "vet": "pass",
+  "tests": "pass",
+  "testsFailed": 0,
+  "overallStatus": "needs-work",
+  "domains": [
+    {
+      "name": "mediaobject",
+      "type": "domain",
+      "checks": [
+        { "id": "DOM-01", "name": "builder.go exists", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/builder.go:16,24-35,38-45" },
+        { "id": "DOM-02", "name": "ToEntity() method", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/entity.go:48" },
+        { "id": "DOM-03", "name": "Make(Entity) function", "status": "warn", "evidence": "apps/media-service/internal/mediaobject/entity.go:30 returns Model, not (Model, error); pre-existing" },
+        { "id": "DOM-04", "name": "Transform function", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/rest.go:18" },
+        { "id": "DOM-05", "name": "TransformSlice function", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/rest.go:36" },
+        { "id": "DOM-06", "name": "Processor accepts FieldLogger", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/processor.go:77" },
+        { "id": "DOM-07", "name": "Handlers pass injected logger", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/resource.go:45; no logrus.StandardLogger() in package" },
+        { "id": "DOM-08", "name": "POST/PATCH use RegisterInputHandler", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/resource.go:48; PUT /media/{id}/content at :74 is raw octet-stream, not JSON:API" },
+        { "id": "DOM-09", "name": "Transform errors handled", "status": "warn", "evidence": "N/A - Transform returns no error (rest.go:18); no discards present" },
+        { "id": "DOM-10", "name": "Providers use lazy evaluation", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/provider.go:24,35" },
+        { "id": "DOM-11", "name": "No os.Getenv() in handlers", "status": "pass", "evidence": "zero matches in package; read once at apps/media-service/cmd/main.go:91" },
+        { "id": "DOM-12", "name": "No cross-domain logic in handlers", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/resource.go handlers call proc.* only" },
+        { "id": "DOM-13", "name": "Handlers do not call providers directly", "status": "pass", "evidence": "no provider calls in handler bodies, resource.go:46-173" },
+        { "id": "DOM-14", "name": "No direct entity creation in handlers", "status": "pass", "evidence": "zero db.Create/db.Save/db.Delete in resource.go" },
+        { "id": "DOM-15", "name": "administrator.go exists for writes", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/administrator.go:11-18; StoreContent writes via processor.go:146" },
+        { "id": "DOM-16", "name": "Domain error to HTTP status mapping", "status": "pass", "evidence": "processor.go:41-46,252-266; packages/shared-go/server/errors.go:15-34" },
+        { "id": "DOM-17", "name": "JSON:API interface on REST models", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/rest.go:19-21 shared server.Resource envelope" },
+        { "id": "DOM-18", "name": "Request models use flat structure", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/resource.go:48-51" },
+        { "id": "DOM-19", "name": "Table-driven tests", "status": "fail", "evidence": "no t.Run( in apps/media-service/internal/mediaobject/*_test.go; pre-existing package style" }
+      ]
+    }
+  ],
+  "security": [
+    { "id": "SEC-01", "name": "No new unauthenticated surface", "status": "pass", "evidence": "both new routes behind authmw.JWT (apps/media-service/cmd/main.go:121-125); PUT gated by requireWrite (resource.go:77)" },
+    { "id": "SEC-02", "name": "Tenancy enforced on production path", "status": "pass", "evidence": "processor.go:132-138 (StoreContent), :209 -> :194-203 (Content), :41-46 AuthorizeAccess" },
+    { "id": "SEC-03", "name": "Content-Type provenance from DB row", "status": "pass", "evidence": "apps/media-service/internal/mediaobject/processor.go:143 uses m.ContentType()" },
+    { "id": "SEC-04", "name": "Secrets not hardcoded", "status": "pass", "evidence": "no secrets in Go diff; presign plumbing removed from apps/media-service/internal/storage/minio.go" },
+    { "id": "SEC-05", "name": "No unbounded resource consumption", "status": "fail", "evidence": "B1: resource.go:86-89 -> processor.go:143 -> storage/minio.go:107-110 -> minio-go api-put-object.go:366-373,398,423; OptimalPartInfo(-1,0)=553648128 bytes (528 MiB) vs deploy/k8s/base/media-service/deployment.yaml:56 limit 256Mi" }
+  ],
+  "blocking": [
+    "B1: 528 MiB buffer allocated on the size=-1 upload path (resource.go:86-89 -> minio-go putObjectMultipartStreamNoLength) against a 256 MiB pod limit (deploy/k8s/base/media-service/deployment.yaml:56); one chunked or oversized-Content-Length request OOM-kills media-service, reachable from the internet via deploy/k8s/overlays/main/ingressroute.yaml:85 with no gateway body limit",
+    "B2: GET /media/{id}/content returns 200 with an empty body when the object has no bytes in MinIO; minio GetObject is lazy (api-get-object.go:32-55,98-100) so storage/minio.go:114-120 returns nil error, and resource.go:152 commits WriteHeader(200) before the first read"
+  ],
+  "nonBlocking": [
+    "N1: oversized Content-Length streams a full 25 MiB to MinIO before the 413 (subsumed by the B1 fix)",
+    "N2: response Content-Length taken from the DB row not the object (resource.go:147-148)",
+    "N3: no X-Content-Type-Options: nosniff or Content-Disposition on GET /media/{id}/content; client-supplied Content-Type unvalidated (builder.go:38-45). Limited by Bearer-only auth (packages/shared-go/auth/middleware.go:18-19)",
+    "N4: DOM-19 new tests are not table-driven",
+    "N5: pre-existing Make/Transform signature deviations (entity.go:30, rest.go:18)"
+  ]
+}
