@@ -37,9 +37,10 @@ func classifyUploadError(err error) error {
 	return err
 }
 
-// InitializeRoutes wires the JWT-protected media-object endpoints. Paths are
-// bare (the gateway strips /api/media). Event emission uses the transactional
-// outbox (design A8); no Kafka producer is needed here.
+// InitializeRoutes wires the JWT-protected media-object endpoints. Paths
+// carry their own /media segment (the gateway strips only /api). Event
+// emission uses the transactional outbox (design A8); no Kafka producer is
+// needed here.
 func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUploadBytes int64) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db), st)
 	return func(r chi.Router) {

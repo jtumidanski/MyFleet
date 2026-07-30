@@ -13,7 +13,10 @@ export interface ListResult<A> {
  * and add resource-specific methods on top.
  *
  * `apiClient.baseUrl` is '', so paths passed here must be absolute gateway
- * paths; Traefik strips `/api/<service>` before routing to the backend.
+ * paths. Traefik strips only `/api` before routing to auth-service and
+ * media-service (their routes already carry their own /auth or /media
+ * segment); fleet-service and notification-service still have their full
+ * `/api/<service>` prefix stripped.
  */
 export abstract class BaseService<A, CreateA = A, UpdateA = Partial<A>> {
   protected abstract readonly resourceType: string;
