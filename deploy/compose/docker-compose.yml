@@ -83,8 +83,8 @@ services:
     labels:
       - "traefik.enable=true"
       # Route /api/auth/* to this service and strip only the /api mount point
-      # so the service sees its own /auth/* (and /.well-known/jwks.json)
-      # routes, which already carry the /auth segment.
+      # so the service sees its own /auth/* routes, which already carry the
+      # /auth segment.
       - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
       - "traefik.http.routers.auth.entrypoints=web"
       - "traefik.http.routers.auth.middlewares=auth-stripprefix"
