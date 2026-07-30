@@ -23,12 +23,6 @@ import (
 // confirmed; the variant worker pool consumes it (design §7/§8.3).
 const EventTypeMediaUploaded = "media.uploaded"
 
-// presignTTL is the lifetime of the presigned GET URL DownloadURL still hands
-// out. Deliberately NOT part of ObjectStore (see below) — Task 4 replaces
-// DownloadURL and this constant with a proxied Content method, at which point
-// this goes away too.
-const presignTTL = 15 * time.Minute
-
 // ObjectStore is the subset of storage.Client the processor needs. Implemented
 // by *storage.Client; kept as an interface so the processor is unit-testable.
 //
@@ -37,6 +31,7 @@ const presignTTL = 15 * time.Minute
 // applications' buckets, so it is never exposed outside the cluster.
 type ObjectStore interface {
 	PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
+	GetObject(ctx context.Context, key string) (io.ReadCloser, error)
 	Bucket() string
 }
 
@@ -207,32 +202,19 @@ func (pr *Processor) GetByID(id, identityFleetID string) (Model, error) {
 	return m, nil
 }
 
-// presigner is the narrow, download-only capability DownloadURL needs. It is
-// deliberately NOT folded into ObjectStore: PutObject-based callers (and the
-// fakeStore test double) have no reason to implement it, and Task 4 deletes
-// this method, presigner, and DownloadURL together when the download route
-// moves to the same proxy-through-the-service model as upload.
-type presigner interface {
-	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
-}
-
-// DownloadURL authorizes by fleet and returns a short-lived presigned GET URL.
-//
-// TEMPORARY: this still hands the browser a presigned MinIO URL, which is
-// exactly the pattern this task replaces for uploads (MinIO's in-cluster host
-// is unresolvable from a browser) — download is no more broken by this change
-// than it already was. Task 4 replaces this with a proxied Content method; see
-// design.md Amendment A1 / plan.md Task 4.
-func (pr *Processor) DownloadURL(id, identityFleetID string) (string, error) {
+// Content authorizes by fleet and opens the object's bytes for streaming to the
+// client. The caller owns closing the returned ReadCloser. Bytes are proxied
+// rather than presigned so MinIO stays unreachable from the browser.
+func (pr *Processor) Content(ctx context.Context, id, identityFleetID string) (Model, io.ReadCloser, error) {
 	m, err := pr.GetByID(id, identityFleetID)
 	if err != nil {
-		return "", err
+		return Model{}, nil, err
 	}
-	p, ok := pr.storage.(presigner)
-	if !ok {
-		return "", errors.New("object store does not support presigned downloads")
+	rc, err := pr.storage.GetObject(ctx, m.ObjectKey())
+	if err != nil {
+		return Model{}, nil, err
 	}
-	return p.PresignGet(context.Background(), m.ObjectKey(), presignTTL)
+	return m, rc, nil
 }
 
 // SoftDelete marks an object deleted (sets deleted_at + purge_after), scoped to

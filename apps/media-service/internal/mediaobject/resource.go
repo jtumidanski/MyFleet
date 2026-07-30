@@ -2,7 +2,9 @@ package mediaobject
 
 import (
 	"errors"
+	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
@@ -125,21 +127,33 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUp
 			server.WriteJSON(w, http.StatusOK, server.Document{Data: Transform(m)})
 		})
 
-		// GET /media/{id}/download — short-lived presigned GET after authz.
-		r.Get("/media/{id}/download", func(w http.ResponseWriter, req *http.Request) {
+		// GET /media/{id}/content — stream the bytes after authz. Proxied, not
+		// presigned: MinIO is a shared cluster service and is never exposed
+		// outside the cluster.
+		r.Get("/media/{id}/content", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
-			m, err := proc.GetByID(id, identity.ActiveFleetID)
+			m, rc, err := proc.Content(req.Context(), id, identity.ActiveFleetID)
 			if err != nil {
 				server.WriteError(w, err)
 				return
 			}
-			url, err := proc.DownloadURL(id, identity.ActiveFleetID)
-			if err != nil {
-				server.WriteError(w, err)
-				return
+			defer func() { _ = rc.Close() }()
+
+			if ct := m.ContentType(); ct != "" {
+				w.Header().Set("Content-Type", ct)
 			}
-			server.WriteJSON(w, http.StatusOK, server.Document{Data: TransformWithDownloadURL(m, url)})
+			if size := m.Size(); size > 0 {
+				w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+			}
+			// Per-fleet authorized bytes — never store in a shared cache.
+			w.Header().Set("Cache-Control", "private, max-age=300")
+			w.WriteHeader(http.StatusOK)
+			if _, err := io.Copy(w, rc); err != nil {
+				// Headers are already written, so the status cannot be changed;
+				// log and let the client see a truncated body.
+				log.WithError(err).Warn("media content stream interrupted")
+			}
 		})
 
 		// DELETE /media/{id} — soft delete (deleted_at + purge_after = +5d).

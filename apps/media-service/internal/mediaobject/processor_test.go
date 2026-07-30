@@ -311,6 +311,10 @@ type fakeStore struct {
 	putSize int64
 	putCT   string
 	putErr  error
+
+	getKey  string
+	getBody []byte
+	getErr  error
 }
 
 func (f *fakeStore) Bucket() string { return f.bucket }
@@ -325,6 +329,14 @@ func (f *fakeStore) PutObject(ctx context.Context, key string, r io.Reader, size
 	}
 	f.putKey, f.putBody, f.putSize, f.putCT = key, b, size, contentType
 	return nil
+}
+
+func (f *fakeStore) GetObject(ctx context.Context, key string) (io.ReadCloser, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	f.getKey = key
+	return io.NopCloser(bytes.NewReader(f.getBody)), nil
 }
 
 func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
@@ -445,5 +457,54 @@ func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
 	}
 	if persisted.Size() != int64(len(body)) {
 		t.Fatalf("persisted size = %d, want %d", persisted.Size(), len(body))
+	}
+}
+
+func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	m, rc, err := pr.Content(context.Background(), created.ID(), "fleet-a")
+	if err != nil {
+		t.Fatalf("content: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	if store.getKey != created.ObjectKey() {
+		t.Fatalf("read key %q, want %q", store.getKey, created.ObjectKey())
+	}
+	if m.ContentType() != "image/jpeg" {
+		t.Fatalf("content type = %q, want image/jpeg", m.ContentType())
+	}
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != "jpeg-bytes" {
+		t.Fatalf("body = %q, want jpeg-bytes", got)
+	}
+}
+
+func TestContent_crossFleetIs404(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-b"); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("cross-fleet read must be 404, got %v", err)
+	}
+	if store.getKey != "" {
+		t.Fatalf("cross-fleet read must not touch storage, read key %q", store.getKey)
 	}
 }

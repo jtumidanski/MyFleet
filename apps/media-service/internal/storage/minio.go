@@ -1,16 +1,16 @@
 // Package storage wraps the MinIO client used by media-service. Buckets are
-// always private; bytes are exchanged with clients exclusively via presigned
-// URLs (design §8.3). Object keys are namespaced by fleet so a single bucket
-// can hold every fleet's media without collisions.
+// always private; bytes are exchanged with clients exclusively by proxying
+// through media-service, never by presigned URL — MinIO is a shared cluster
+// service and is not exposed outside the cluster. Object keys are namespaced
+// by fleet so a single bucket can hold every fleet's media without
+// collisions.
 package storage
 
 import (
 	"context"
 	"io"
-	"net/url"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -69,7 +69,9 @@ type Config struct {
 }
 
 // New constructs the wrapped client and ensures the bucket exists (private).
-// It never sets any public-read policy; all access is via presigned URLs.
+// It never sets any public-read policy; bytes are exchanged with clients
+// exclusively by proxying through media-service, never by presigned URL —
+// MinIO is a shared cluster service and is not exposed outside the cluster.
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	mc, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
@@ -99,26 +101,6 @@ func (c *Client) ensureBucket(ctx context.Context) error {
 		return nil
 	}
 	return c.mc.MakeBucket(ctx, c.bucket, minio.MakeBucketOptions{})
-}
-
-// PresignPut returns a short-lived presigned URL the client uses to PUT bytes
-// directly to MinIO (init-upload flow, design §8.3).
-func (c *Client) PresignPut(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	u, err := c.mc.PresignedPutObject(ctx, c.bucket, key, ttl)
-	if err != nil {
-		return "", err
-	}
-	return u.String(), nil
-}
-
-// PresignGet returns a short-lived presigned URL the client uses to GET bytes
-// directly from MinIO (download flow, design §8.3).
-func (c *Client) PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	u, err := c.mc.PresignedGetObject(ctx, c.bucket, key, ttl, url.Values{})
-	if err != nil {
-		return "", err
-	}
-	return u.String(), nil
 }
 
 // PutObject uploads bytes to the bucket under key (used by the variant worker).

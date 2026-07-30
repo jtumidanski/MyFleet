@@ -12,7 +12,6 @@ type Attributes struct {
 	Size             int64  `json:"size,omitempty"`
 	OriginalFilename string `json:"originalFilename,omitempty"`
 	Status           string `json:"status"`
-	DownloadURL      string `json:"downloadUrl,omitempty"`
 }
 
 // Transform converts a Model to a JSON:API Resource.
@@ -31,15 +30,6 @@ func Transform(m Model) server.Resource {
 			Status:           string(m.Status()),
 		},
 	}
-}
-
-// TransformWithDownloadURL renders an object plus its presigned GET URL.
-func TransformWithDownloadURL(m Model, downloadURL string) server.Resource {
-	res := Transform(m)
-	attrs := res.Attributes.(Attributes)
-	attrs.DownloadURL = downloadURL
-	res.Attributes = attrs
-	return res
 }
 
 // TransformSlice converts a slice of Models to JSON:API Resources.
