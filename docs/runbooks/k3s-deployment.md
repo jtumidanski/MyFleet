@@ -27,12 +27,15 @@ Pick a password and keep it for step 3.
 ```sh
 POD=$(kubectl -n postgres get pods -l app=postgres -o jsonpath='{.items[0].metadata.name}')
 
-kubectl -n postgres exec "$POD" -- psql -U postgres <<'SQL'
+# -i is required: kubectl exec does not attach local stdin without it, so a
+# heredoc piped in without -i silently delivers nothing to psql — no error,
+# just a database that was never created.
+kubectl -n postgres exec -i "$POD" -- psql -U postgres <<'SQL'
 CREATE ROLE myfleet LOGIN PASSWORD '<password>';
 CREATE DATABASE myfleet OWNER myfleet;
 SQL
 
-kubectl -n postgres exec "$POD" -- psql -U postgres -d myfleet <<'SQL'
+kubectl -n postgres exec -i "$POD" -- psql -U postgres -d myfleet <<'SQL'
 CREATE SCHEMA IF NOT EXISTS auth         AUTHORIZATION myfleet;
 CREATE SCHEMA IF NOT EXISTS fleet        AUTHORIZATION myfleet;
 CREATE SCHEMA IF NOT EXISTS media        AUTHORIZATION myfleet;
@@ -77,6 +80,10 @@ Then create the bucket and user:
 
 ```sh
 kubectl -n minio port-forward svc/minio 9000:9000 &
+# Backgrounding port-forward and immediately using the tunnel races its
+# startup on a slow connection. Wait until it actually accepts connections
+# (bash's /dev/tcp avoids depending on nc being installed):
+until (exec 3<>/dev/tcp/localhost/9000) 2>/dev/null; do sleep 0.5; done
 mc alias set bee http://localhost:9000 <root-user> <root-pass>
 mc mb bee/myfleet-media
 mc admin user add bee myfleet <minio-secret>
@@ -193,16 +200,30 @@ Apply it:
 kubectl apply -f argocd-myfleet.yml
 ```
 
+Every `newTag` in `deploy/k8s/overlays/main/kustomization.yaml` seeds as
+`latest` until the first `bump-overlay` run pins them to a real SHA (see
+below). This is currently moot in the normal flow because the `main` pipeline
+publishes all five images (including `ghcr.io/jtumidanski/myfleet-web`)
+before Argo CD ever syncs. It matters for a fresh cluster or a from-scratch
+replay of this bootstrap: if the Application is applied before any image has
+been pushed to GHCR under that tag, the `web` Deployment (or any service)
+`ImagePullBackOff`s until the corresponding image lands — self-resolving once
+CI publishes, same shape as the schema-missing `CrashLoopBackOff` above.
+
 ### How images get pinned after the first sync
 
 `.github/workflows/main.yml`'s `main` push pipeline runs `build-test` →
-`publish` (image build/push, matrix of 5: the four Go services plus `web`) →
-`trivy` (a CRITICAL/HIGH vulnerability gate, same matrix, `fail-fast: false` so
-one service's findings don't hide another's) → `tag`, and finally
-`bump-overlay`, which now declares `needs: [publish, trivy]`. A failing Trivy
-scan on any image blocks `bump-overlay`, so `deploy/k8s/overlays/main/kustomization.yaml`
-keeps its previous `newTag` and the cluster keeps running the last good SHA —
-the gate fails closed.
+`publish` (image build/push, matrix of 5: the four Go services plus `web`),
+then fans out into two jobs that both depend only on `publish` and run in
+parallel: `trivy` (a CRITICAL/HIGH vulnerability gate, same matrix,
+`fail-fast: false` so one service's findings don't hide another's) and `tag`
+(pushes the next semver tag). Trivy does **not** gate `tag` — a failing scan
+still lets the version tag land. The only job downstream of both is
+`bump-overlay`, which declares `needs: [publish, trivy]` (not `tag`). A
+failing Trivy scan on any image blocks `bump-overlay`, so
+`deploy/k8s/overlays/main/kustomization.yaml` keeps its previous `newTag` and
+the cluster keeps running the last good SHA — the gate fails closed, even
+though the SHA already got a version tag.
 
 `bump-overlay` also carries a job-scoped `concurrency: {group: bump-overlay,
 cancel-in-progress: false}` so overlapping runs (two merges to `main` in quick
