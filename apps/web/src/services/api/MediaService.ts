@@ -60,7 +60,12 @@ class MediaService {
    * GET /api/media/{id}/content — the raw bytes, authenticated.
    *
    * `original` sends no query parameter at all, so every pre-existing caller's
-   * request stays byte-identical on the wire.
+   * request stays byte-identical on the wire. That is the only thing protecting
+   * the vehicle detail gallery, which was never touched by the variant work —
+   * MediaService.test.ts pins it.
+   *
+   * A derived variant that the service cannot produce answers 404; it does NOT
+   * fall back to the original (apps/media-service/internal/mediaobject/processor.go).
    */
   async getContentBlob(id: string, variant: MediaVariant = 'original'): Promise<Blob> {
     const suffix = variant === 'original' ? '' : `?variant=${variant}`;

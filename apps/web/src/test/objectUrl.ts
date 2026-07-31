@@ -1,10 +1,19 @@
 import { vi } from 'vitest';
+import { cleanup } from '@testing-library/react';
 
 /**
  * jsdom implements neither createObjectURL nor revokeObjectURL, so anything
  * going through useMediaContentUrl needs them stubbed. Returns the mocks so a
  * test can assert on call counts and arguments (the hook's create/revoke pairing
  * is what keeps it from leaking allocations under StrictMode).
+ *
+ * The stub is a SUBCLASS of URL rather than `Object.assign(URL, ...)`. Assigning
+ * onto the real class mutates it before `vi.stubGlobal` snapshots the original,
+ * so `vi.unstubAllGlobals()` restores a value that already carries the mocks and
+ * the stubbed methods leak into every later test file in the process. Extending
+ * leaves the real `URL` untouched, so the restore is real — and the subclass
+ * still constructs and parses URLs exactly as before, which `new URL(...)` in
+ * the code under test depends on.
  */
 export function stubObjectUrl(): {
   createObjectURL: ReturnType<typeof vi.fn>;
@@ -13,6 +22,28 @@ export function stubObjectUrl(): {
   let counter = 0;
   const createObjectURL = vi.fn(() => `blob:mock-${counter++}`);
   const revokeObjectURL = vi.fn();
-  vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }));
+
+  class StubbedURL extends URL {
+    static createObjectURL = createObjectURL;
+    static revokeObjectURL = revokeObjectURL;
+  }
+
+  vi.stubGlobal('URL', StubbedURL);
   return { createObjectURL, revokeObjectURL };
+}
+
+/**
+ * Unmounts every rendered tree, THEN removes the stub.
+ *
+ * Order is the whole point. Vitest runs `afterEach` hooks last-registered-first,
+ * and Testing Library registers its auto-cleanup when it is imported — i.e.
+ * before a test file's own `afterEach` — so the file's hook runs first and
+ * `vi.unstubAllGlobals()` would restore the real `URL` while components are
+ * still mounted. Their effect cleanups then call `URL.revokeObjectURL`, which
+ * jsdom does not implement. That crash was invisible while the old stub mutated
+ * the real `URL` in place and the mutation outlived the "restore".
+ */
+export function unstubObjectUrl(): void {
+  cleanup();
+  vi.unstubAllGlobals();
 }

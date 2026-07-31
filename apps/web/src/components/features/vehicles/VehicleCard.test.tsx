@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/renderWithProviders';
-import { stubObjectUrl } from '../../../test/objectUrl';
+import { stubObjectUrl, unstubObjectUrl } from '../../../test/objectUrl';
 import { mediaService } from '../../../services/api/MediaService';
-import { getRuntimeConfig } from '../../../lib/config/runtimeConfig';
+import { DEFAULT_RUNTIME_CONFIG, loadRuntimeConfig } from '../../../lib/config/runtimeConfig';
 import { VehicleCard } from './VehicleCard';
 import type { Vehicle } from '../../../types/models/vehicle';
 
@@ -11,11 +11,19 @@ vi.mock('../../../services/api/MediaService', () => ({
   mediaService: { getContentBlob: vi.fn() },
 }));
 
-vi.mock('../../../lib/config/runtimeConfig', () => ({
-  getRuntimeConfig: vi.fn(),
-}));
+// The runtime-config module is deliberately NOT mocked. Its observability is the
+// behaviour under test — a mocked getter would happily satisfy every assertion
+// here while the real app silently ignored its ConfigMap.
+const TEMPLATE = DEFAULT_RUNTIME_CONFIG.carfaxUrlTemplate;
 
-const TEMPLATE = 'https://www.carfax.com/VehicleHistory/p/Report.cfx?vin={vin}';
+/** Serves one config document and latches it into the real module store. */
+async function latchConfig(carfaxUrlTemplate: string): Promise<void> {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify({ carfaxUrlTemplate }), { status: 200 })),
+  );
+  await loadRuntimeConfig();
+}
 
 function makeVehicle(attrs: Partial<Vehicle['attributes']> = {}): Vehicle {
   return {
@@ -31,14 +39,16 @@ function makeVehicle(attrs: Partial<Vehicle['attributes']> = {}): Vehicle {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   stubObjectUrl();
-  vi.mocked(getRuntimeConfig).mockReturnValue({ carfaxUrlTemplate: TEMPLATE });
+  // The latch is module state and survives between tests, so reset it to a
+  // known value rather than depending on what ran before.
+  await latchConfig(TEMPLATE);
   vi.mocked(mediaService.getContentBlob).mockResolvedValue(new Blob(['x']));
 });
 
 afterEach(() => {
-  vi.unstubAllGlobals();
+  unstubObjectUrl();
   vi.clearAllMocks();
 });
 
@@ -103,10 +113,47 @@ describe('VehicleCard', () => {
     expect(screen.getAllByRole('link')).toHaveLength(1);
   });
 
-  it('omits the Carfax button when the configured template ignores the VIN', () => {
-    vi.mocked(getRuntimeConfig).mockReturnValue({ carfaxUrlTemplate: 'https://www.carfax.com/' });
+  it('omits the Carfax button when the configured template ignores the VIN', async () => {
+    await latchConfig('https://www.carfax.com/');
 
     renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
+    expect(screen.queryByRole('link', { name: /Carfax/ })).not.toBeInTheDocument();
+  });
+
+  it('picks up a runtime config that arrives AFTER the card has mounted', async () => {
+    // main.tsx no longer blocks the mount on the config fetch, so this is the
+    // ordering that actually happens in production. If the card read the module
+    // getter directly instead of subscribing, it would keep the compiled-in
+    // default forever and a ConfigMap override would silently never take effect
+    // — a quieter and worse bug than the blank page that change removed.
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
+
+    expect(screen.getByRole('link', { name: /Carfax/ })).toHaveAttribute(
+      'href',
+      'https://www.carfax.com/VehicleHistory/p/Report.cfx?vin=1HGCM82633A004352',
+    );
+
+    await act(async () => {
+      await latchConfig('https://example.test/report?vin={vin}');
+    });
+
+    expect(screen.getByRole('link', { name: /Carfax/ })).toHaveAttribute(
+      'href',
+      'https://example.test/report?vin=1HGCM82633A004352',
+    );
+  });
+
+  it('drops the Carfax button when a late config makes the template unusable', async () => {
+    // The subscription has to work in both directions: a ConfigMap that removes
+    // {vin} must remove the button from cards already on screen, not leave a
+    // stale link pointing at the old template.
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
+    expect(screen.getByRole('link', { name: /Carfax/ })).toBeInTheDocument();
+
+    await act(async () => {
+      await latchConfig('https://www.carfax.com/');
+    });
+
     expect(screen.queryByRole('link', { name: /Carfax/ })).not.toBeInTheDocument();
   });
 

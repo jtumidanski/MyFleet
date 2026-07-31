@@ -6,7 +6,7 @@ import { ApiError } from '@myfleet/shared-ts';
 import { mediaKeys, useMediaContentUrl } from './media';
 import { performMediaUpload, MEDIA_MAX_UPLOAD_BYTES, MEDIA_TOO_LARGE_CODE } from './media';
 import { mediaService } from '../../../services/api/MediaService';
-import { stubObjectUrl } from '../../../test/objectUrl';
+import { stubObjectUrl, unstubObjectUrl } from '../../../test/objectUrl';
 
 // useMediaContentUrl goes through mediaService.getContentBlob; mock the
 // module so no network call is needed and each test controls what blob
@@ -144,7 +144,7 @@ describe('useMediaContentUrl', () => {
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    unstubObjectUrl();
   });
 
   it('never reports settled (isLoading: false) with a null url once the blob has arrived — no "No image" flash', async () => {

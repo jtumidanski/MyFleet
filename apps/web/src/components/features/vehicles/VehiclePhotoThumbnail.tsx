@@ -70,9 +70,12 @@ export function VehiclePhotoThumbnail({
     return <Skeleton className={cn(BOX, className)} />;
   }
   if (isError || !url) {
-    return (
-      <PhotoPlaceholder label={isError ? 'Photo unavailable' : 'No photo'} className={className} />
-    );
+    // "No photo" is reserved for the `!mediaId` branch above. Reaching here
+    // means the vehicle DOES have a photo we could not show — a real error, or
+    // React Query pausing the query offline (isLoading false, isError false,
+    // data undefined), which would otherwise tell the user their vehicle has no
+    // photo at all.
+    return <PhotoPlaceholder label="Photo unavailable" className={className} />;
   }
   return (
     <img

@@ -1,4 +1,11 @@
-import { z } from 'zod';
+import { createErrorFromUnknown } from '@myfleet/shared-ts';
+import {
+  DEFAULT_CARFAX_URL_TEMPLATE,
+  runtimeConfigSchema,
+  type RuntimeConfig,
+} from '../schemas/runtimeConfig';
+
+export type { RuntimeConfig };
 
 /**
  * Configuration the SPA reads at runtime rather than at build time.
@@ -11,10 +18,11 @@ import { z } from 'zod';
  *
  * It is deliberately built as a general facility with one key today rather than
  * as a Carfax special case, so the second key does not require redesigning it.
+ *
+ * The module is a plain observable store, deliberately free of React: the
+ * Carfax URL builder that consumes it is a pure function, and `useRuntimeConfig`
+ * (lib/hooks/useRuntimeConfig.ts) is the only thing that knows about React.
  */
-export interface RuntimeConfig {
-  carfaxUrlTemplate: string;
-}
 
 /**
  * Compiled into the bundle, so the app works with no ConfigMap at all: local
@@ -22,26 +30,18 @@ export interface RuntimeConfig {
  * adopted the ConfigMap.
  */
 export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = {
-  carfaxUrlTemplate: 'https://www.carfax.com/VehicleHistory/p/Report.cfx?vin={vin}',
+  carfaxUrlTemplate: DEFAULT_CARFAX_URL_TEMPLATE,
 };
 
 const RUNTIME_CONFIG_URL = '/config/config.json';
 
 /**
- * Without a bound, a wedged nginx worker turns a missing 60-byte file into a
- * permanent white screen, because nothing renders until this settles.
+ * Without a bound, a wedged nginx worker leaves the config pending forever. The
+ * app renders regardless (main.tsx no longer waits on it), so this only bounds
+ * how long the compiled-in defaults stay in force — but an unbounded fetch also
+ * never releases its connection, so the ceiling stays.
  */
 const FETCH_TIMEOUT_MS = 2000;
-
-// `.catch()` per field, then once more on the object, is what makes a partially
-// broken document degrade rather than being discarded: one malformed key falls
-// back on its own while the rest of the document is honoured. Unknown keys are
-// stripped by zod's default object behaviour.
-const runtimeConfigSchema = z
-  .object({
-    carfaxUrlTemplate: z.string().min(1).catch(DEFAULT_RUNTIME_CONFIG.carfaxUrlTemplate),
-  })
-  .catch(DEFAULT_RUNTIME_CONFIG);
 
 /** Validates one parsed document, falling back per field. Never throws. */
 export function parseRuntimeConfig(raw: unknown): RuntimeConfig {
@@ -49,21 +49,48 @@ export function parseRuntimeConfig(raw: unknown): RuntimeConfig {
 }
 
 let latched: RuntimeConfig = DEFAULT_RUNTIME_CONFIG;
+const listeners = new Set<() => void>();
 
 /**
  * The latched config. Returns the compiled-in defaults until loadRuntimeConfig
  * has resolved, which is why the defaults must be a usable value rather than
  * placeholders.
+ *
+ * The returned object is referentially stable until the config actually changes,
+ * which is what makes it a valid `useSyncExternalStore` snapshot.
  */
 export function getRuntimeConfig(): RuntimeConfig {
   return latched;
 }
 
 /**
+ * Subscribes to config changes; returns the unsubscribe function.
+ *
+ * This exists because the tree now mounts BEFORE the config arrives. Without a
+ * notification, every component that rendered during that window would hold the
+ * compiled-in default forever and a ConfigMap override would silently never take
+ * effect — a quieter and worse bug than the blank page this replaced.
+ */
+export function subscribeRuntimeConfig(onChange: () => void): () => void {
+  listeners.add(onChange);
+  return () => {
+    listeners.delete(onChange);
+  };
+}
+
+function latch(next: RuntimeConfig): void {
+  latched = next;
+  for (const listener of listeners) {
+    listener();
+  }
+}
+
+/**
  * Fetches, parses, and latches the config. Never throws and never rejects —
  * every failure (404, network error, malformed body, hung request) resolves to
  * DEFAULT_RUNTIME_CONFIG and logs a single warning. Nothing about a config
- * failure may prevent the app from rendering.
+ * failure may prevent the app from rendering, and callers rely on being able to
+ * `void` the returned promise without an unhandled rejection.
  */
 export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
   const controller = new AbortController();
@@ -76,10 +103,14 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
     if (!res.ok) {
       throw new Error(`config request returned ${res.status}`);
     }
-    latched = parseRuntimeConfig(await res.json());
+    latch(parseRuntimeConfig(await res.json()));
   } catch (err) {
-    console.warn('[runtime-config] using built-in defaults:', err);
-    latched = DEFAULT_RUNTIME_CONFIG;
+    // createErrorFromUnknown is the project's one normalisation point for an
+    // unknown throwable, so a network TypeError, an ApiError-shaped object, and
+    // a plain string all surface the same readable message.
+    const apiError = createErrorFromUnknown(err);
+    console.warn('[runtime-config] using built-in defaults:', apiError.message);
+    latch(DEFAULT_RUNTIME_CONFIG);
   } finally {
     clearTimeout(timer);
   }

@@ -8,21 +8,25 @@ import './index.css';
 const rootElement = document.getElementById('root');
 if (!rootElement) throw new Error('Root element #root not found');
 
-// Runtime config is latched before the tree mounts so synchronous readers
-// (getRuntimeConfig) never observe a half-initialised value.
+// Render FIRST, latch the config after. Blocking the mount on the config fetch
+// meant a wedged /config/config.json showed a blank page for the full 2 s
+// timeout on every route — for a value whose only consumer is one optional icon
+// button. Nothing on first paint needs it.
 //
-// `.then` rather than `.catch` is the mechanism on purpose: loadRuntimeConfig
-// catches everything internally and always resolves, so this callback always
-// runs and the app always renders — with the compiled-in defaults if the fetch
-// failed. It costs one same-origin request ahead of first paint, which is not a
-// new class of delay: the app already gates its first meaningful render on the
-// auth bootstrap.
-void loadRuntimeConfig().then(() => {
-  createRoot(rootElement).render(
-    <StrictMode>
-      <AppProviders>
-        <App />
-      </AppProviders>
-    </StrictMode>,
-  );
-});
+// The config is not lost by rendering early: the module is an observable store
+// and `useRuntimeConfig` subscribes to it, so components that rendered against
+// the compiled-in defaults re-render when the real document arrives. Without
+// that subscription this ordering would be the worse bug — a ConfigMap override
+// that silently never takes effect.
+//
+// `void` is safe because loadRuntimeConfig catches everything internally and
+// always resolves; there is no rejection to handle.
+createRoot(rootElement).render(
+  <StrictMode>
+    <AppProviders>
+      <App />
+    </AppProviders>
+  </StrictMode>,
+);
+
+void loadRuntimeConfig();

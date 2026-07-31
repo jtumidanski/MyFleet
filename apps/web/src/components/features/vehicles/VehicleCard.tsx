@@ -5,7 +5,7 @@ import { Button } from '../../ui/button';
 import { Card } from '../../ui/card';
 import { VehiclePhotoThumbnail } from './VehiclePhotoThumbnail';
 import { buildCarfaxUrl } from '../../../lib/carfax';
-import { getRuntimeConfig } from '../../../lib/config/runtimeConfig';
+import { useRuntimeConfig } from '../../../lib/hooks/useRuntimeConfig';
 import type { Vehicle } from '../../../types/models/vehicle';
 
 const KNOWN_STATUSES: readonly VehicleStatus[] = [
@@ -27,9 +27,14 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
     attributes.nickname?.trim() ||
     `${attributes.year} ${attributes.make} ${attributes.model}`.trim();
   const status = asVehicleStatus(attributes.status);
+  // Read through the hook, not the module getter: the tree mounts before the
+  // runtime config fetch resolves, so a card rendered in that window has to
+  // re-render when the real template lands or a ConfigMap override would never
+  // reach the user.
+  const { carfaxUrlTemplate } = useRuntimeConfig();
   // null means "render no button": no VIN, a template that ignores {vin}, or a
   // template whose scheme is not https:. Nothing contacts Carfax until a click.
-  const carfaxUrl = buildCarfaxUrl(getRuntimeConfig().carfaxUrlTemplate, attributes.vin);
+  const carfaxUrl = buildCarfaxUrl(carfaxUrlTemplate, attributes.vin);
 
   return (
     <Card className="p-4">

@@ -4,6 +4,7 @@ import {
   getRuntimeConfig,
   loadRuntimeConfig,
   parseRuntimeConfig,
+  subscribeRuntimeConfig,
 } from './runtimeConfig';
 
 const CUSTOM = 'https://example.test/report?vin={vin}';
@@ -87,6 +88,64 @@ describe('loadRuntimeConfig', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await expect(loadRuntimeConfig()).resolves.toEqual(DEFAULT_RUNTIME_CONFIG);
+  });
+
+  it('notifies subscribers so a tree mounted before the fetch resolves updates', async () => {
+    // main.tsx renders first and loads the config after, so a latch that nobody
+    // is told about is a config that silently never takes effect.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () => new Response(JSON.stringify({ carfaxUrlTemplate: CUSTOM }), { status: 200 }),
+      ),
+    );
+    const seen: string[] = [];
+    const unsubscribe = subscribeRuntimeConfig(() => {
+      seen.push(getRuntimeConfig().carfaxUrlTemplate);
+    });
+
+    await loadRuntimeConfig();
+    expect(seen).toEqual([CUSTOM]);
+
+    unsubscribe();
+    await loadRuntimeConfig();
+    // Still one entry: unsubscribe must actually detach, or a long-lived page
+    // accumulates listeners for every unmounted card.
+    expect(seen).toEqual([CUSTOM]);
+  });
+
+  it('notifies subscribers on the failure path too', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not found', { status: 404 })),
+    );
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const onChange = vi.fn();
+    const unsubscribe = subscribeRuntimeConfig(onChange);
+
+    await loadRuntimeConfig();
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(getRuntimeConfig()).toEqual(DEFAULT_RUNTIME_CONFIG);
+    unsubscribe();
+  });
+
+  it('logs the failure through the project error helper, and still never rejects', async () => {
+    // console.warn on a raw unknown is what this replaced; createErrorFromUnknown
+    // is the one place that normalises a network TypeError, a JSON:API envelope,
+    // and a bare string into the same readable message.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Failed to fetch');
+      }),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await expect(loadRuntimeConfig()).resolves.toEqual(DEFAULT_RUNTIME_CONFIG);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[1]).toBe('Failed to fetch');
   });
 
   it('gives up rather than hanging when the request never settles', async () => {
