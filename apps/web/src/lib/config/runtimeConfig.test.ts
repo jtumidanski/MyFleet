@@ -45,7 +45,9 @@ describe('loadRuntimeConfig', () => {
   it('latches a served document so getRuntimeConfig returns it', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ carfaxUrlTemplate: CUSTOM }), { status: 200 })),
+      vi.fn(
+        async () => new Response(JSON.stringify({ carfaxUrlTemplate: CUSTOM }), { status: 200 }),
+      ),
     );
 
     await expect(loadRuntimeConfig()).resolves.toEqual({ carfaxUrlTemplate: CUSTOM });
@@ -55,7 +57,10 @@ describe('loadRuntimeConfig', () => {
   // Each of these must resolve to the defaults, never reject: a config failure
   // must not be able to stop the app from rendering.
   it('falls back to defaults on a 404 (no ConfigMap, older image)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('not found', { status: 404 })),
+    );
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await expect(loadRuntimeConfig()).resolves.toEqual(DEFAULT_RUNTIME_CONFIG);
@@ -75,7 +80,10 @@ describe('loadRuntimeConfig', () => {
   });
 
   it('falls back to defaults on malformed JSON', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('{ not json', { status: 200 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{ not json', { status: 200 })),
+    );
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await expect(loadRuntimeConfig()).resolves.toEqual(DEFAULT_RUNTIME_CONFIG);
