@@ -92,10 +92,11 @@ export function AttachmentPicker({ items, onAdd, onRemove, disabled }: Attachmen
                 size="sm"
                 variant="ghost"
                 className="h-6 w-6 p-0"
+                disabled={disabled}
                 aria-label={`Remove ${item.file.name}`}
                 onClick={() => onRemove(item.localId)}
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4" aria-hidden="true" />
               </Button>
             </li>
           ))}
