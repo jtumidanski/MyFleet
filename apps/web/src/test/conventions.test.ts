@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 
 // src/test -> apps/web
@@ -91,5 +91,42 @@ describe('index.html icon wiring', () => {
   it('declares both theme-color metas', () => {
     expect(html).toContain('media="(prefers-color-scheme: light)" content="#ffffff"');
     expect(html).toContain('media="(prefers-color-scheme: dark)" content="#020817"');
+  });
+});
+
+// FR-CONVERT-10 / FR-TEST-9. Hardcoded palette classes are how dark mode rots:
+// each one renders light-on-light or as an unreadable smear once the background
+// goes dark, and nothing in the type system stops a new one appearing.
+describe('no hardcoded palette classes', () => {
+  const PALETTE =
+    /(bg|text|border|ring|divide)-(gray|slate|zinc|neutral|white|black|red|green|blue|amber|yellow|emerald|orange)/;
+
+  function tsxFiles(dir: string): string[] {
+    return readdirSync(dir).flatMap((entry) => {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) return tsxFiles(full);
+      return full.endsWith('.tsx') ? [full] : [];
+    });
+  }
+
+  it('are absent from apps/web/src and packages/ui-components/src', () => {
+    const roots = [resolve(WEB_ROOT, 'src'), resolve(WEB_ROOT, '../../packages/ui-components/src')];
+    // This file necessarily contains the pattern. It is a .ts, and the scan is
+    // .tsx-only, so it is out of scope by construction — the explicit skip is
+    // belt-and-braces against a future rename.
+    const self = fileURLToPath(import.meta.url);
+
+    const offenders = roots
+      .flatMap(tsxFiles)
+      .filter((file) => file !== self)
+      .flatMap((file) =>
+        readFileSync(file, 'utf8')
+          .split('\n')
+          .map((line, index) => ({ file, line: index + 1, text: line }))
+          .filter((entry) => PALETTE.test(entry.text)),
+      )
+      .map((entry) => `${entry.file}:${entry.line}  ${entry.text.trim()}`);
+
+    expect(offenders, `use the semantic tokens in src/index.css instead`).toEqual([]);
   });
 });

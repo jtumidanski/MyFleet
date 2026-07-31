@@ -25,7 +25,7 @@ export function UpcomingMaintenanceWidget({ fleetId }: UpcomingMaintenanceWidget
   return (
     <Card>
       <CardContent className="pt-4">
-        <h3 className="text-sm font-semibold mb-3 text-amber-700">Upcoming Maintenance</h3>
+        <h3 className="text-sm font-semibold mb-3 text-warning">Upcoming Maintenance</h3>
         {!items || items.length === 0 ? (
           <p className="text-sm text-muted-foreground">No upcoming maintenance.</p>
         ) : (

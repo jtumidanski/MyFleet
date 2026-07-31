@@ -32,10 +32,11 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
 
   return (
     <div className="space-y-6">
-      {/* Overdue — intentional status colors: red indicates urgency */}
+      {/* Overdue — the danger family; the "Overdue Maintenance" heading carries
+          the meaning, colour only reinforces it (FR-A11Y-2). */}
       <Card>
         <CardContent className="pt-6">
-          <h2 className="mb-4 text-base font-semibold text-red-700">Overdue Maintenance</h2>
+          <h2 className="mb-4 text-base font-semibold text-danger">Overdue Maintenance</h2>
           {!overdue || overdue.length === 0 ? (
             <p className="text-sm text-muted-foreground">No overdue maintenance items.</p>
           ) : (
@@ -43,7 +44,7 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
               {overdue.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between rounded-md border border-red-200 bg-red-50 p-3"
+                  className="flex items-center justify-between rounded-md border border-danger-border bg-danger-subtle p-3"
                 >
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">
@@ -71,7 +72,7 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
       {/* Upcoming — intentional status color: amber indicates upcoming attention needed */}
       <Card>
         <CardContent className="pt-6">
-          <h2 className="mb-4 text-base font-semibold text-amber-700">Upcoming Maintenance</h2>
+          <h2 className="mb-4 text-base font-semibold text-warning">Upcoming Maintenance</h2>
           {!upcoming || upcoming.length === 0 ? (
             <p className="text-sm text-muted-foreground">No upcoming maintenance items.</p>
           ) : (
