@@ -1,6 +1,10 @@
 import type { JsonApiDocument, JsonApiResource } from '@myfleet/shared-ts';
 import { apiClient } from '../../lib/api/client';
-import type { MediaObjectAttributes, InitMediaUploadAttributes } from '../../types/models/media';
+import type {
+  MediaObjectAttributes,
+  InitMediaUploadAttributes,
+  MediaVariant,
+} from '../../types/models/media';
 
 /**
  * Media service — wraps the media-service endpoints (gateway prefix /api/media).
@@ -9,7 +13,8 @@ import type { MediaObjectAttributes, InitMediaUploadAttributes } from '../../typ
  *   PUT    /api/media/{id}/content  — upload the raw bytes (proxied to MinIO)
  *   POST   /api/media/{id}/confirm  — mark uploaded→processing
  *   GET    /api/media/{id}          — get metadata
- *   GET    /api/media/{id}/content  — stream the bytes (proxied from MinIO)
+ *   GET    /api/media/{id}/content  — stream the bytes (proxied from MinIO);
+ *                                     optional ?variant=thumbnail|display
  *   DELETE /api/media/{id}          — soft delete
  *
  * Bytes are proxied through media-service, not presigned: MinIO is a shared
@@ -51,9 +56,15 @@ class MediaService {
     return doc.data;
   }
 
-  /** GET /api/media/{id}/content — the raw bytes, authenticated. */
-  async getContentBlob(id: string): Promise<Blob> {
-    return apiClient.requestBlob(`${this.basePath}/${id}/content`);
+  /**
+   * GET /api/media/{id}/content — the raw bytes, authenticated.
+   *
+   * `original` sends no query parameter at all, so every pre-existing caller's
+   * request stays byte-identical on the wire.
+   */
+  async getContentBlob(id: string, variant: MediaVariant = 'original'): Promise<Blob> {
+    const suffix = variant === 'original' ? '' : `?variant=${variant}`;
+    return apiClient.requestBlob(`${this.basePath}/${id}/content${suffix}`);
   }
 
   /** POST /api/media/{id}/confirm — move from uploaded → processing. */

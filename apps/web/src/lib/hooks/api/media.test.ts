@@ -20,7 +20,8 @@ describe('mediaKeys', () => {
   it('is hierarchical', () => {
     expect(mediaKeys.all).toEqual(['media']);
     expect(mediaKeys.detail('m1')).toEqual(['media', 'detail', 'm1']);
-    expect(mediaKeys.content('m1')).toEqual(['media', 'content', 'm1']);
+    expect(mediaKeys.content('m1')).toEqual(['media', 'content', 'm1', 'original']);
+    expect(mediaKeys.content('m1', 'thumbnail')).toEqual(['media', 'content', 'm1', 'thumbnail']);
   });
 });
 
