@@ -2,6 +2,8 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
+import { THEME_STORAGE_KEY } from '../lib/theme';
+import { MEDIA_QUERY } from '../context/ThemeContext';
 
 // src/test -> apps/web
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -15,12 +17,12 @@ describe('index.html pre-paint theme script', () => {
   const html = readFileSync(resolve(WEB_ROOT, 'index.html'), 'utf8');
 
   it('is present and reads the shared storage key', () => {
-    expect(html).toContain("localStorage.getItem('myfleet.theme')");
+    expect(html).toContain(`localStorage.getItem('${THEME_STORAGE_KEY}')`);
   });
 
   it('applies the dark class before the module bundle loads', () => {
     expect(html).toContain("document.documentElement.classList.add('dark')");
-    const scriptIndex = html.indexOf("localStorage.getItem('myfleet.theme')");
+    const scriptIndex = html.indexOf(`localStorage.getItem('${THEME_STORAGE_KEY}')`);
     const moduleIndex = html.indexOf('type="module"');
     expect(scriptIndex).toBeGreaterThan(-1);
     expect(moduleIndex).toBeGreaterThan(-1);
@@ -29,7 +31,7 @@ describe('index.html pre-paint theme script', () => {
 
   // FR-FLASH-1: neither defer nor async, or it stops being pre-paint.
   it('is synchronous', () => {
-    const openTag = html.slice(html.lastIndexOf('<script', html.indexOf('myfleet.theme')));
+    const openTag = html.slice(html.lastIndexOf('<script', html.indexOf(THEME_STORAGE_KEY)));
     const firstClose = openTag.slice(0, openTag.indexOf('>'));
     expect(firstClose).not.toContain('defer');
     expect(firstClose).not.toContain('async');
@@ -39,7 +41,7 @@ describe('index.html pre-paint theme script', () => {
   // FR-FLASH-3: localStorage blocked by privacy settings must not stop the app
   // booting.
   it('is wrapped in try/catch', () => {
-    const scriptStart = html.lastIndexOf('<script', html.indexOf('myfleet.theme'));
+    const scriptStart = html.lastIndexOf('<script', html.indexOf(THEME_STORAGE_KEY));
     const scriptEnd = html.indexOf('</script>', scriptStart);
     const body = html.slice(scriptStart, scriptEnd);
     expect(body).toContain('try {');
@@ -48,10 +50,21 @@ describe('index.html pre-paint theme script', () => {
 
   // FR-PERF-1: under 500 bytes.
   it('stays small', () => {
-    const scriptStart = html.lastIndexOf('<script', html.indexOf('myfleet.theme'));
+    const scriptStart = html.lastIndexOf('<script', html.indexOf(THEME_STORAGE_KEY));
     const scriptEnd = html.indexOf('</script>', scriptStart);
     const body = html.slice(scriptStart, scriptEnd);
     expect(body.length).toBeLessThan(500);
+  });
+
+  // Pins the pre-paint script's media query against ThemeContext's MEDIA_QUERY
+  // so the two cannot drift. Scoped to the script body specifically — the
+  // theme-color <meta> tags also contain this substring, so checking the
+  // whole file would pass even if only the script's copy went stale.
+  it('uses the same media query as ThemeContext', () => {
+    const scriptStart = html.lastIndexOf('<script', html.indexOf(THEME_STORAGE_KEY));
+    const scriptEnd = html.indexOf('</script>', scriptStart);
+    const body = html.slice(scriptStart, scriptEnd);
+    expect(body).toContain(MEDIA_QUERY);
   });
 });
 

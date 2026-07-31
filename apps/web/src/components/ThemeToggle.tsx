@@ -41,7 +41,7 @@ export function ThemeToggle() {
     setPreference(next);
     updateTheme.mutate(next, {
       onError: () => {
-        toast.error("Couldn't save your theme preference. It'll reset next time you sign in.");
+        toast.error("Couldn't save your theme preference. It'll reset next time you reload.");
       },
     });
   };

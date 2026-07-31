@@ -52,12 +52,12 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
                       <SeverityChip severity={item.attributes.severity} />
                     </div>
                     {item.attributes.nextDueDate && (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-danger-subtle-foreground">
                         Was due {new Date(item.attributes.nextDueDate).toLocaleDateString()}
                       </p>
                     )}
                     {item.attributes.nextDueMileage ? (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-danger-subtle-foreground">
                         At {item.attributes.nextDueMileage.toLocaleString()} miles
                       </p>
                     ) : null}

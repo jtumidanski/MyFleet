@@ -136,7 +136,18 @@ def main() -> None:
     # Rendered at 64 so Pillow downsamples cleanly into both ICO entries.
     raster(64).save(PUBLIC / 'favicon.ico', sizes=[(16, 16), (32, 32)])
 
-    total = sum(p.stat().st_size for p in PUBLIC.iterdir() if p.is_file())
+    # Only the icon files the budget (FR-PERF-4) is about — not every file that
+    # happens to live in apps/web/public/ (site.webmanifest today, anything
+    # else dropped in there later).
+    ICON_NAMES = (
+        'favicon.svg',
+        'favicon.ico',
+        'apple-touch-icon.png',
+        'icon-192.png',
+        'icon-512.png',
+        'icon-512-maskable.png',
+    )
+    total = sum((PUBLIC / name).stat().st_size for name in ICON_NAMES)
     print(f'generate-icons: wrote {PUBLIC} ({total / 1024:.1f} KiB total)')
     if total > 100 * 1024:
         raise SystemExit('generate-icons: FAIL — assets exceed the 100 KB budget (FR-PERF-4)')

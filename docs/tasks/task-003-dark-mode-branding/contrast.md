@@ -30,6 +30,24 @@ pairings the design calls for: 4 families × 2 measurements × 2 themes.
 **All sixteen clear the 4.5:1 body-text threshold.** The tightest is light
 `--warning` on white at 5.01:1.
 
+## MaintenanceQueueView overdue row
+
+The overdue row in `MaintenanceQueueView.tsx` fills with `bg-danger-subtle`.
+Body text inside that row must therefore be measured against `--danger-subtle`,
+not against `--background` — the "danger" row above already gives the accepted
+pairing, restated here explicitly because it governs a specific component:
+
+| Pairing | Light | Dark |
+|---|---|---|
+| `danger-subtle-foreground` on `danger-subtle` (accepted, used for "Was due …" / "At … miles") | 6.80:1 | 8.14:1 |
+| `muted-foreground` on `danger-subtle` (rejected — do not reintroduce) | 3.89:1 **FAIL** | 6.38:1 |
+
+`text-muted-foreground` is calibrated against `--background`/`--card`, not
+against the danger-subtle fill, so it silently drops below AA the moment it
+lands inside a `bg-danger-subtle` container even though it passes everywhere
+else in the app. `text-danger-subtle-foreground` is the correct token for any
+body text inside that fill.
+
 ## On the `-border` tokens
 
 The `-border` values are deliberately low-contrast against the page background

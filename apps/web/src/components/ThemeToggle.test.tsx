@@ -86,7 +86,7 @@ describe('ThemeToggle', () => {
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
     await waitFor(() =>
       expect(toastError).toHaveBeenCalledWith(
-        "Couldn't save your theme preference. It'll reset next time you sign in.",
+        "Couldn't save your theme preference. It'll reset next time you reload.",
       ),
     );
   });

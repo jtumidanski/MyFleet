@@ -17,7 +17,9 @@ import {
   type ResolvedTheme,
 } from '../lib/theme';
 
-const MEDIA_QUERY = '(prefers-color-scheme: dark)';
+// Shared with the pre-paint script in apps/web/index.html — src/test/
+// conventions.test.ts pins the two against each other.
+export const MEDIA_QUERY = '(prefers-color-scheme: dark)';
 
 export interface ThemeContextValue {
   preference: ThemePreference;
