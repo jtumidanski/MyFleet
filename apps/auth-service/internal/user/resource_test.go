@@ -1,6 +1,7 @@
 package user
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -112,5 +113,85 @@ func TestAuthMe_normalisesAnEmptyStoredTheme(t *testing.T) {
 	rec := serve(r, http.MethodGet, "/auth/me", "", testUserID)
 	if !strings.Contains(rec.Body.String(), `"themePreference":"system"`) {
 		t.Fatalf("a blank stored theme must read back as system. Body: %s", rec.Body.String())
+	}
+}
+
+const patchBody = `{"data":{"type":"users","attributes":{"themePreference":%q}}}`
+
+// The value must survive a round trip through storage, not merely be echoed
+// back out of the request that set it.
+func TestPatchMe_persistsAndEchoesTheNewPreference(t *testing.T) {
+	r, _ := newAuthRouter(t)
+
+	rec := serve(r, http.MethodPatch, "/auth/me", fmt.Sprintf(patchBody, ThemeDark), testUserID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH /auth/me = %d, want 200. Body: %s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+	if !strings.Contains(rec.Body.String(), `"themePreference":"dark"`) {
+		t.Fatalf("PATCH /auth/me did not echo the new value. Body: %s", rec.Body.String())
+	}
+
+	got := serve(r, http.MethodGet, "/auth/me", "", testUserID)
+	if !strings.Contains(got.Body.String(), `"themePreference":"dark"`) {
+		t.Fatalf("the PATCH did not reach storage — a later GET returned: %s", got.Body.String())
+	}
+}
+
+// PRD §5.2: the field is required. PATCH-as-partial-update is not supported for
+// a single-field resource, so an absent or empty value is a client error rather
+// than a no-op that silently reports success.
+func TestPatchMe_rejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"empty string", fmt.Sprintf(patchBody, "")},
+		{"unknown value", fmt.Sprintf(patchBody, "purple")},
+		{"absent attribute", `{"data":{"type":"users","attributes":{}}}`},
+		{"malformed json", `{"data":`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r, _ := newAuthRouter(t)
+
+			// 422, not the PRD's 400: shared-go has no 400 sentinel, and
+			// RegisterInputHandler already renders a malformed body as 422
+			// (design §3.1).
+			rec := serve(r, http.MethodPatch, "/auth/me", tt.body, testUserID)
+			if rec.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("PATCH %s = %d, want 422. Body: %s", tt.name, rec.Code, strings.TrimSpace(rec.Body.String()))
+			}
+
+			// A rejected write must leave the stored value alone.
+			got := serve(r, http.MethodGet, "/auth/me", "", testUserID)
+			if !strings.Contains(got.Body.String(), `"themePreference":"system"`) {
+				t.Fatalf("a rejected PATCH modified the stored value: %s", got.Body.String())
+			}
+		})
+	}
+}
+
+// The title names the field and the accepted values without echoing the
+// caller's raw input back (PRD §5.2, FR-SEC-2).
+func TestPatchMe_validationTitleNamesTheFieldNotTheInput(t *testing.T) {
+	r, _ := newAuthRouter(t)
+
+	rec := serve(r, http.MethodPatch, "/auth/me", fmt.Sprintf(patchBody, "<script>purple"), testUserID)
+	body := rec.Body.String()
+	if !strings.Contains(body, "themePreference") || !strings.Contains(body, "light, dark, system") {
+		t.Fatalf("the validation error must name the field and the allow-list: %s", body)
+	}
+	if strings.Contains(body, "purple") || strings.Contains(body, "<script>") {
+		t.Fatalf("the validation error echoed the caller's raw input back: %s", body)
+	}
+}
+
+func TestPatchMe_unknownUserIsNotFound(t *testing.T) {
+	r, _ := newAuthRouter(t)
+
+	rec := serve(r, http.MethodPatch, "/auth/me", fmt.Sprintf(patchBody, ThemeDark), testGoogleSub)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PATCH /auth/me for an unknown user = %d, want 404. Body: %s",
+			rec.Code, strings.TrimSpace(rec.Body.String()))
 	}
 }
