@@ -8,6 +8,11 @@ export interface MaintenanceRecordAttributes {
   categoryId: string;
   /** RFC3339 */
   performedAt: string;
+  /**
+   * Short summary. Absent when empty (the server emits it with omitempty), so
+   * callers fall back to the category name (PRD FR-REC-2).
+   */
+  description?: string;
   mileage: number;
   cost: number;
   vendor?: string;
@@ -23,10 +28,11 @@ export type MaintenanceRecord = JsonApiResource<MaintenanceRecordAttributes>;
 /** POST /api/fleet/vehicles/{id}/maintenance-records body attributes */
 export interface CreateMaintenanceRecordAttributes {
   categoryId: string;
-  /** RFC3339 */
+  /** RFC3339. Required — the server no longer defaults it to now. */
   performedAt: string;
-  mileage: number;
-  cost: number;
+  description?: string;
+  mileage?: number;
+  cost?: number;
   vendor?: string;
   notes?: string;
   documentMediaIds?: string[];
@@ -36,6 +42,7 @@ export interface CreateMaintenanceRecordAttributes {
 export interface UpdateMaintenanceRecordAttributes {
   /** RFC3339 */
   performedAt?: string;
+  description?: string;
   mileage?: number;
   cost?: number;
   vendor?: string;
