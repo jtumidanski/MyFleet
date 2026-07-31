@@ -26,7 +26,7 @@ func newAggDB(t *testing.T) *gorm.DB {
 			primary_image_media_id TEXT, notes TEXT, created_at DATETIME,
 			updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME)`,
 		`CREATE TABLE fleet.maintenance_records (
-			id TEXT PRIMARY KEY, vehicle_id TEXT, category_id TEXT,
+			id TEXT PRIMARY KEY, vehicle_id TEXT, category_id TEXT, description TEXT,
 			performed_at DATETIME, mileage INTEGER, cost REAL, vendor TEXT,
 			notes TEXT, created_by_user_id TEXT, created_at DATETIME,
 			updated_at DATETIME, deleted_at DATETIME)`,
