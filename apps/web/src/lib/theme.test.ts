@@ -60,10 +60,18 @@ describe('readCachedTheme', () => {
   });
 
   // FR-FLASH-3: localStorage blocked by privacy settings must not break boot.
+  //
+  // src/test/setup.ts installs a MemoryStorage class that `implements Storage`
+  // rather than `extends Storage`, so `implements` creates no runtime
+  // prototype link to Storage.prototype. Spying on Storage.prototype would
+  // never intercept calls on the polyfill instance, so we spy on the
+  // polyfill's own prototype instead.
   it('returns null when localStorage throws', () => {
-    const spy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('blocked');
-    });
+    const spy = vi
+      .spyOn(Object.getPrototypeOf(localStorage) as Storage, 'getItem')
+      .mockImplementation(() => {
+        throw new Error('blocked');
+      });
     expect(readCachedTheme()).toBeNull();
     spy.mockRestore();
   });
@@ -77,10 +85,15 @@ describe('writeCachedTheme', () => {
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe('light');
   });
 
+  // See the note above readCachedTheme's throwing test: MemoryStorage
+  // `implements Storage` rather than `extends` it, so the spy must target
+  // its own prototype, not the global Storage.prototype.
   it('swallows a throwing localStorage', () => {
-    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('blocked');
-    });
+    const spy = vi
+      .spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem')
+      .mockImplementation(() => {
+        throw new Error('blocked');
+      });
     expect(() => writeCachedTheme('dark')).not.toThrow();
     spy.mockRestore();
   });

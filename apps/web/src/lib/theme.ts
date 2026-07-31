@@ -17,7 +17,7 @@ export const THEME_STORAGE_KEY = 'myfleet.theme';
 // types/models/user.ts because it never crosses the wire.
 export type ResolvedTheme = 'light' | 'dark';
 
-const VALID: readonly string[] = ['light', 'dark', 'system'];
+const VALID: readonly ThemePreference[] = ['light', 'dark', 'system'];
 
 export function isThemePreference(value: unknown): value is ThemePreference {
   return typeof value === 'string' && VALID.includes(value);
