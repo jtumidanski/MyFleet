@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
+import { cn } from '../../../../lib/utils';
 import { Card, CardContent } from '../../../ui/card';
 import { Button } from '../../../ui/button';
 import { Skeleton } from '../../../ui/skeleton';
@@ -308,7 +309,13 @@ export function VehicleMaintenanceSection({
                               record.attributes.categoryId}
                           </p>
                           {category?.attributes.kind === 'modification' && (
-                            <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-800">
+                            /* Intentional status colors: kind has no shadcn semantic equivalent; violet marks a modification record. */
+                            <span
+                              className={cn(
+                                'inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium',
+                                'border-violet-200 bg-violet-100 text-violet-800',
+                              )}
+                            >
                               Mod
                             </span>
                           )}
