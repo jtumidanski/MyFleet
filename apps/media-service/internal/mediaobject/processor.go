@@ -67,6 +67,28 @@ func MarkReady(m Model) (Model, error) {
 	return m.WithStatus(StatusReady), nil
 }
 
+// MarkReadyDirect transitions uploaded → ready for objects that need no
+// processing (documents). Any other source state is a conflict (409). MarkReady
+// is deliberately left untouched so the worker's behaviour and tests are
+// unchanged (design D12).
+func MarkReadyDirect(m Model) (Model, error) {
+	if m.Status() != StatusUploaded {
+		return Model{}, server.ErrConflict
+	}
+	return m.WithStatus(StatusReady), nil
+}
+
+// MarkFailed is the terminal failure transition. It accepts uploaded or
+// processing; anything else is a conflict. It is what guarantees no object
+// stays in processing forever and no Kafka partition is blocked by one bad
+// file (design D13, PRD FR-MEDIA-5).
+func MarkFailed(m Model) (Model, error) {
+	if m.Status() != StatusUploaded && m.Status() != StatusProcessing {
+		return Model{}, server.ErrConflict
+	}
+	return m.WithStatus(StatusFailed), nil
+}
+
 // Processor contains media-object business logic, injected with Provider,
 // Administrator, and an ObjectStore (MinIO). Event publication is handled by the
 // transactional-outbox relay (design A8); the processor never calls Publish

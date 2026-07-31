@@ -558,3 +558,41 @@ func TestContent_otherStorageFailuresAreNot404(t *testing.T) {
 		t.Fatalf("content = %v, want the underlying storage error passed through", err)
 	}
 }
+
+// MarkReadyDirect is the documents-only shortcut: uploaded → ready with no
+// worker in between (design D12). Any other source state is a conflict.
+func TestMarkReadyDirect_requiresUploaded(t *testing.T) {
+	uploaded := Model{status: StatusUploaded}
+	got, err := MarkReadyDirect(uploaded)
+	if err != nil {
+		t.Fatalf("MarkReadyDirect(uploaded): %v", err)
+	}
+	if got.Status() != StatusReady {
+		t.Fatalf("status = %q, want ready", got.Status())
+	}
+
+	for _, s := range []Status{StatusProcessing, StatusReady, StatusFailed} {
+		if _, err := MarkReadyDirect(Model{status: s}); !errors.Is(err, server.ErrConflict) {
+			t.Fatalf("MarkReadyDirect(%q) err = %v, want ErrConflict", s, err)
+		}
+	}
+}
+
+// MarkFailed is the only terminal transition out of the pipeline that is not
+// ready. It accepts uploaded or processing (design D13).
+func TestMarkFailed_acceptsUploadedAndProcessing(t *testing.T) {
+	for _, s := range []Status{StatusUploaded, StatusProcessing} {
+		got, err := MarkFailed(Model{status: s})
+		if err != nil {
+			t.Fatalf("MarkFailed(%q): %v", s, err)
+		}
+		if got.Status() != StatusFailed {
+			t.Fatalf("MarkFailed(%q) status = %q, want failed", s, got.Status())
+		}
+	}
+	for _, s := range []Status{StatusReady, StatusFailed} {
+		if _, err := MarkFailed(Model{status: s}); !errors.Is(err, server.ErrConflict) {
+			t.Fatalf("MarkFailed(%q) err = %v, want ErrConflict", s, err)
+		}
+	}
+}

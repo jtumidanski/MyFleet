@@ -10,6 +10,11 @@ const (
 	StatusUploaded   Status = "uploaded"
 	StatusProcessing Status = "processing"
 	StatusReady      Status = "ready"
+	// StatusFailed is terminal. It exists because "ready with zero variants"
+	// would be a promise the object cannot keep: every consumer of ready
+	// assumes displayable bytes, and an object that lies about its state is a
+	// bug that surfaces far from its cause (design D13).
+	StatusFailed Status = "failed"
 )
 
 // Model is immutable; state changes return new instances.
