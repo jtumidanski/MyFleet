@@ -8,6 +8,7 @@ package processing
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -29,6 +30,14 @@ const (
 	thumbnailMaxEdge = 320
 	displayMaxEdge   = 1280
 )
+
+// ErrPermanent marks a processing failure that cannot plausibly succeed on a
+// later delivery. events.Consume has no retry budget — it re-delivers without
+// committing until the handler stops erroring — so returning an error for a
+// file that will never decode blocks the partition for every other media object
+// behind it. Wrapping permanent failures lets handle commit them instead
+// (design D13).
+var ErrPermanent = errors.New("permanent processing failure")
 
 // ResizeDims computes target dimensions so the longest edge equals maxEdge while
 // preserving aspect ratio. It never upscales: if both dimensions are already
@@ -150,6 +159,9 @@ func (w *Worker) handle(ctx context.Context, e events.Envelope) error {
 	// Step 4 — generate and persist variants, then transition to ready.
 	src, err := w.decodeOriginal(ctx, obj.ObjectKey())
 	if err != nil {
+		if errors.Is(err, ErrPermanent) {
+			return w.failPermanently(e, obj, err)
+		}
 		return fmt.Errorf("decode original %s: %w", obj.ObjectKey(), err)
 	}
 
@@ -197,15 +209,22 @@ func (w *Worker) handle(ctx context.Context, e events.Envelope) error {
 }
 
 // decodeOriginal downloads and decodes the original image (jpeg or png).
+// Both failure modes it can produce are permanent: bytes that do not decode
+// will not start decoding, and an original that was never stored will not
+// appear. Everything else (a transport error from the store, for instance)
+// passes through unwrapped and stays retryable.
 func (w *Worker) decodeOriginal(ctx context.Context, key string) (image.Image, error) {
 	rc, err := w.store.GetObject(ctx, key)
 	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return nil, fmt.Errorf("%w: original bytes were never stored: %w", ErrPermanent, err)
+		}
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
 	img, _, err := image.Decode(rc)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrPermanent, err)
 	}
 	return img, nil
 }
@@ -256,4 +275,30 @@ func encode(w io.Writer, img image.Image, contentType string) error {
 		return png.Encode(w, img)
 	}
 	return jpeg.Encode(w, img, &jpeg.Options{Quality: 85})
+}
+
+// failPermanently moves the object to the terminal failed state and records the
+// event as processed, so a file that can never be decoded does not redeliver
+// forever. It returns nil on success: the delivery is complete, just not
+// successfully, and committing the offset is the whole point.
+func (w *Worker) failPermanently(e events.Envelope, obj mediaobject.Model, cause error) error {
+	w.log.WithField("media_id", obj.ID()).WithError(cause).
+		Error("media processing failed permanently; marking object failed")
+
+	failed, err := mediaobject.MarkFailed(obj)
+	if err != nil {
+		// The object is in a state MarkFailed rejects (already ready or already
+		// failed). Nothing left to do, and retrying will not change it.
+		w.log.WithField("media_id", obj.ID()).WithError(err).
+			Warn("cannot mark media object failed; recording event anyway")
+	} else if _, err := w.objectAdmin.Update(failed); err != nil {
+		// Persisting the terminal state is a database failure, which IS
+		// transient — retry rather than committing a half-applied outcome.
+		return fmt.Errorf("persist failed media object: %w", err)
+	}
+
+	if _, err := w.dedupe.MarkProcessed(e.EventID); err != nil {
+		return fmt.Errorf("record processed event (permanent failure): %w", err)
+	}
+	return nil
 }
