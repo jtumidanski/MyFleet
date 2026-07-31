@@ -9,6 +9,7 @@ import type {
   UpdateMaintenanceScheduleAttributes,
   CompleteMaintenanceScheduleAttributes,
 } from '../../../types/models/maintenanceSchedule';
+import type { MaintenanceCategoryKind } from '../../../types/models/maintenanceCategory';
 
 // ---------------------------------------------------------------------------
 // Query key factories
@@ -18,14 +19,15 @@ import type {
  * Hierarchical query-key factory for maintenance records.
  * all                              -> ['maintenanceRecords']
  * lists()                          -> ['maintenanceRecords', 'list']
- * list({ vehicleId })              -> ['maintenanceRecords', 'list', { vehicleId }]
+ * list({ vehicleId, kind })        -> ['maintenanceRecords', 'list', { vehicleId, kind }]
  * details()                        -> ['maintenanceRecords', 'detail']
  * detail(id)                       -> ['maintenanceRecords', 'detail', id]
  */
 export const maintenanceRecordKeys = {
   all: ['maintenanceRecords'] as const,
   lists: () => [...maintenanceRecordKeys.all, 'list'] as const,
-  list: (params: { vehicleId: string }) => [...maintenanceRecordKeys.lists(), params] as const,
+  list: (params: { vehicleId: string; kind?: MaintenanceCategoryKind }) =>
+    [...maintenanceRecordKeys.lists(), params] as const,
   details: () => [...maintenanceRecordKeys.all, 'detail'] as const,
   detail: (id: string) => [...maintenanceRecordKeys.details(), id] as const,
 };
@@ -52,23 +54,26 @@ export const maintenanceScheduleKeys = {
 
 /**
  * Hierarchical query-key factory for maintenance categories.
- * all    -> ['maintenanceCategories']
- * lists() -> ['maintenanceCategories', 'list']
+ * all              -> ['maintenanceCategories']
+ * lists()          -> ['maintenanceCategories', 'list']
+ * list({ kind })   -> ['maintenanceCategories', 'list', { kind }]
  */
 export const maintenanceCategoryKeys = {
   all: ['maintenanceCategories'] as const,
   lists: () => [...maintenanceCategoryKeys.all, 'list'] as const,
+  list: (params: { kind?: MaintenanceCategoryKind }) =>
+    [...maintenanceCategoryKeys.lists(), params] as const,
 };
 
 // ---------------------------------------------------------------------------
 // Category queries
 // ---------------------------------------------------------------------------
 
-/** GET /api/fleet/maintenance-categories — list all categories. */
-export function useMaintenanceCategories() {
+/** GET /api/fleet/maintenance-categories — all categories, or one kind. */
+export function useMaintenanceCategories(kind?: MaintenanceCategoryKind) {
   return useQuery({
-    queryKey: maintenanceCategoryKeys.lists(),
-    queryFn: () => maintenanceCategoryService.list(),
+    queryKey: maintenanceCategoryKeys.list({ kind }),
+    queryFn: () => maintenanceCategoryService.list(kind),
     staleTime: 10 * 60 * 1000, // Categories are relatively static
     gcTime: 30 * 60 * 1000,
     select: (result) => result.data,
@@ -79,11 +84,14 @@ export function useMaintenanceCategories() {
 // Maintenance record queries
 // ---------------------------------------------------------------------------
 
-/** GET /api/fleet/vehicles/{vehicleId}/maintenance-records */
-export function useMaintenanceRecords(vehicleId: string | null | undefined) {
+/** GET /api/fleet/vehicles/{vehicleId}/maintenance-records[?kind=…] */
+export function useMaintenanceRecords(
+  vehicleId: string | null | undefined,
+  kind?: MaintenanceCategoryKind,
+) {
   return useQuery({
-    queryKey: maintenanceRecordKeys.list({ vehicleId: vehicleId ?? '' }),
-    queryFn: () => maintenanceRecordService.listByVehicle(vehicleId as string),
+    queryKey: maintenanceRecordKeys.list({ vehicleId: vehicleId ?? '', kind }),
+    queryFn: () => maintenanceRecordService.listByVehicle(vehicleId as string, kind),
     enabled: !!vehicleId,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
