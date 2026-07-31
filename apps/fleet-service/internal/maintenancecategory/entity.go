@@ -11,6 +11,11 @@ type Entity struct {
 	Name          string `gorm:"not null"`
 	Description   string
 	SystemDefined bool `gorm:"not null;default:false"`
+	// The DEFAULT is what classifies the eight pre-existing rows in the same
+	// ALTER TABLE that adds the column — no backfill step (PRD FR-KIND-1).
+	// The literal is quoted because GORM copies the tag value verbatim into the
+	// DDL; unquoted, PostgreSQL reads `maintenance` as a column reference.
+	Kind string `gorm:"type:varchar(20);not null;default:'maintenance'"`
 }
 
 func (Entity) TableName() string { return "fleet.maintenance_categories" }
@@ -24,20 +29,35 @@ func Make(e Entity) Model {
 		name:          e.Name,
 		description:   e.Description,
 		systemDefined: e.SystemDefined,
+		kind:          Kind(e.Kind),
 	}
 }
 
-// seeds is the canonical list of system-defined maintenance categories
-// (FR-MAINT-1). Seeding is keyed by Name so it is idempotent.
+// seeds is the canonical list of system-defined categories (FR-MAINT-1,
+// FR-KIND-2). Seeding is keyed by Name so it is idempotent; no modification
+// name collides with a maintenance one.
 var seeds = []Entity{
-	{Name: "Oil Change", SystemDefined: true},
-	{Name: "Tire Rotation", SystemDefined: true},
-	{Name: "Brake Service", SystemDefined: true},
-	{Name: "Air Filter", SystemDefined: true},
-	{Name: "Transmission Service", SystemDefined: true},
-	{Name: "Coolant Flush", SystemDefined: true},
-	{Name: "Battery", SystemDefined: true},
-	{Name: "Inspection", SystemDefined: true},
+	{Name: "Oil Change", SystemDefined: true, Kind: string(KindMaintenance)},
+	{Name: "Tire Rotation", SystemDefined: true, Kind: string(KindMaintenance)},
+	{Name: "Brake Service", SystemDefined: true, Kind: string(KindMaintenance)},
+	{Name: "Air Filter", SystemDefined: true, Kind: string(KindMaintenance)},
+	{Name: "Transmission Service", SystemDefined: true, Kind: string(KindMaintenance)},
+	{Name: "Coolant Flush", SystemDefined: true, Kind: string(KindMaintenance)},
+	{Name: "Battery", SystemDefined: true, Kind: string(KindMaintenance)},
+	{Name: "Inspection", SystemDefined: true, Kind: string(KindMaintenance)},
+
+	{Name: "Performance / Tune", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Suspension", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Wheels & Tires", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Exhaust", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Intake", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Brake Upgrade", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Exterior / Body", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Interior", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Audio & Electronics", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Lighting", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Towing", SystemDefined: true, Kind: string(KindModification)},
+	{Name: "Other Modification", SystemDefined: true, Kind: string(KindModification)},
 }
 
 // Seed inserts the system-defined categories. It is idempotent: FirstOrCreate
@@ -51,6 +71,7 @@ func Seed(db *gorm.DB) error {
 				Name:          s.Name,
 				Description:   s.Description,
 				SystemDefined: s.SystemDefined,
+				Kind:          s.Kind,
 			}).
 			FirstOrCreate(&e).Error; err != nil {
 			return err
