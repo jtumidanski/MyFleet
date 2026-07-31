@@ -14,6 +14,9 @@ dist/
 .env
 .envrc
 *.local
+# Filled-in copy of deploy/k8s/secrets.example.yaml — applied out-of-band,
+# never committed.
+deploy/k8s/secrets.yaml
 # MinIO/data
 deploy/compose/data/
 # Local-only compose overrides (e.g. host-port remaps for machine-specific collisions)

@@ -23,10 +23,38 @@ spec:
     rejectStatusCode: 403
 
 ---
-# Both public hosts share one route set. Priorities are explicit rather than
-# relying on Traefik's rule-length ordering: the SPA catch-all must lose to
-# every /api/* route. Entry point `web` is bee's k3s Traefik :80; TLS for the
-# Cloudflare host terminates at the edge.
+# ==========================================================================
+# THE route set. Defined once here; mirrored onto :443 by kustomize.
+# ==========================================================================
+# Two IngressRoute objects are unavoidable. A Traefik IngressRoute carrying a
+# `tls` section produces a TLS-ONLY router, even when `entryPoints` also lists
+# `web`. Verified empirically against bee's Traefik 3.6.13: a probe IngressRoute
+# with entryPoints [web, websecure] and `tls: {}` answered 200 on :443 and 404
+# on :80. So one object cannot serve both ports, and adding `websecure` here
+# would silently break http://myfleet.home.
+#
+# What IS avoidable is duplicating the routes. The `replacements` block in
+# kustomization.yaml copies `spec.routes` from this object into
+# myfleet-routes-tls at build time, so the list below is the single source of
+# truth for both entrypoints. Edit it here and both ports change together.
+#
+# That matters because the priority-200 internal-deny route is a security
+# control: if it were present on one entrypoint and missing on the other,
+# fleet-service's unauthenticated /internal/* surface would be exposed on the
+# port that lost it. Hand-maintained duplication would make that a one-typo
+# mistake; the replacement makes it unrepresentable. The runbook's post-deploy
+# checks still probe the deny rule on :80 AND :443 as a backstop.
+#
+# Both ports are required:
+#   * :443 — how the public reaches us. Cloudflare connects to the origin over
+#     TLS; before the TLS twin existed, every such request found no matching
+#     router and got Traefik's default `404 page not found`. That was the
+#     original symptom.
+#   * :80  — myfleet.home over plain HTTP, used for health checks that must not
+#     depend on Cloudflare or on trusting a self-signed cert.
+#
+# Priorities are explicit rather than relying on Traefik's rule-length
+# ordering: the SPA catch-all must lose to every /api/* route.
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -58,7 +86,7 @@ spec:
     #
     # The service reference is inert: internal-deny short-circuits with 403
     # before anything is proxied.
-    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathRegexp(`(?i)^/+api/+fleet[^/]*/*internal`)
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathRegexp(`(?i)^/+api/+fleet[^/]*/*internal`)
       kind: Rule
       priority: 200
       middlewares:
@@ -66,7 +94,7 @@ spec:
       services:
         - name: fleet-service
           port: 8080
-    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathPrefix(`/api/auth`)
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathPrefix(`/api/auth`)
       kind: Rule
       priority: 100
       middlewares:
@@ -74,7 +102,7 @@ spec:
       services:
         - name: auth-service
           port: 8080
-    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathPrefix(`/api/fleet`)
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathPrefix(`/api/fleet`)
       kind: Rule
       priority: 100
       middlewares:
@@ -82,7 +110,7 @@ spec:
       services:
         - name: fleet-service
           port: 8080
-    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathPrefix(`/api/media`)
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathPrefix(`/api/media`)
       kind: Rule
       priority: 100
       middlewares:
@@ -90,7 +118,7 @@ spec:
       services:
         - name: media-service
           port: 8080
-    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathPrefix(`/api/notifications`)
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathPrefix(`/api/notifications`)
       kind: Rule
       priority: 100
       middlewares:
@@ -98,10 +126,44 @@ spec:
       services:
         - name: notification-service
           port: 8080
-    - match: Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)
+    - match: Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)
       kind: Rule
       # Catch-all for the SPA: must lose to every /api/* route above.
       priority: 1
       services:
         - name: web
           port: 80
+
+---
+# TLS twin of myfleet-routes above. `spec.routes` is INTENTIONALLY EMPTY here:
+# it is populated at build time by the `replacements` block in
+# kustomization.yaml, which copies `spec.routes` verbatim from myfleet-routes.
+#
+# That is what makes the two entrypoints structurally impossible to drift. The
+# route set — including the priority-200 internal-deny rule that keeps
+# fleet-service's unauthenticated /internal/* surface off the public internet —
+# is defined exactly once, above. Editing it there updates both ports.
+#
+# Do NOT hand-write routes into this object. If you do, kustomize overwrites
+# them on the next build and the edit silently disappears.
+#
+# `myfleet-tls` is a self-signed certificate applied out-of-band alongside the
+# service Secrets (deploy/k8s/secrets.yaml, generated per the runbook), for the
+# same reason: this overlay ships no Secrets, so Argo CD does not track them and
+# `prune: true` cannot remove them. It carries all three hostnames as SANs.
+#
+# Self-signed is sufficient because Cloudflare in Full (non-strict) mode accepts
+# any origin certificate, and the browser only ever sees Cloudflare's valid edge
+# certificate. Direct LAN access to myfleet.tumidanski.me warns, as it does for
+# home-hub. Full (STRICT) mode would reject this and require a Cloudflare Origin
+# Certificate instead.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: myfleet-routes-tls
+spec:
+  entryPoints:
+    - websecure
+  routes: []
+  tls:
+    secretName: myfleet-tls

@@ -14,6 +14,29 @@ resources:
   - ../../base
   - ingressroute.yaml
 
+# Mirror the route set onto the TLS entrypoint. A Traefik IngressRoute with a
+# `tls` section is TLS-only, so :80 and :443 need two objects — but the routes
+# themselves are written once, in myfleet-routes, and copied here at build time.
+#
+# This is a security control, not tidiness: the route set contains the
+# priority-200 internal-deny rule that keeps fleet-service's unauthenticated
+# /internal/* surface off the public internet. Hand-copying it would make
+# "present on :80, missing on :443" a one-typo mistake. Copying it structurally
+# makes that state unrepresentable.
+#
+# Requires kustomize >= v4.5 for `replacements`. Argo CD v3.4.2 bundles v5.8.1.
+replacements:
+  - source:
+      kind: IngressRoute
+      name: myfleet-routes
+      fieldPath: spec.routes
+    targets:
+      - select:
+          kind: IngressRoute
+          name: myfleet-routes-tls
+        fieldPaths:
+          - spec.routes
+
 replicas:
   - name: auth-service
     count: 1
