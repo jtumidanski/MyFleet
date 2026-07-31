@@ -1,6 +1,6 @@
 GO_MODULES := $(shell go work edit -json | python3 -c "import json,sys;[print(m['DiskPath']) for m in json.load(sys.stdin)['Use']]" 2>/dev/null)
 
-.PHONY: build test vet tidy fe-build fe-test up down lint lint-check fmt ci
+.PHONY: build test vet tidy fe-build fe-test up down lint lint-check fmt manifests ci
 
 build: ## go build every module in the workspace
 	go build github.com/jtumidanski/myfleet/...
@@ -39,4 +39,7 @@ up:
 down:
 	docker compose -f deploy/compose/docker-compose.yml down -v
 
-ci: lint-check vet test build fe-test fe-build
+manifests: ## render deploy/k8s overlays and assert their invariants
+	./tools/check-manifests.sh
+
+ci: lint-check vet test build fe-test fe-build manifests

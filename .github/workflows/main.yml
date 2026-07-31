@@ -50,6 +50,26 @@ jobs:
       - name: Frontend build
         run: make fe-build
 
+      # Renders both overlays and asserts their invariants — chiefly that the
+      # :80 and :443 IngressRoutes carry identical route sets, so the
+      # internal-deny rule cannot go missing from one entrypoint. Gating this
+      # inside build-test means a broken overlay blocks `publish`, rather than
+      # being discovered when Argo CD syncs it to the cluster.
+      #
+      # Note the workflow's paths-ignore skips overlay-only pushes (the
+      # bump-overlay commits); those change nothing but `newTag`, which cannot
+      # affect route parity.
+      - name: Install kustomize
+        run: |
+          curl -sSL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - name: Install PyYAML
+        run: pip install pyyaml
+
+      - name: Check manifests
+        run: make manifests
+
   # ── Publish container images to GHCR ─────────────────────────────────────────
   publish:
     needs: build-test

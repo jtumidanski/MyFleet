@@ -1,0 +1,23 @@
+# The build context is the repository ROOT for every service, including
+# apps/web (see CLAUDE.md), so anything here is a candidate for a layer.
+#
+# The entry that matters is deploy/k8s/secrets.yaml: it is the filled-in,
+# gitignored copy of secrets.example.yaml and holds live production credentials
+# (Postgres password, MinIO secret key, JWT signing key, OIDC state secret, the
+# TLS private key). .gitignore keeps it out of git; this keeps it out of images.
+#
+# No current Dockerfile does `COPY . .` — they all copy go.work, packages/,
+# apps/<service>/ and the package manifests explicitly — so nothing leaks today.
+# This file exists so that a future `COPY . .` is not a credential disclosure.
+deploy/k8s/secrets.yaml
+*.key
+*.pem
+
+# Not needed in any build, and .worktrees/ in particular can contain whole
+# second checkouts (including their own secrets.yaml).
+.git
+.worktrees
+node_modules
+dist
+.cache
+bin
