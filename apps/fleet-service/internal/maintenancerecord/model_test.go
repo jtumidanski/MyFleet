@@ -58,7 +58,8 @@ func TestSetDescription_trims(t *testing.T) {
 	if m.Description() != "Cat-back exhaust" {
 		t.Fatalf("Description() = %q, want trimmed", m.Description())
 	}
-	// A description of only whitespace is empty, not a 1-rune value.
+	// Padding on both sides of a max-length description must not itself
+	// count toward the 200-rune cap: trimming happens before measurement.
 	padded := strings.Repeat(" ", 50) + strings.Repeat("a", MaxDescriptionRunes) + strings.Repeat(" ", 50)
 	if _, err := validBuilder().SetDescription(padded).Build(); err != nil {
 		t.Fatalf("whitespace-padded 200 runes rejected: %v", err)

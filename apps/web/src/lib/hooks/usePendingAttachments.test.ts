@@ -124,13 +124,21 @@ describe('usePendingAttachments', () => {
     expect(mediaService.remove).not.toHaveBeenCalled();
   });
 
-  it('stops accepting files at the cap', () => {
+  it('stops accepting files at the cap', async () => {
     mockUploadSucceeds('m1');
     const { result } = renderHook(() => usePendingAttachments());
 
     const many = Array.from({ length: MAX_ATTACHMENTS + 3 }, (_, i) => file(`f${i}.pdf`));
     act(() => result.current.add(many));
 
+    expect(result.current.items).toHaveLength(MAX_ATTACHMENTS);
+    expect(result.current.isFull).toBe(true);
+
+    // The MAX_ATTACHMENTS uploads kicked off above resolve as microtasks
+    // after this point; let them settle before the test body returns so
+    // their state updates land inside act() instead of firing after
+    // teardown and printing act() warnings.
+    await waitFor(() => expect(result.current.isUploading).toBe(false));
     expect(result.current.items).toHaveLength(MAX_ATTACHMENTS);
     expect(result.current.isFull).toBe(true);
   });

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
@@ -36,8 +37,18 @@ type Client struct {
 	hc   *http.Client
 }
 
+// clientTimeout bounds ValidateOwnership. This call happens synchronously on
+// a user-facing request path (POST /vehicles/{id}/maintenance-records), so it
+// cannot inherit http.DefaultClient's no-timeout behavior: a stalled
+// connection (GC pause, MinIO backpressure, a half-open socket after a node
+// reschedule) would otherwise hang the handler goroutine indefinitely,
+// because the request context only cancels if the browser disconnects.
+const clientTimeout = 5 * time.Second
+
 // NewClient returns a Client targeting the given media-service base URL.
-func NewClient(base string) *Client { return &Client{base: base, hc: http.DefaultClient} }
+func NewClient(base string) *Client {
+	return &Client{base: base, hc: &http.Client{Timeout: clientTimeout}}
+}
 
 // ValidateOwnership returns nil when every requested ID came back from
 // media-service, which means every one is active AND in fleetID.

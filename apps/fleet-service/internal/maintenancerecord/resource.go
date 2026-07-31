@@ -150,6 +150,19 @@ func InitializeRoutes(
 				return
 			}
 
+			// Enforce the per-record cap before the cross-service call, not
+			// just at Build() below. Otherwise an oversized ID list builds a
+			// multi-megabyte ids= query string and media-service's own
+			// MaxInternalLookupIDs rejects it with a plain-status error that
+			// StatusFor maps to 500 — an opaque server error for what is
+			// really a client mistake. The Build()-time check stays too:
+			// that one is the invariant guarantee, this one is about status
+			// code and not shipping an absurd URL.
+			if len(attrs.DocumentMediaIDs) > MaxDocuments {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+
 			// Prove the attachments are the caller's own BEFORE anything is
 			// written, so a rejection leaves nothing to roll back
 			// (PRD FR-DOC-6). Skipped entirely when there are no
