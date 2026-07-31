@@ -6,8 +6,12 @@ const timeFormat = "2006-01-02T15:04:05Z07:00"
 
 // Attributes is the JSON:API attributes payload for a maintenance record.
 type Attributes struct {
-	VehicleID        string   `json:"vehicleId"`
-	CategoryID       string   `json:"categoryId"`
+	VehicleID  string `json:"vehicleId"`
+	CategoryID string `json:"categoryId"`
+	// omitempty, consistent with the existing vendor/notes fields. Clients treat
+	// an absent description as empty and fall back to the category name
+	// (PRD FR-REC-2, api-contracts §2).
+	Description      string   `json:"description,omitempty"`
 	PerformedAt      string   `json:"performedAt"`
 	Mileage          int      `json:"mileage"`
 	Cost             float64  `json:"cost"`
@@ -26,6 +30,7 @@ func Transform(m Model) server.Resource {
 		Attributes: Attributes{
 			VehicleID:        m.VehicleID(),
 			CategoryID:       m.CategoryID(),
+			Description:      m.Description(),
 			PerformedAt:      m.PerformedAt().Format(timeFormat),
 			Mileage:          m.Mileage(),
 			Cost:             m.Cost(),

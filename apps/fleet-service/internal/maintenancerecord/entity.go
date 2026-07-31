@@ -11,6 +11,7 @@ type Entity struct {
 	ID              string    `gorm:"type:uuid;primaryKey"`
 	VehicleID       string    `gorm:"type:uuid;not null;index"`
 	CategoryID      string    `gorm:"type:uuid;not null"`
+	Description     string    `gorm:"type:varchar(200)"`
 	PerformedAt     time.Time `gorm:"not null"`
 	Mileage         int
 	Cost            float64
@@ -46,6 +47,7 @@ func Make(e Entity, docs []DocumentEntity) Model {
 		id:               e.ID,
 		vehicleID:        e.VehicleID,
 		categoryID:       e.CategoryID,
+		description:      e.Description,
 		performedAt:      e.PerformedAt,
 		mileage:          e.Mileage,
 		cost:             e.Cost,
@@ -65,6 +67,7 @@ func (m Model) ToEntity() Entity {
 		ID:              m.id,
 		VehicleID:       m.vehicleID,
 		CategoryID:      m.categoryID,
+		Description:     m.description,
 		PerformedAt:     m.performedAt,
 		Mileage:         m.mileage,
 		Cost:            m.cost,

@@ -1,11 +1,10 @@
 package maintenancerecord
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // Builder constructs a valid maintenance record Model. Build() returns
@@ -27,10 +26,16 @@ func (b *Builder) SetNotes(notes string) *Builder            { b.m.notes = notes
 func (b *Builder) SetCreatedByUserID(userID string) *Builder { b.m.createdByUserID = userID; return b }
 func (b *Builder) SetDocumentMediaIDs(ids []string) *Builder { b.m.documentMediaIDs = ids; return b }
 
+// SetDescription sets the short summary, trimmed of surrounding whitespace.
+func (b *Builder) SetDescription(d string) *Builder {
+	b.m.description = strings.TrimSpace(d)
+	return b
+}
+
 // Build validates invariants and returns the model or a validation error.
 func (b *Builder) Build() (Model, error) {
-	if b.m.vehicleID == "" || b.m.categoryID == "" || b.m.performedAt.IsZero() {
-		return Model{}, server.ErrValidation
+	if err := Validate(b.m); err != nil {
+		return Model{}, err
 	}
 	return b.m, nil
 }
