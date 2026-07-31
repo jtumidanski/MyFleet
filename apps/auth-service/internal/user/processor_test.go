@@ -6,8 +6,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// Note: a fake keyed by an opaque map cannot express which column the real
+// query filters on, which is why the /auth/me login-loop bug was invisible
+// here. The column-level guarantees live in provider_test.go, against a real
+// database.
 type fakeProvider struct {
+	byID  map[string]Model
 	bySub map[string]Model
+}
+
+func (f *fakeProvider) GetByID(id string) (Model, error) {
+	if m, ok := f.byID[id]; ok {
+		return m, nil
+	}
+	return Model{}, ErrNotFound
 }
 
 func (f *fakeProvider) GetBySub(sub string) (Model, error) {
