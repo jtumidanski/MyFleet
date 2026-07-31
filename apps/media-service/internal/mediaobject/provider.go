@@ -14,6 +14,10 @@ var ErrNotFound = errors.New("media object not found")
 type Provider interface {
 	GetByID(id string) (Model, error)
 	GetByIDIncludingDeleted(id string) (Model, error)
+	// ListActiveByFleetAndIDs returns the subset of ids that are active (not
+	// soft-deleted) AND belong to fleetID. fleetID is a filter, never a trusted
+	// assertion: the result set is never widened on the caller's say-so.
+	ListActiveByFleetAndIDs(fleetID string, ids []string) ([]Model, error)
 }
 
 type dbProvider struct{ db *gorm.DB }
@@ -41,4 +45,20 @@ func (p *dbProvider) GetByIDIncludingDeleted(id string) (Model, error) {
 		return Model{}, err
 	}
 	return Make(e), nil
+}
+
+func (p *dbProvider) ListActiveByFleetAndIDs(fleetID string, ids []string) ([]Model, error) {
+	if len(ids) == 0 {
+		return []Model{}, nil
+	}
+	var es []Entity
+	if err := p.db.Where("fleet_id = ? AND deleted_at IS NULL AND id IN ?", fleetID, ids).
+		Find(&es).Error; err != nil {
+		return nil, err
+	}
+	out := make([]Model, 0, len(es))
+	for _, e := range es {
+		out = append(out, Make(e))
+	}
+	return out, nil
 }

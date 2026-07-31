@@ -3,7 +3,9 @@ package mediaobject
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -476,5 +478,110 @@ func TestConfirm_unknownContentTypeConfirmsLikeADocument(t *testing.T) {
 	}
 	if n := countOutboxRows(t, db); n != 0 {
 		t.Fatalf("outbox rows = %d, want 0", n)
+	}
+}
+
+// internalRouter mounts the no-JWT internal routes over the same DB the
+// authenticated router uses, so a test can create objects through the processor
+// and then query them the way fleet-service will.
+func internalRouter(t *testing.T, db *gorm.DB) http.Handler {
+	t.Helper()
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+	r := chi.NewRouter()
+	r.Group(InitializeInternalRoutes(log, db))
+	return r
+}
+
+// getInternal issues an unauthenticated GET — this route has no JWT middleware,
+// so no identity is attached to the context.
+func getInternal(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+	return rec
+}
+
+// The response contains only the requested IDs that are active AND in the
+// fleet. Whether a missing ID does not exist, was deleted, or belongs to
+// someone else is indistinguishable — that non-disclosure property falls out of
+// the endpoint's shape rather than needing handler-side care (design D6).
+func TestInternalMedia_returnsOnlySameFleetActiveIDs(t *testing.T) {
+	_, proc, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	h := internalRouter(t, db)
+
+	mine, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "a.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload(mine): %v", err)
+	}
+	theirs, err := proc.InitUpload("fleet-b", "u2", "application/pdf", "b.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload(theirs): %v", err)
+	}
+	deleted, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "c.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload(deleted): %v", err)
+	}
+	if err := proc.SoftDelete(deleted.ID(), "fleet-a"); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+
+	ids := strings.Join([]string{mine.ID(), theirs.ID(), deleted.ID(), "does-not-exist"}, ",")
+	rec := getInternal(t, h, "/internal/media?fleet_id=fleet-a&ids="+ids)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got InternalMediaResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Media) != 1 || got.Media[0].ID != mine.ID() {
+		t.Fatalf("got %+v, want exactly the caller's own active object", got.Media)
+	}
+	if got.Media[0].ContentType != "application/pdf" {
+		t.Fatalf("content_type = %q", got.Media[0].ContentType)
+	}
+}
+
+func TestInternalMedia_missingFleetIDIs422(t *testing.T) {
+	_, _, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := getInternal(t, internalRouter(t, db), "/internal/media?ids=x")
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+}
+
+func TestInternalMedia_emptyIdsReturnsEmptyList(t *testing.T) {
+	_, _, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := getInternal(t, internalRouter(t, db), "/internal/media?fleet_id=fleet-a")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var got InternalMediaResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Media) != 0 {
+		t.Fatalf("got %+v, want an empty list", got.Media)
+	}
+}
+
+// The endpoint is unauthenticated, so its input must be bounded.
+func TestInternalMedia_tooManyIdsIs422(t *testing.T) {
+	_, _, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	ids := make([]string, MaxInternalLookupIDs+1)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("id-%d", i)
+	}
+	rec := getInternal(t, internalRouter(t, db), "/internal/media?fleet_id=fleet-a&ids="+strings.Join(ids, ","))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
 	}
 }

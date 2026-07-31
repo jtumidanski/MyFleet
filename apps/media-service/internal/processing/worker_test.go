@@ -37,6 +37,10 @@ type fakeProvider struct{ m mediaobject.Model }
 func (f *fakeProvider) GetByID(_ string) (mediaobject.Model, error)                 { return f.m, nil }
 func (f *fakeProvider) GetByIDIncludingDeleted(_ string) (mediaobject.Model, error) { return f.m, nil }
 
+func (f *fakeProvider) ListActiveByFleetAndIDs(_ string, _ []string) ([]mediaobject.Model, error) {
+	return nil, nil
+}
+
 // fakeObjectAdmin implements mediaobject.Administrator; records Update calls.
 type fakeObjectAdmin struct{ updated []mediaobject.Model }
 

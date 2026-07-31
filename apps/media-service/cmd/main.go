@@ -127,6 +127,10 @@ func main() {
 
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
+		// Internal route: no JWT, network-restricted (consumed by fleet-service
+		// to validate documentMediaIds). Kept off the public internet by the
+		// priority-200 internal-deny rule in the main overlay's ingressroute.
+		AddRouteInitializer(mediaobject.InitializeInternalRoutes(log, db)).
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
@@ -203,4 +204,73 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUp
 			w.WriteHeader(http.StatusNoContent)
 		})
 	}
+}
+
+// MaxInternalLookupIDs bounds a single /internal/media lookup. The endpoint is
+// unauthenticated, so its input must be bounded; fleet-service's own
+// maintenancerecord.MaxDocuments (10) is the authoritative per-record cap and
+// this is the defensive ceiling behind it.
+const MaxInternalLookupIDs = 50
+
+// InitializeInternalRoutes wires the network-restricted internal endpoint.
+// Register this initializer WITHOUT JWT middleware, exactly as fleet-service
+// does for membership.InitializeInternalRoutes.
+//
+// GET /internal/media?fleet_id=<uuid>&ids=<id>,<id>,… returns the requested IDs
+// that are active AND belong to fleet_id. fleet-service compares the returned
+// set against the requested set to prove a record's documentMediaIds are its
+// caller's own media (design D6, PRD FR-DOC-6). A missing ID is
+// indistinguishable between "does not exist", "was deleted" and "belongs to
+// another fleet" — which is the non-disclosure property api-contracts §3 asks
+// for, and it falls out of the shape rather than needing handler-side care.
+//
+// SECURITY: this route has no authentication. The priority-200 `internal-deny`
+// rule in deploy/k8s/overlays/main/ingressroute.yaml is what keeps it off the
+// public internet (design D20). Without it this is an unauthenticated
+// cross-fleet media-existence oracle. The two ship together; never separately.
+func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
+	prov := NewProvider(db)
+	return func(r chi.Router) {
+		r.Get("/internal/media", func(w http.ResponseWriter, req *http.Request) {
+			fleetID := req.URL.Query().Get("fleet_id")
+			if fleetID == "" {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+
+			ids := splitInternalIDs(req.URL.Query().Get("ids"))
+			if len(ids) > MaxInternalLookupIDs {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+			if len(ids) == 0 {
+				server.WriteJSON(w, http.StatusOK, InternalMediaResponse{Media: []InternalMedia{}})
+				return
+			}
+
+			ms, err := prov.ListActiveByFleetAndIDs(fleetID, ids)
+			if err != nil {
+				log.WithError(err).Error("internal media lookup")
+				server.WriteError(w, err)
+				return
+			}
+			server.WriteJSON(w, http.StatusOK, InternalMediaResponse{Media: TransformInternalMedia(ms)})
+		})
+	}
+}
+
+// splitInternalIDs parses the comma-separated ids parameter, dropping empty
+// segments so a trailing comma or a doubled separator is not a lookup for "".
+func splitInternalIDs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if id := strings.TrimSpace(p); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
