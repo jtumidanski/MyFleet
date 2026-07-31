@@ -76,7 +76,10 @@ export interface UploadDeps {
  *  2. PUT the bytes to /api/media/{id}/content (proxied to MinIO by the service).
  *  3. Confirm — transitions the row from uploaded → processing.
  *
- * After confirm, the caller should poll GET /media/{id} until status === 'ready'.
+ * Documents come back `ready` from confirm; images come back `processing` and
+ * finish asynchronously. Callers do NOT need to poll for `ready` before using
+ * the result — the server validates attachment ownership, not readiness, so
+ * an in-flight image is just as attachable as a finished one.
  *
  * Oversized files are rejected here, before step 1, so nothing reaches the
  * network and no orphaned media row is created.
@@ -258,27 +261,35 @@ export function useSetPrimaryImage(vehicleId: string) {
   });
 }
 
-/** DELETE /api/media/{id} — soft delete. Invalidates vehicle media list. */
-export function useDeleteMedia(vehicleId: string) {
+export interface MediaDeleteOptions {
+  /**
+   * Query keys to invalidate once the delete settles. Empty by default: a
+   * media object cleaned up before it's attached to anything (PRD
+   * FR-DOC-2/FR-DOC-3) has no gallery to refresh.
+   */
+  invalidateKeys?: ReadonlyArray<readonly unknown[]>;
+}
+
+/**
+ * DELETE /api/media/{id} — soft delete, with no gallery coupling by default.
+ * Used to clean up an attachment that was uploaded but never attached to a
+ * saved record. Best-effort: the 5-day purge_after sweep is the authoritative
+ * backstop.
+ */
+export function useDeleteMediaObject(options: MediaDeleteOptions = {}) {
   const queryClient = useQueryClient();
+  const { invalidateKeys } = options;
   return useMutation({
     mutationFn: (mediaId: string) => mediaService.remove(mediaId),
     onSettled: () => {
-      void queryClient.invalidateQueries({
-        queryKey: mediaKeys.vehicleMedia(vehicleId),
-      });
+      for (const key of invalidateKeys ?? []) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
     },
   });
 }
 
-/**
- * DELETE /api/media/{id} — soft delete, with no gallery coupling. Used to clean
- * up an attachment that was uploaded but never attached to a saved record
- * (PRD FR-DOC-2/FR-DOC-3). Best-effort: the 5-day purge_after sweep is the
- * authoritative backstop.
- */
-export function useDeleteMediaObject() {
-  return useMutation({
-    mutationFn: (mediaId: string) => mediaService.remove(mediaId),
-  });
+/** DELETE /api/media/{id} — soft delete. Invalidates vehicle media list. */
+export function useDeleteMedia(vehicleId: string) {
+  return useDeleteMediaObject({ invalidateKeys: [mediaKeys.vehicleMedia(vehicleId)] });
 }
