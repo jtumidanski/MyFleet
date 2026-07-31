@@ -17,7 +17,15 @@ func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator) *Processo
 	return &Processor{log: log, p: p, a: a}
 }
 
-// GetBySub fetches a user by Google sub — delegates to the provider.
+// GetByID fetches a user by our internal user id — the value the JWT `sub`
+// claim carries. This is what GET /auth/me needs; GetBySub is not a substitute.
+func (pr *Processor) GetByID(id string) (Model, error) {
+	return pr.p.GetByID(id)
+}
+
+// GetBySub fetches a user by Google sub — delegates to the provider. Only the
+// OAuth callback path has a Google sub; everything downstream of token issue
+// holds a user id and wants GetByID.
 func (pr *Processor) GetBySub(sub string) (Model, error) {
 	return pr.p.GetBySub(sub)
 }

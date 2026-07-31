@@ -18,7 +18,12 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 	return func(r chi.Router) {
 		r.Get("/auth/me", func(w http.ResponseWriter, req *http.Request) {
 			id := auth.IdentityFromContext(req.Context())
-			m, err := proc.GetBySub(id.UserID) // sub == user id in our tokens
+			// id.UserID is the JWT `sub` claim, which session.Processor sets to
+			// our internal user id — NOT Google's sub. It must be looked up by
+			// primary key. Calling GetBySub here matched it against google_sub,
+			// never found the row, and 404'd every authenticated request, which
+			// the SPA treats as logged-out — an unbreakable login loop.
+			m, err := proc.GetByID(id.UserID)
 			if err != nil {
 				server.WriteError(w, server.ErrNotFound)
 				return
