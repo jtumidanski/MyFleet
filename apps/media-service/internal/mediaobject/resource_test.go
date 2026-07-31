@@ -54,16 +54,23 @@ func TestClassifyUploadError_passesOtherErrorsThrough(t *testing.T) {
 }
 
 // testRouter mounts the real routes over an in-memory DB and the supplied
-// store, and injects the identity the JWT middleware would normally put on the
-// context so the handlers can be exercised end to end.
+// store, with no stored variants — the shape every pre-variant test needs.
 func testRouter(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Handler, *Processor) {
+	t.Helper()
+	return testRouterWithVariants(t, store, &fakeVariants{}, maxUploadBytes)
+}
+
+// testRouterWithVariants mounts the real routes with a variant lookup under the
+// test's control, and injects the identity the JWT middleware would normally put
+// on the context so the handlers can be exercised end to end.
+func testRouterWithVariants(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor) {
 	t.Helper()
 	db := newConfirmTestDB(t)
 	log := logrus.New()
 	log.SetOutput(io.Discard)
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db, store, maxUploadBytes))
-	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store)
+	r.Group(InitializeRoutes(log, db, store, variants, maxUploadBytes))
+	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants)
 }
 
 func memberRequest(method, target string, body io.Reader) *http.Request {

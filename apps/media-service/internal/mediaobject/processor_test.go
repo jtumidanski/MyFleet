@@ -318,6 +318,16 @@ type fakeStore struct {
 	getKey  string
 	getBody []byte
 	getErr  error
+
+	// getBodies serves per-key bytes, so a test can hold a variant and its
+	// original at once; keys absent from the map fall back to getBody.
+	getBodies map[string][]byte
+	// missing marks keys that answer storage.ErrObjectNotFound, which is how
+	// DB/store drift (a variant row whose object is gone) is simulated.
+	missing map[string]bool
+	// getCalls records every key requested, in order, so a test can assert that
+	// a cross-fleet read touched storage zero times.
+	getCalls []string
 }
 
 func (f *fakeStore) Bucket() string { return f.bucket }
@@ -336,17 +346,41 @@ func (f *fakeStore) PutObject(ctx context.Context, key string, r io.Reader, size
 }
 
 func (f *fakeStore) GetObject(ctx context.Context, key string) (io.ReadCloser, error) {
+	f.getCalls = append(f.getCalls, key)
+	if f.missing[key] {
+		return nil, storage.ErrObjectNotFound
+	}
 	if f.getErr != nil {
 		return nil, f.getErr
 	}
 	f.getKey = key
+	if b, ok := f.getBodies[key]; ok {
+		return io.NopCloser(bytes.NewReader(b)), nil
+	}
 	return io.NopCloser(bytes.NewReader(f.getBody)), nil
+}
+
+// fakeVariants stands in for the mediavariant-backed adapter. refs is keyed by
+// variant name ("thumbnail", "display"); an absent key is the normal miss.
+type fakeVariants struct {
+	refs  map[string]VariantRef
+	err   error
+	calls []string
+}
+
+func (f *fakeVariants) Lookup(mediaObjectID, variant string) (VariantRef, bool, error) {
+	f.calls = append(f.calls, variant)
+	if f.err != nil {
+		return VariantRef{}, false, f.err
+	}
+	ref, ok := f.refs[variant]
+	return ref, ok, nil
 }
 
 func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -380,7 +414,7 @@ func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
 func TestStoreContent_crossFleetIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -404,7 +438,7 @@ func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T)
 	db := newConfirmTestDB(t)
 	injectErr := errors.New("simulated minio put failure")
 	store := &fakeStore{bucket: "myfleet-media", putErr: injectErr}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -434,7 +468,7 @@ func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T)
 func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -467,14 +501,14 @@ func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
 func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
 		t.Fatalf("init upload: %v", err)
 	}
 
-	m, rc, err := pr.Content(context.Background(), created.ID(), "fleet-a")
+	info, rc, err := pr.Content(context.Background(), created.ID(), "fleet-a", ContentOriginal)
 	if err != nil {
 		t.Fatalf("content: %v", err)
 	}
@@ -483,8 +517,8 @@ func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
 	if store.getKey != created.ObjectKey() {
 		t.Fatalf("read key %q, want %q", store.getKey, created.ObjectKey())
 	}
-	if m.ContentType() != "image/jpeg" {
-		t.Fatalf("content type = %q, want image/jpeg", m.ContentType())
+	if info.ContentType != "image/jpeg" {
+		t.Fatalf("content type = %q, want image/jpeg", info.ContentType)
 	}
 	got, err := io.ReadAll(rc)
 	if err != nil {
@@ -498,14 +532,14 @@ func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
 func TestContent_crossFleetIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
 		t.Fatalf("init upload: %v", err)
 	}
 
-	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-b"); !errors.Is(err, server.ErrNotFound) {
+	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-b", ContentOriginal); !errors.Is(err, server.ErrNotFound) {
 		t.Fatalf("cross-fleet read must be 404, got %v", err)
 	}
 	if store.getKey != "" {
@@ -521,14 +555,14 @@ func TestContent_crossFleetIs404(t *testing.T) {
 func TestContent_missingObjectIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getErr: storage.ErrObjectNotFound}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
 		t.Fatalf("init upload: %v", err)
 	}
 
-	_, rc, err := pr.Content(context.Background(), created.ID(), "fleet-a")
+	_, rc, err := pr.Content(context.Background(), created.ID(), "fleet-a", ContentOriginal)
 	if !errors.Is(err, server.ErrNotFound) {
 		if rc != nil {
 			_ = rc.Close()
@@ -547,14 +581,209 @@ func TestContent_otherStorageFailuresAreNot404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	boom := errors.New("simulated minio outage")
 	store := &fakeStore{bucket: "myfleet-media", getErr: boom}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
 		t.Fatalf("init upload: %v", err)
 	}
 
-	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-a"); !errors.Is(err, boom) {
+	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-a", ContentOriginal); !errors.Is(err, boom) {
 		t.Fatalf("content = %v, want the underlying storage error passed through", err)
+	}
+}
+
+// seedReadyObject creates a media object and records its byte count, returning
+// the model — the state a completed upload leaves behind.
+func seedReadyObject(t *testing.T, pr *Processor, fleetID string, payload []byte) Model {
+	t.Helper()
+	created, err := pr.InitUpload(fleetID, "u1", "image/png", "photo.png")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+	stored, err := pr.StoreContent(context.Background(), created.ID(), fleetID, bytes.NewReader(payload), int64(len(payload)))
+	if err != nil {
+		t.Fatalf("store content: %v", err)
+	}
+	return stored
+}
+
+func readAllAndClose(t *testing.T, rc io.ReadCloser) string {
+	t.Helper()
+	defer func() { _ = rc.Close() }()
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read content: %v", err)
+	}
+	return string(b)
+}
+
+// TestContent_originalIsUnchanged pins the pre-existing contract: asking for the
+// original serves the media object's own key, content type, and recorded size.
+func TestContent_originalIsUnchanged(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	variants := &fakeVariants{}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+
+	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+	info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentOriginal)
+	if err != nil {
+		t.Fatalf("Content: %v", err)
+	}
+	if got := readAllAndClose(t, rc); got != "original-bytes" {
+		t.Fatalf("body = %q, want original-bytes", got)
+	}
+	if info.ContentType != "image/png" {
+		t.Fatalf("ContentType = %q, want image/png", info.ContentType)
+	}
+	if info.Size != int64(len("original-bytes")) {
+		t.Fatalf("Size = %d, want %d", info.Size, len("original-bytes"))
+	}
+	if info.Served != ContentOriginal {
+		t.Fatalf("Served = %q, want original", info.Served)
+	}
+	if len(variants.calls) != 0 {
+		t.Fatalf("variant lookup ran %v times for an original request; it must not", variants.calls)
+	}
+}
+
+// TestContent_variantFoundServesVariantBytes is the whole point of the feature:
+// the variant's own key and content type, and NO size — media_variants records
+// width/height/content_type but no byte count, so Content-Length must be omitted.
+func TestContent_variantFoundServesVariantBytes(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{
+		bucket:    "myfleet-media",
+		getBody:   []byte("original-bytes"),
+		getBodies: map[string][]byte{"fleet-a/thumb.jpg": []byte("thumb-bytes")},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+	}}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+
+	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+	info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail)
+	if err != nil {
+		t.Fatalf("Content: %v", err)
+	}
+	if got := readAllAndClose(t, rc); got != "thumb-bytes" {
+		t.Fatalf("body = %q, want thumb-bytes", got)
+	}
+	if info.ContentType != "image/jpeg" {
+		t.Fatalf("ContentType = %q, want the variant's own image/jpeg", info.ContentType)
+	}
+	if info.Size != 0 {
+		t.Fatalf("Size = %d, want 0 — the original's size must never describe a variant", info.Size)
+	}
+	if info.Served != ContentThumbnail {
+		t.Fatalf("Served = %q, want thumbnail", info.Served)
+	}
+}
+
+// TestContent_variantMissingFallsBackToOriginal is the normal state for media
+// whose processing has not finished, and for anything that is not a processable
+// image. Clients must not have to special-case it.
+func TestContent_variantMissingFallsBackToOriginal(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	variants := &fakeVariants{} // no rows at all
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+
+	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+	info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail)
+	if err != nil {
+		t.Fatalf("Content: %v", err)
+	}
+	if got := readAllAndClose(t, rc); got != "original-bytes" {
+		t.Fatalf("body = %q, want the original bytes as a fallback", got)
+	}
+	if info.Served != ContentOriginal {
+		t.Fatalf("Served = %q, want original after a fallback", info.Served)
+	}
+	if info.ContentType != "image/png" {
+		t.Fatalf("ContentType = %q, want the media object's own image/png", info.ContentType)
+	}
+	if info.Size == 0 {
+		t.Fatal("Size = 0; a fallback serves the ORIGINAL, whose size is known")
+	}
+}
+
+// TestContent_variantObjectMissingFallsBackToOriginal covers DB/store drift: the
+// variant row exists but its object is gone from MinIO. 404 would be a worse
+// answer than the original — the resource plainly exists and we hold readable
+// bytes for it.
+func TestContent_variantObjectMissingFallsBackToOriginal(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{
+		bucket:  "myfleet-media",
+		getBody: []byte("original-bytes"),
+		missing: map[string]bool{"fleet-a/gone.jpg": true},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-a/gone.jpg", ContentType: "image/jpeg"},
+	}}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+
+	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+	info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail)
+	if err != nil {
+		t.Fatalf("Content: %v", err)
+	}
+	if got := readAllAndClose(t, rc); got != "original-bytes" {
+		t.Fatalf("body = %q, want the original bytes", got)
+	}
+	if info.Served != ContentOriginal {
+		t.Fatalf("Served = %q, want original", info.Served)
+	}
+	if len(store.getCalls) != 2 {
+		t.Fatalf("store was called %v; want the missing variant key then the original", store.getCalls)
+	}
+}
+
+// TestContent_crossFleetNeverTouchesLookupOrStore is FR-7.5: the media object is
+// resolved and fleet-scoped BEFORE any variant lookup or object-store read, so a
+// variant can never be reachable by a caller who could not read the original.
+func TestContent_crossFleetNeverTouchesLookupOrStore(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-b/thumb.jpg", ContentType: "image/jpeg"},
+	}}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+
+	obj := seedReadyObject(t, pr, "fleet-b", []byte("original-bytes"))
+
+	_, _, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail)
+	if !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("Content across fleets = %v, want ErrNotFound (404, never 403 — 403 would leak existence)", err)
+	}
+	if len(variants.calls) != 0 {
+		t.Fatalf("variant lookup ran %v for a cross-fleet read", variants.calls)
+	}
+	if len(store.getCalls) != 0 {
+		t.Fatalf("cross-fleet read touched storage: %v", store.getCalls)
+	}
+}
+
+// TestContent_lookupErrorIsReturned: a miss is found=false, so an actual error
+// means the database is broken. Masking it behind the original would hide a real
+// fault.
+func TestContent_lookupErrorIsReturned(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	boom := errors.New("simulated variant query failure")
+	variants := &fakeVariants{err: boom}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+
+	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+	if _, _, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail); !errors.Is(err, boom) {
+		t.Fatalf("Content = %v, want the lookup error propagated", err)
 	}
 }
