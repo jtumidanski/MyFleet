@@ -26,5 +26,6 @@ resources:
   - notification-service/deployment.yaml
   - notification-service/service.yaml
 
+  - web/configmap.yaml
   - web/deployment.yaml
   - web/service.yaml

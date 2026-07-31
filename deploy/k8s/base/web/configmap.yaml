@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-config
+  labels:
+    app: web
+data:
+  # Served by the SPA's own nginx at /config/config.json and read once, before
+  # the React tree mounts (apps/web/src/lib/config/runtimeConfig.ts). Editing
+  # this value takes effect on a `kubectl apply` — no image rebuild — which is
+  # the whole reason it is not an inlined Vite env var.
+  #
+  # The volume is mounted as a directory rather than with subPath so kubelet
+  # propagates updates to running pods.
+  config.json: |
+    {
+      "carfaxUrlTemplate": "https://www.carfax.com/VehicleHistory/p/Report.cfx?vin={vin}"
+    }
