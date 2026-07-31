@@ -6,6 +6,7 @@ import { ApiError } from '@myfleet/shared-ts';
 import { mediaKeys, useMediaContentUrl } from './media';
 import { performMediaUpload, MEDIA_MAX_UPLOAD_BYTES, MEDIA_TOO_LARGE_CODE } from './media';
 import { mediaService } from '../../../services/api/MediaService';
+import { stubObjectUrl } from '../../../test/objectUrl';
 
 // useMediaContentUrl goes through mediaService.getContentBlob; mock the
 // module so no network call is needed and each test controls what blob
@@ -123,16 +124,6 @@ describe('performMediaUpload', () => {
 // blob is available, and must never leak a createObjectURL allocation,
 // including across React StrictMode's dev-only double-invocation.
 // ---------------------------------------------------------------------------
-
-// jsdom does not implement createObjectURL/revokeObjectURL; stub them so the
-// hook has something to call, and so we can assert on call counts/args.
-function stubObjectUrl() {
-  let counter = 0;
-  const createObjectURL = vi.fn(() => `blob:mock-${counter++}`);
-  const revokeObjectURL = vi.fn();
-  vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }));
-  return { createObjectURL, revokeObjectURL };
-}
 
 function makeQueryWrapper(queryClient: QueryClient, strict: boolean) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
