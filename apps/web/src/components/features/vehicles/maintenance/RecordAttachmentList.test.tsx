@@ -30,9 +30,7 @@ describe('RecordAttachmentList', () => {
 
   it('renders a document as a working download action', async () => {
     const user = userEvent.setup();
-    vi.mocked(mediaService.get).mockResolvedValue(
-      mediaResource('m1', 'application/pdf') as never,
-    );
+    vi.mocked(mediaService.get).mockResolvedValue(mediaResource('m1', 'application/pdf') as never);
     const blob = new Blob(['%PDF']);
     vi.mocked(mediaService.getContentBlob).mockResolvedValue(blob);
 

@@ -8,8 +8,8 @@ var (
 	ErrNotFound              = errors.New("not found")                // 404
 	ErrConflict              = errors.New("conflict")                 // 409
 	ErrGone                  = errors.New("gone")                     // 410
-	ErrRequestEntityTooLarge = errors.New("request entity too large")  // 413
-	ErrUnsupportedMediaType  = errors.New("unsupported media type")    // 415
+	ErrRequestEntityTooLarge = errors.New("request entity too large") // 413
+	ErrUnsupportedMediaType  = errors.New("unsupported media type")   // 415
 	ErrValidation            = errors.New("validation")               // 422
 )
 

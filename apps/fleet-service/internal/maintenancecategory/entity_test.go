@@ -4,9 +4,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 func newTestDB(t *testing.T) *gorm.DB {

@@ -41,7 +41,9 @@ const categories: MaintenanceCategory[] = [
 describe('MaintenanceRecordForm', () => {
   it('offers only the categories of the requested kind', async () => {
     const user = userEvent.setup();
-    render(<MaintenanceRecordForm categories={categories} kind="modification" onSubmit={vi.fn()} />);
+    render(
+      <MaintenanceRecordForm categories={categories} kind="modification" onSubmit={vi.fn()} />,
+    );
 
     // Open the picker and inspect its listbox directly — a Select renders no
     // options until opened, so checking the closed document proves nothing.

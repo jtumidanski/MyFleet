@@ -305,7 +305,8 @@ export function VehicleMaintenanceSection({
                               with no description fall back to the category name
                               so history stays readable (PRD FR-REC-2). */}
                           <p className="truncate text-sm font-medium">
-                            {record.attributes.description || category?.attributes.name ||
+                            {record.attributes.description ||
+                              category?.attributes.name ||
                               record.attributes.categoryId}
                           </p>
                           {category?.attributes.kind === 'modification' && (
@@ -356,9 +357,7 @@ export function VehicleMaintenanceSection({
                         25-record page from issuing 25 × N metadata requests. */}
                     {isExpanded && (
                       <div className="mt-3 border-t pt-3">
-                        <RecordAttachmentList
-                          mediaIds={record.attributes.documentMediaIds ?? []}
-                        />
+                        <RecordAttachmentList mediaIds={record.attributes.documentMediaIds ?? []} />
                       </div>
                     )}
                   </div>

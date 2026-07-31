@@ -6,7 +6,10 @@ import {
   MEDIA_MAX_UPLOAD_BYTES,
   formatUploadSize,
 } from '../../../../lib/hooks/api/media';
-import { MAX_ATTACHMENTS, type PendingAttachment } from '../../../../lib/hooks/usePendingAttachments';
+import {
+  MAX_ATTACHMENTS,
+  type PendingAttachment,
+} from '../../../../lib/hooks/usePendingAttachments';
 
 interface AttachmentPickerProps {
   items: PendingAttachment[];
