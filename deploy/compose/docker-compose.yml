@@ -137,6 +137,7 @@ services:
       MINIO_USE_SSL: "false"
       MEDIA_BUCKET: ${MEDIA_BUCKET}
       MEDIA_WORKERS: ${MEDIA_WORKERS:-2}
+      MEDIA_ALLOWED_CONTENT_TYPES: ${MEDIA_ALLOWED_CONTENT_TYPES:-image/jpeg,image/png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:

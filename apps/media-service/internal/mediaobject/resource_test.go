@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
@@ -56,14 +57,18 @@ func TestClassifyUploadError_passesOtherErrorsThrough(t *testing.T) {
 // testRouter mounts the real routes over an in-memory DB and the supplied
 // store, and injects the identity the JWT middleware would normally put on the
 // context so the handlers can be exercised end to end.
-func testRouter(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Handler, *Processor) {
+func testRouter(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Handler, *Processor, *gorm.DB) {
 	t.Helper()
 	db := newConfirmTestDB(t)
 	log := logrus.New()
 	log.SetOutput(io.Discard)
+	allow, err := ParseAllowlist(DefaultAllowedContentTypes)
+	if err != nil {
+		t.Fatalf("ParseAllowlist: %v", err)
+	}
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db, store, maxUploadBytes))
-	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store)
+	r.Group(InitializeRoutes(log, db, store, maxUploadBytes, allow))
+	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, allow), db
 }
 
 func memberRequest(method, target string, body io.Reader) *http.Request {
@@ -85,7 +90,7 @@ func memberRequest(method, target string, body io.Reader) *http.Request {
 func TestPutContent_overCapContentLengthIs413BeforeStorage(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media"}
 	const cap = 1024
-	router, proc := testRouter(t, store, cap)
+	router, proc, _ := testRouter(t, store, cap)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -112,7 +117,7 @@ func TestPutContent_overCapContentLengthIs413BeforeStorage(t *testing.T) {
 // must still reach the store with the unknown-length sentinel.
 func TestPutContent_unknownLengthStillUploads(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media"}
-	router, proc := testRouter(t, store, 1024)
+	router, proc, _ := testRouter(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -141,7 +146,7 @@ func TestPutContent_unknownLengthStillUploads(t *testing.T) {
 // path.
 func TestPutContent_withinCapContentLengthIsPassedThrough(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media"}
-	router, proc := testRouter(t, store, 1024)
+	router, proc, _ := testRouter(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -167,7 +172,7 @@ func TestPutContent_withinCapContentLengthIsPassedThrough(t *testing.T) {
 // an empty body. The status has to be decided before any header is committed.
 func TestGetContent_missingObjectIs404NotEmpty200(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getErr: storage.ErrObjectNotFound}
-	router, proc := testRouter(t, store, 1024)
+	router, proc, _ := testRouter(t, store, 1024)
 
 	// Exactly the state POST /media leaves behind: row created, nothing PUT.
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
@@ -193,7 +198,7 @@ func TestGetContent_missingObjectIs404NotEmpty200(t *testing.T) {
 func TestGetContent_presentObjectStreams200(t *testing.T) {
 	payload := []byte("jpeg-bytes")
 	store := &fakeStore{bucket: "myfleet-media", getBody: payload}
-	router, proc := testRouter(t, store, 1024)
+	router, proc, _ := testRouter(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -223,7 +228,7 @@ func TestGetContent_presentObjectStreams200(t *testing.T) {
 // never be touched.
 func TestGetContent_crossFleetIs404(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
-	router, proc := testRouter(t, store, 1024)
+	router, proc, _ := testRouter(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-b", "u2", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -239,5 +244,64 @@ func TestGetContent_crossFleetIs404(t *testing.T) {
 	}
 	if store.getKey != "" {
 		t.Fatalf("cross-fleet read touched storage (key %q)", store.getKey)
+	}
+}
+
+// initBody builds the JSON:API envelope POST /media expects.
+func initBody(contentType, filename string) io.Reader {
+	return strings.NewReader(`{"data":{"attributes":{"contentType":"` + contentType +
+		`","originalFilename":"` + filename + `"}}}`)
+}
+
+func TestInitUpload_pdfIsAccepted(t *testing.T) {
+	router, _, _ := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("application/pdf", "invoice.pdf")))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// The allowlist is a security control, not a UX affordance: broadening the
+// accepted file types without it would turn media download into a same-origin
+// stored-XSS vector.
+func TestInitUpload_htmlIs415(t *testing.T) {
+	router, _, _ := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("text/html", "evil.html")))
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "application/pdf") {
+		t.Fatalf("415 body does not name the accepted types: %s", rec.Body.String())
+	}
+}
+
+func TestInitUpload_emptyContentTypeIs415(t *testing.T) {
+	router, _, _ := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("", "mystery")))
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+}
+
+// text/csv; charset=utf-8 is what a browser actually sends. The parameters are
+// discarded and the bare type is what gets stored (design D10).
+func TestInitUpload_normalizesAndStoresBareType(t *testing.T) {
+	_, proc, _ := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	m, err := proc.InitUpload("fleet-a", "u1", "TEXT/CSV; charset=utf-8", "mileage.csv")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+	if m.ContentType() != "text/csv" {
+		t.Fatalf("stored contentType = %q, want text/csv", m.ContentType())
 	}
 }

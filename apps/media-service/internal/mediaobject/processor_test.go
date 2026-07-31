@@ -346,7 +346,7 @@ func (f *fakeStore) GetObject(ctx context.Context, key string) (io.ReadCloser, e
 func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -380,7 +380,7 @@ func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
 func TestStoreContent_crossFleetIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -404,7 +404,7 @@ func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T)
 	db := newConfirmTestDB(t)
 	injectErr := errors.New("simulated minio put failure")
 	store := &fakeStore{bucket: "myfleet-media", putErr: injectErr}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -434,7 +434,7 @@ func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T)
 func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -467,7 +467,7 @@ func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
 func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -498,7 +498,7 @@ func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
 func TestContent_crossFleetIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -521,7 +521,7 @@ func TestContent_crossFleetIs404(t *testing.T) {
 func TestContent_missingObjectIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getErr: storage.ErrObjectNotFound}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -547,7 +547,7 @@ func TestContent_otherStorageFailuresAreNot404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	boom := errors.New("simulated minio outage")
 	store := &fakeStore{bucket: "myfleet-media", getErr: boom}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {

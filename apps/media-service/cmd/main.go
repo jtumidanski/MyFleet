@@ -89,6 +89,15 @@ func main() {
 	// Cap proxied uploads. 25 MiB sits under Cloudflare's free-plan request-body
 	// ceiling, so the edge is not the first thing a user discovers.
 	maxUploadBytes := int64(config.GetInt("MEDIA_MAX_UPLOAD_BYTES", 26214400))
+
+	// The allowlist is a security control (PRD FR-MEDIA-1). Fatal on a parse
+	// error: a malformed list must not boot into "allow nothing" or "allow
+	// everything".
+	allow, err := mediaobject.ParseAllowlist(
+		config.Get("MEDIA_ALLOWED_CONTENT_TYPES", mediaobject.DefaultAllowedContentTypes))
+	if err != nil {
+		log.WithError(err).Fatal("parse MEDIA_ALLOWED_CONTENT_TYPES")
+	}
 	for i := 0; i < workerCount; i++ {
 		go worker.Run(ctx, brokers, "media-variant-workers")
 	}
@@ -121,7 +130,7 @@ func main() {
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
-				mediaobject.InitializeRoutes(log, db, store, maxUploadBytes)(pr)
+				mediaobject.InitializeRoutes(log, db, store, maxUploadBytes, allow)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {

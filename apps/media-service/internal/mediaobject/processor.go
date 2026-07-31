@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -98,16 +100,34 @@ type Processor struct {
 	p       Provider
 	a       Administrator
 	storage ObjectStore
+	allow   Allowlist
 }
 
-func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore) *Processor {
-	return &Processor{log: log, p: p, a: a, storage: st}
+func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore, allow Allowlist) *Processor {
+	return &Processor{log: log, p: p, a: a, storage: st, allow: allow}
 }
 
 // InitUpload creates a media-object row in the uploaded state. The client then
 // PUTs the bytes to /media/{id}/content; this service proxies them to object
 // storage so MinIO is never reachable from the browser.
+//
+// The client-supplied content type is validated against the server-side
+// allowlist and stored NORMALISED (parameters discarded, lowercased), so no
+// arbitrary client string is ever persisted and GET /media/{id}/content cannot
+// echo one back (PRD FR-MEDIA-1, design D10).
 func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (Model, error) {
+	normalized, ok := pr.allow.Normalize(contentType)
+	if !ok {
+		// Log the offending type, never the bytes and never the filename.
+		pr.log.WithFields(logrus.Fields{
+			"content_type": contentType,
+			"fleet_id":     fleetID,
+			"user_id":      userID,
+		}).Warn("upload rejected: content type is not on the allowlist")
+		return Model{}, fmt.Errorf("%w: accepted types are %s",
+			server.ErrUnsupportedMediaType, strings.Join(pr.allow.Accepted(), ", "))
+	}
+
 	id := uuid.NewString()
 	key := storage.ObjectKey(fleetID, id, filename)
 	m, err := NewBuilder().
@@ -116,18 +136,14 @@ func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (
 		SetUploadedByUserID(userID).
 		SetBucket(pr.storage.Bucket()).
 		SetObjectKey(key).
-		SetContentType(contentType).
+		SetContentType(normalized).
 		SetOriginalFilename(filename).
 		SetStatus(StatusUploaded).
 		Build()
 	if err != nil {
 		return Model{}, err
 	}
-	created, err := pr.a.Insert(m)
-	if err != nil {
-		return Model{}, err
-	}
-	return created, nil
+	return pr.a.Insert(m)
 }
 
 // countingReader wraps an io.Reader and tallies the bytes actually read, so

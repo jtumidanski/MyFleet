@@ -41,8 +41,8 @@ func classifyUploadError(err error) error {
 // carry their own /media segment (the gateway strips only /api). Event
 // emission uses the transactional outbox (design A8); no Kafka producer is
 // needed here.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUploadBytes int64) func(chi.Router) {
-	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db), st)
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUploadBytes int64, allow Allowlist) func(chi.Router) {
+	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db), st, allow)
 	return func(r chi.Router) {
 		// POST /media — init upload: create the row in the uploaded state.
 		r.Post("/media", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
