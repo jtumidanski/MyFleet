@@ -10,6 +10,7 @@ require (
 	github.com/sirupsen/logrus v1.9.4
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.280.0
+	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.1
 )
 
@@ -56,5 +57,4 @@ require (
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
-	gorm.io/driver/sqlite v1.6.0 // indirect
 )

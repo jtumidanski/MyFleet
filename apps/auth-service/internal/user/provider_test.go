@@ -27,7 +27,8 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err := db.Exec("ATTACH DATABASE ':memory:' AS auth").Error; err != nil {
 		t.Fatalf("attach auth schema: %v", err)
 	}
-	// Explicit DDL rather than Migration(db)/AutoMigrate: the uniqueIndex tags
+	// KEEP IN SYNC WITH entity.go. Explicit DDL rather than
+	// Migration(db)/AutoMigrate: the uniqueIndex tags
 	// on GoogleSub and Email make GORM emit `CREATE UNIQUE INDEX … ON users`
 	// unqualified, which cannot resolve against the attached `auth` schema and
 	// fails with "no such table: main.users". fleet-service's entities carry no
@@ -85,6 +86,20 @@ func TestGetByID_doesNotMatchOnGoogleSub(t *testing.T) {
 
 	if _, err := NewProvider(db).GetByID(testGoogleSub); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetByID(googleSub) = %v; want ErrNotFound — a Google sub is not a user id", err)
+	}
+}
+
+// auth.JWT builds Identity.UserID via str(claims["sub"]), which yields "" for a
+// missing or non-string claim. Empty must not act as "no filter" and return an
+// arbitrary user — that would hand the first row in the table to any token
+// lacking a sub.
+func TestGetByID_emptyIDMatchesNothing(t *testing.T) {
+	db := newTestDB(t)
+	seedUser(t, db)
+
+	if _, err := NewProvider(db).GetByID(""); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetByID(\"\") = %v; want ErrNotFound — an absent sub claim must "+
+			"not resolve to a user", err)
 	}
 }
 

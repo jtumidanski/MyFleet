@@ -23,12 +23,11 @@ func (pr *Processor) GetByID(id string) (Model, error) {
 	return pr.p.GetByID(id)
 }
 
-// GetBySub fetches a user by Google sub — delegates to the provider. Only the
-// OAuth callback path has a Google sub; everything downstream of token issue
-// holds a user id and wants GetByID.
-func (pr *Processor) GetBySub(sub string) (Model, error) {
-	return pr.p.GetBySub(sub)
-}
+// No GetBySub wrapper: ProvisionFromGoogle below calls pr.p.GetBySub directly,
+// and it is the only code path that holds a Google sub. Exposing a lookup named
+// "BySub" on the Processor is what invited the login-loop bug — the JWT's `sub`
+// claim is a user id, so the name reads as correct at every call site that has
+// an Identity. Anything holding a user id wants GetByID.
 
 // ProvisionFromGoogle upserts a user by google_sub (FR-AUTH-2). Idempotent.
 func (pr *Processor) ProvisionFromGoogle(gp GoogleProfile) (Model, error) {
