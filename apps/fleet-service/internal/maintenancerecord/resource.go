@@ -1,6 +1,7 @@
 package maintenancerecord
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancecategory"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
 )
 
@@ -21,9 +23,36 @@ type VehicleAccessor interface {
 	GetByID(id string) (vehicle.Model, error)
 }
 
+// CategoryAccessor resolves the category IDs of a kind so the record list can
+// be filtered by kind without importing another domain's data access. It
+// mirrors VehicleAccessor exactly; satisfied by *maintenancecategory.Processor.
+//
+// Importing maintenancecategory.Kind/ParseKind for the type keeps parsing and
+// the permitted value set in the domain that owns them, so the category and
+// record endpoints cannot drift on what ?kind= accepts (design D2).
+type CategoryAccessor interface {
+	IDsByKind(kind maintenancecategory.Kind) ([]string, error)
+}
+
+// DocumentValidator proves every documentMediaId belongs to the caller's active
+// fleet (PRD FR-DOC-6). Satisfied by *mediaclient.Client. A nil value is legal
+// and means "no validator wired" — used by unit tests and by any future caller
+// that has already validated.
+type DocumentValidator interface {
+	ValidateOwnership(ctx context.Context, fleetID string, mediaIDs []string) error
+}
+
 // InitializeRoutes wires the JWT-protected maintenance record endpoints.
-// vehicleAccessor resolves the owning vehicle's fleetID for authz.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor) func(chi.Router) {
+// vehicleAccessor resolves the owning vehicle's fleetID for authz;
+// categoryAccessor backs the ?kind= filter; docs validates attachment
+// ownership on create and may be nil.
+func InitializeRoutes(
+	log logrus.FieldLogger,
+	db *gorm.DB,
+	vehicleAccessor VehicleAccessor,
+	categoryAccessor CategoryAccessor,
+	docs DocumentValidator,
+) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
 	return func(r chi.Router) {
 		// GET /vehicles/{id}/maintenance-records — list (paged, newest first).
@@ -41,11 +70,29 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				return
 			}
 
+			kind, err := maintenancecategory.ParseKind(req.URL.Query().Get("kind"))
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+
+			// nil means "no filter"; a resolved-but-empty set means "match
+			// nothing". Never collapse the two (design D3).
+			var categoryIDs []string
+			if kind != "" {
+				categoryIDs, err = categoryAccessor.IDsByKind(kind)
+				if err != nil {
+					log.WithError(err).Error("resolve category ids by kind")
+					server.WriteError(w, err)
+					return
+				}
+				if categoryIDs == nil {
+					categoryIDs = []string{}
+				}
+			}
+
 			page := server.ParsePage(req)
-			// TODO(task-16): pass the category filter parsed from the query
-			// string instead of nil. nil preserves today's unfiltered
-			// behaviour exactly and keeps the build green in the interim.
-			ms, total, err := proc.ListByVehicle(vehicleID, nil, page)
+			ms, total, err := proc.ListByVehicle(vehicleID, categoryIDs, page)
 			if err != nil {
 				log.WithError(err).Error("list maintenance records")
 				server.WriteError(w, err)
@@ -60,6 +107,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 		// POST /vehicles/{id}/maintenance-records — log a maintenance record.
 		r.Post("/vehicles/{id}/maintenance-records", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			CategoryID       string   `json:"categoryId"`
+			Description      string   `json:"description"`
 			PerformedAt      string   `json:"performedAt"`
 			Mileage          int      `json:"mileage"`
 			Cost             float64  `json:"cost"`
@@ -85,11 +133,31 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				return
 			}
 
-			performedAt := time.Now().UTC()
-			if attrs.PerformedAt != "" {
-				performedAt, err = time.Parse(time.RFC3339, attrs.PerformedAt)
-				if err != nil {
-					server.WriteError(w, server.ErrValidation)
+			// performedAt is required (PRD FR-REC-5). This used to default
+			// to time.Now().UTC() when empty; a maintenance log with a
+			// silently-guessed date is worse than one that refuses to save.
+			// The builder rejects a zero time as well, so the invariant is
+			// enforced twice on purpose: the handler gives the accurate
+			// status code, the builder guarantees no code path can construct
+			// a dateless record.
+			if attrs.PerformedAt == "" {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+			performedAt, err := time.Parse(time.RFC3339, attrs.PerformedAt)
+			if err != nil {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+
+			// Prove the attachments are the caller's own BEFORE anything is
+			// written, so a rejection leaves nothing to roll back
+			// (PRD FR-DOC-6). Skipped entirely when there are no
+			// attachments, so the common case makes no cross-service call.
+			if len(attrs.DocumentMediaIDs) > 0 && docs != nil {
+				if err := docs.ValidateOwnership(req.Context(), identity.ActiveFleetID, attrs.DocumentMediaIDs); err != nil {
+					log.WithError(err).Warn("attachment ownership validation failed")
+					server.WriteError(w, err)
 					return
 				}
 			}
@@ -97,6 +165,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			m, err := NewBuilder().
 				SetVehicleID(vehicleID).
 				SetCategoryID(attrs.CategoryID).
+				SetDescription(attrs.Description).
 				SetPerformedAt(performedAt).
 				SetMileage(attrs.Mileage).
 				SetCost(attrs.Cost).
@@ -141,6 +210,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 
 		// PATCH /maintenance-records/{id} — partial update.
 		r.Patch("/maintenance-records/{id}", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
+			Description *string  `json:"description"`
 			PerformedAt *string  `json:"performedAt"`
 			Mileage     *int     `json:"mileage"`
 			Cost        *float64 `json:"cost"`
@@ -180,6 +250,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			}
 
 			updated, err := proc.Update(id, func(m Model) Model {
+				if attrs.Description != nil {
+					m = m.WithDescription(*attrs.Description)
+				}
 				if parsedAt != nil {
 					m = m.WithPerformedAt(*parsedAt)
 				}
