@@ -116,8 +116,17 @@ describe('no hardcoded palette classes', () => {
     // belt-and-braces against a future rename.
     const self = fileURLToPath(import.meta.url);
 
-    const offenders = roots
-      .flatMap(tsxFiles)
+    const filesByRoot = roots.map((root) => ({ root, files: tsxFiles(root) }));
+    // A root that silently resolves to zero files (a moved directory, a
+    // rename) would make the assertion below pass trivially — StatusBadge.tsx
+    // is the one file make fe-test never covers on its own, so an empty walk
+    // into packages/ui-components/src must fail loudly, not pass silently.
+    filesByRoot.forEach(({ root, files }) => {
+      expect(files.length, `expected at least one .tsx file under ${root}`).toBeGreaterThan(0);
+    });
+
+    const offenders = filesByRoot
+      .flatMap(({ files }) => files)
       .filter((file) => file !== self)
       .flatMap((file) =>
         readFileSync(file, 'utf8')

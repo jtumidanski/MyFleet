@@ -69,7 +69,8 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
         </CardContent>
       </Card>
 
-      {/* Upcoming — intentional status color: amber indicates upcoming attention needed */}
+      {/* Upcoming — the warning family; the "Upcoming Maintenance" heading carries
+          the meaning, colour only reinforces it (FR-A11Y-2). */}
       <Card>
         <CardContent className="pt-6">
           <h2 className="mb-4 text-base font-semibold text-warning">Upcoming Maintenance</h2>
