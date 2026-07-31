@@ -149,7 +149,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, varia
 		// The optional ?variant= parameter selects a stored rendition
 		// (thumbnail/display); omitting it serves the original, byte-for-byte
 		// as before. An unrecognised value is a 400, never a silent fallback —
-		// a typo would otherwise ship multi-megabyte responses undetected.
+		// a typo would otherwise ship multi-megabyte responses undetected — and
+		// a derived variant that cannot be served is a 404 for the same reason
+		// (see Processor.Content).
 		r.Get("/media/{id}/content", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
@@ -160,6 +162,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, varia
 			}
 			info, rc, err := proc.Content(req.Context(), id, identity.ActiveFleetID, v)
 			if err != nil {
+				// Expected outcomes (404 for a missing object or an unservable
+				// variant, 403, 410) are the client's business, not an operator's;
+				// a 500 here means the variant query or the object store failed
+				// and must leave a server-side trace, as its sibling handlers do.
+				if server.StatusFor(err) >= http.StatusInternalServerError {
+					log.WithError(err).WithField("media_id", id).
+						WithField("variant", string(v)).
+						Error("media content read failed")
+				}
 				server.WriteError(w, err)
 				return
 			}

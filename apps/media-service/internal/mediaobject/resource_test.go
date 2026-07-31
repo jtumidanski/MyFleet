@@ -65,12 +65,23 @@ func testRouter(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Han
 // on the context so the handlers can be exercised end to end.
 func testRouterWithVariants(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor) {
 	t.Helper()
+	router, proc, _ := testRouterCapturingLogs(t, store, variants, maxUploadBytes)
+	return router, proc
+}
+
+// testRouterCapturingLogs is testRouterWithVariants plus the hook, for the tests
+// that assert an operator-facing log was actually emitted rather than only that
+// the right status reached the client.
+func testRouterCapturingLogs(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor, *logrusTestHook) {
+	t.Helper()
 	db := newConfirmTestDB(t)
 	log := logrus.New()
 	log.SetOutput(io.Discard)
+	hook := &logrusTestHook{}
+	log.AddHook(hook)
 	r := chi.NewRouter()
 	r.Group(InitializeRoutes(log, db, store, variants, maxUploadBytes))
-	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants)
+	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants), hook
 }
 
 func memberRequest(method, target string, body io.Reader) *http.Request {
@@ -354,24 +365,98 @@ func TestGetContent_displayAndOriginalVariantsAreAccepted(t *testing.T) {
 	}
 }
 
-// TestGetContent_variantWithNoRowFallsBackToOriginal: the normal state for a
-// media object whose processing has not completed yet.
-func TestGetContent_variantWithNoRowFallsBackToOriginal(t *testing.T) {
+// TestGetContent_variantWithNoRowIs404WithNoOriginalBytes: the normal state for
+// a media object whose processing has not completed yet is now a 404 over the
+// wire, not the original. A 12-card grid must not be able to turn 12 thumbnail
+// requests into 12 full-size downloads.
+func TestGetContent_variantWithNoRowIs404WithNoOriginalBytes(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
 	router, proc := testRouterWithVariants(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+	callsBefore := len(store.getCalls)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "original-bytes") {
+		t.Fatalf("the 404 body carried the original's bytes: %s", rec.Body.String())
+	}
+	if len(store.getCalls) != callsBefore {
+		t.Fatalf("an unservable variant read the object store: %v", store.getCalls[callsBefore:])
+	}
+}
+
+// TestGetContent_originalIsUnaffectedByAnUnservableVariant is the
+// backwards-compatibility half of the same change: making a derived variant 404
+// must leave ?variant=original and the bare request serving the original with
+// its Content-Length, on the very same object that 404s for a thumbnail.
+func TestGetContent_originalIsUnaffectedByAnUnservableVariant(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc := testRouterWithVariants(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	for _, target := range []string{
+		"/media/" + id + "/content",
+		"/media/" + id + "/content?variant=original",
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, memberRequest(http.MethodGet, target, nil))
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200; body: %s", target, rec.Code, rec.Body.String())
+		}
+		if rec.Body.String() != "original-bytes" {
+			t.Fatalf("GET %s body = %q, want original-bytes", target, rec.Body.String())
+		}
+		if cl := rec.Header().Get("Content-Length"); cl != "14" {
+			t.Fatalf("GET %s Content-Length = %q, want 14 — the original's contract is unchanged", target, cl)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+			t.Fatalf("GET %s Content-Type = %q, want image/png", target, ct)
+		}
+	}
+}
+
+// TestGetContent_lookupFailureIs500AndIsLogged: a broken variant query is a
+// server fault, and a 500 that leaves no server-side trace is undebuggable. Its
+// sibling handlers in this file log every failure they turn into an error
+// response; this one must too.
+func TestGetContent_lookupFailureIs500AndIsLogged(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	variants := &fakeVariants{err: errors.New("simulated variant query failure")}
+	router, proc, hook := testRouterCapturingLogs(t, store, variants, 1024)
 	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", rec.Code, rec.Body.String())
 	}
-	if rec.Body.String() != "original-bytes" {
-		t.Fatalf("body = %q, want the original as a fallback", rec.Body.String())
+	if !hook.hasError() {
+		t.Fatal("a 500 from the variant lookup was returned with no server-side log")
 	}
-	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
-		t.Fatalf("Content-Type = %q, want the media object's own image/png on a fallback", ct)
+}
+
+// TestGetContent_expectedErrorsAreNotLoggedAsFaults: a thumbnail that has not
+// been generated yet is the normal state of freshly uploaded media. Logging each
+// one at Error would bury the genuine faults the test above pins.
+func TestGetContent_expectedErrorsAreNotLoggedAsFaults(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc, hook := testRouterCapturingLogs(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if hook.hasError() {
+		t.Fatal("an expected 404 was logged at Error level")
 	}
 }
 

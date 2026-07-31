@@ -363,13 +363,18 @@ func (f *fakeStore) GetObject(ctx context.Context, key string) (io.ReadCloser, e
 // fakeVariants stands in for the mediavariant-backed adapter. refs is keyed by
 // variant name ("thumbnail", "display"); an absent key is the normal miss.
 type fakeVariants struct {
-	refs  map[string]VariantRef
-	err   error
+	refs map[string]VariantRef
+	err  error
+	// calls records the variant name of each lookup; ctxs records the context
+	// each one was handed, so a test can prove the request context is threaded
+	// through the port rather than dropped on the floor.
 	calls []string
+	ctxs  []context.Context
 }
 
-func (f *fakeVariants) Lookup(mediaObjectID, variant string) (VariantRef, bool, error) {
+func (f *fakeVariants) Lookup(ctx context.Context, mediaObjectID, variant string) (VariantRef, bool, error) {
 	f.calls = append(f.calls, variant)
+	f.ctxs = append(f.ctxs, ctx)
 	if f.err != nil {
 		return VariantRef{}, false, f.err
 	}
@@ -641,9 +646,6 @@ func TestContent_originalIsUnchanged(t *testing.T) {
 	if info.Size != int64(len("original-bytes")) {
 		t.Fatalf("Size = %d, want %d", info.Size, len("original-bytes"))
 	}
-	if info.Served != ContentOriginal {
-		t.Fatalf("Served = %q, want original", info.Served)
-	}
 	if len(variants.calls) != 0 {
 		t.Fatalf("variant lookup ran %v times for an original request; it must not", variants.calls)
 	}
@@ -666,7 +668,10 @@ func TestContent_variantFoundServesVariantBytes(t *testing.T) {
 
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 
-	info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail)
+	type ctxKey struct{}
+	ctx := context.WithValue(context.Background(), ctxKey{}, "carried")
+
+	info, rc, err := pr.Content(ctx, obj.ID(), "fleet-a", ContentThumbnail)
 	if err != nil {
 		t.Fatalf("Content: %v", err)
 	}
@@ -679,45 +684,59 @@ func TestContent_variantFoundServesVariantBytes(t *testing.T) {
 	if info.Size != 0 {
 		t.Fatalf("Size = %d, want 0 — the original's size must never describe a variant", info.Size)
 	}
-	if info.Served != ContentThumbnail {
-		t.Fatalf("Served = %q, want thumbnail", info.Served)
+	// The lookup runs as part of serving a request, so it must receive that
+	// request's context — not context.Background() manufactured inside the
+	// provider, which would survive a client disconnect.
+	if len(variants.ctxs) != 1 || variants.ctxs[0].Value(ctxKey{}) != "carried" {
+		t.Fatalf("Lookup received %d contexts, first value %v; want Content's own ctx threaded through",
+			len(variants.ctxs), func() any {
+				if len(variants.ctxs) == 0 {
+					return nil
+				}
+				return variants.ctxs[0].Value(ctxKey{})
+			}())
 	}
 }
 
-// TestContent_variantMissingFallsBackToOriginal is the normal state for media
-// whose processing has not finished, and for anything that is not a processable
-// image. Clients must not have to special-case it.
-func TestContent_variantMissingFallsBackToOriginal(t *testing.T) {
+// TestContent_variantMissingIs404AndServesNoOriginal is the reversal of the
+// original fallback design. A missing variant row is the normal state for media
+// whose processing has not finished and for anything that is not a processable
+// image — but answering it with the original means a twelve-card grid asking for
+// thumbnails silently pulls twelve full-size uploads, up to 25 MiB each. The
+// caller asked for a small rendition; 404 is the honest answer.
+func TestContent_variantMissingIs404AndServesNoOriginal(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
 	variants := &fakeVariants{} // no rows at all
 	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
 
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+	callsBefore := len(store.getCalls)
 
 	info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail)
-	if err != nil {
-		t.Fatalf("Content: %v", err)
+	if !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("Content = %v, want ErrNotFound (404) for a variant that does not exist", err)
 	}
-	if got := readAllAndClose(t, rc); got != "original-bytes" {
-		t.Fatalf("body = %q, want the original bytes as a fallback", got)
+	if rc != nil {
+		_ = rc.Close()
+		t.Fatal("Content returned a body alongside the 404; nothing may be served")
 	}
-	if info.Served != ContentOriginal {
-		t.Fatalf("Served = %q, want original after a fallback", info.Served)
+	if info != (ContentInfo{}) {
+		t.Fatalf("ContentInfo = %+v, want the zero value on a 404", info)
 	}
-	if info.ContentType != "image/png" {
-		t.Fatalf("ContentType = %q, want the media object's own image/png", info.ContentType)
-	}
-	if info.Size == 0 {
-		t.Fatal("Size = 0; a fallback serves the ORIGINAL, whose size is known")
+	// The point of the change: the original's bytes were never opened.
+	if len(store.getCalls) != callsBefore {
+		t.Fatalf("a missing variant read the object store: %v — the original must NOT be served",
+			store.getCalls[callsBefore:])
 	}
 }
 
-// TestContent_variantObjectMissingFallsBackToOriginal covers DB/store drift: the
-// variant row exists but its object is gone from MinIO. 404 would be a worse
-// answer than the original — the resource plainly exists and we hold readable
-// bytes for it.
-func TestContent_variantObjectMissingFallsBackToOriginal(t *testing.T) {
+// TestContent_variantObjectMissingIs404AndServesNoOriginal covers DB/store
+// drift: the variant row exists but its object is gone from MinIO. The response
+// is the same 404 as a missing row, because the size consequence of falling back
+// to the original is identical. The Warn log is what distinguishes the two for
+// an operator — drift is a real fault, a missing row usually is not.
+func TestContent_variantObjectMissingIs404AndServesNoOriginal(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{
 		bucket:  "myfleet-media",
@@ -727,23 +746,55 @@ func TestContent_variantObjectMissingFallsBackToOriginal(t *testing.T) {
 	variants := &fakeVariants{refs: map[string]VariantRef{
 		"thumbnail": {ObjectKey: "fleet-a/gone.jpg", ContentType: "image/jpeg"},
 	}}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+	log := logrus.New()
+	log.SetLevel(logrus.WarnLevel)
+	var logged logrusTestHook
+	log.AddHook(&logged)
+	pr := NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants)
 
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+	callsBefore := len(store.getCalls)
 
-	info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail)
-	if err != nil {
-		t.Fatalf("Content: %v", err)
+	_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentThumbnail)
+	if !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("Content = %v, want ErrNotFound (404) when the variant's object is gone", err)
 	}
-	if got := readAllAndClose(t, rc); got != "original-bytes" {
-		t.Fatalf("body = %q, want the original bytes", got)
+	if rc != nil {
+		_ = rc.Close()
+		t.Fatal("Content returned a body alongside the 404; nothing may be served")
 	}
-	if info.Served != ContentOriginal {
-		t.Fatalf("Served = %q, want original", info.Served)
+	// Exactly one store read — the missing variant key. Falling through to the
+	// original would show up here as a second call.
+	if got := store.getCalls[callsBefore:]; len(got) != 1 || got[0] != "fleet-a/gone.jpg" {
+		t.Fatalf("store calls = %v; want exactly the variant key and never the original", got)
 	}
-	if len(store.getCalls) != 2 {
-		t.Fatalf("store was called %v; want the missing variant key then the original", store.getCalls)
+	if !logged.hasWarn() {
+		t.Fatal("DB/store drift was not logged at Warn; the 404 alone leaves an operator blind to it")
 	}
+}
+
+// logrusTestHook captures emitted entries so a test can assert an operator-facing
+// log was actually written, not merely that the code path was taken.
+type logrusTestHook struct{ entries []*logrus.Entry }
+
+func (h *logrusTestHook) Levels() []logrus.Level { return logrus.AllLevels }
+
+func (h *logrusTestHook) Fire(e *logrus.Entry) error {
+	h.entries = append(h.entries, e)
+	return nil
+}
+
+func (h *logrusTestHook) hasWarn() bool { return h.has(logrus.WarnLevel) }
+
+func (h *logrusTestHook) hasError() bool { return h.has(logrus.ErrorLevel) }
+
+func (h *logrusTestHook) has(level logrus.Level) bool {
+	for _, e := range h.entries {
+		if e.Level == level {
+			return true
+		}
+	}
+	return false
 }
 
 // TestContent_crossFleetNeverTouchesLookupOrStore is FR-7.5: the media object is

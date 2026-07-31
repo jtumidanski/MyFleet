@@ -1,6 +1,8 @@
 package mediavariant
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"gorm.io/driver/sqlite"
@@ -61,12 +63,9 @@ func TestGetByMediaObjectAndVariant_returnsTheNamedRow(t *testing.T) {
 	db := newVariantTestDB(t)
 	seedVariant(t, db, "m1", VariantThumbnail, "fleet-a/m1/thumbnail.jpg", "image/jpeg")
 
-	got, found, err := NewProvider(db).GetByMediaObjectAndVariant("m1", VariantThumbnail)
+	got, err := NewProvider(db).GetByMediaObjectAndVariant(context.Background(), "m1", VariantThumbnail)
 	if err != nil {
 		t.Fatalf("lookup: %v", err)
-	}
-	if !found {
-		t.Fatal("found = false, want true for a seeded variant")
 	}
 	if got.ObjectKey() != "fleet-a/m1/thumbnail.jpg" {
 		t.Fatalf("ObjectKey = %q, want fleet-a/m1/thumbnail.jpg", got.ObjectKey())
@@ -76,20 +75,37 @@ func TestGetByMediaObjectAndVariant_returnsTheNamedRow(t *testing.T) {
 	}
 }
 
-// TestGetByMediaObjectAndVariant_missIsNotAnError pins the contract the content
+// TestGetByMediaObjectAndVariant_missIsErrNotFound pins the contract the content
 // route leans on: a media object whose processing has not run (or which is not a
-// processable image) reports found=false with a nil error, so the caller can
-// fall back to the original rather than failing the request.
-func TestGetByMediaObjectAndVariant_missIsNotAnError(t *testing.T) {
+// processable image) reports the package's ErrNotFound sentinel — distinguishable
+// from a genuine database failure, which the route answers with a 500.
+func TestGetByMediaObjectAndVariant_missIsErrNotFound(t *testing.T) {
 	db := newVariantTestDB(t)
 	seedVariant(t, db, "m1", VariantThumbnail, "fleet-a/m1/thumbnail.jpg", "image/jpeg")
 
 	// Right media object, variant kind that was never generated.
-	if _, found, err := NewProvider(db).GetByMediaObjectAndVariant("m1", VariantDisplay); err != nil || found {
-		t.Fatalf("GetByMediaObjectAndVariant(m1, display) = (_, %v, %v), want (_, false, nil)", found, err)
+	if _, err := NewProvider(db).GetByMediaObjectAndVariant(context.Background(), "m1", VariantDisplay); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetByMediaObjectAndVariant(m1, display) = (_, %v), want ErrNotFound", err)
 	}
 	// Right variant kind, different media object — must not leak another row.
-	if _, found, err := NewProvider(db).GetByMediaObjectAndVariant("m2", VariantThumbnail); err != nil || found {
-		t.Fatalf("GetByMediaObjectAndVariant(m2, thumbnail) = (_, %v, %v), want (_, false, nil)", found, err)
+	if _, err := NewProvider(db).GetByMediaObjectAndVariant(context.Background(), "m2", VariantThumbnail); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetByMediaObjectAndVariant(m2, thumbnail) = (_, %v), want ErrNotFound", err)
+	}
+}
+
+// TestGetByMediaObjectAndVariant_honoursContextCancellation proves the ctx
+// parameter actually reaches the driver: a client that disconnects mid-request
+// must cancel the query rather than leave it running on a bare connection.
+func TestGetByMediaObjectAndVariant_honoursContextCancellation(t *testing.T) {
+	db := newVariantTestDB(t)
+	seedVariant(t, db, "m1", VariantThumbnail, "fleet-a/m1/thumbnail.jpg", "image/jpeg")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := NewProvider(db).GetByMediaObjectAndVariant(ctx, "m1", VariantThumbnail)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("GetByMediaObjectAndVariant with a cancelled ctx = %v, want context.Canceled — "+
+			"the context is not reaching the query", err)
 	}
 }
