@@ -4,6 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MyFleet</title>
+    <!--
+      Pre-paint theme (FR-FLASH-1..3). Synchronous and inline on purpose: a
+      module import in <head> is asynchronous by definition and would
+      reintroduce the flash this exists to prevent, so it duplicates
+      resolveTheme's four lines from src/lib/theme.ts. The duplication is
+      guarded by src/test/conventions.test.ts.
+
+      Note the shape: it narrows to a known-good default rather than rejecting
+      bad input, so a corrupted "purple" and an absent key take the identical
+      `system` path (FR-FLASH-2, FR-SEC-4). The class name is a literal — the
+      stored value, which any script or extension on the origin can write, is
+      never concatenated into a class, URL, or markup.
+    -->
+    <script>
+      try {
+        var p = localStorage.getItem('myfleet.theme');
+        if (p !== 'light' && p !== 'dark') p = 'system';
+        var d =
+          p === 'dark' ||
+          (p === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (d) document.documentElement.classList.add('dark');
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
