@@ -42,7 +42,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			}
 
 			page := server.ParsePage(req)
-			ms, total, err := proc.ListByVehicle(vehicleID, page)
+			// TODO(task-16): pass the category filter parsed from the query
+			// string instead of nil. nil preserves today's unfiltered
+			// behaviour exactly and keeps the build green in the interim.
+			ms, total, err := proc.ListByVehicle(vehicleID, nil, page)
 			if err != nil {
 				log.WithError(err).Error("list maintenance records")
 				server.WriteError(w, err)
