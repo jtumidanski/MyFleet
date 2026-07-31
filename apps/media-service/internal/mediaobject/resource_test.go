@@ -248,6 +248,96 @@ func TestGetContent_crossFleetIs404(t *testing.T) {
 	}
 }
 
+func TestGetContent_pdfIsAttachmentWithNosniff(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("%PDF-1.7")}
+	router, proc, _ := testRouter(t, store, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "invoice.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+created.ID()+"/content", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); got != `attachment; filename="invoice.pdf"` {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+// inline + a correct image/jpeg still renders in an <img>; nosniff only stops
+// the browser second-guessing the declared type.
+func TestGetContent_jpegIsInlineWithNosniff(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("\xff\xd8\xff")}
+	router, proc, _ := testRouter(t, store, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+created.ID()+"/content", nil))
+
+	if got := rec.Header().Get("Content-Disposition"); got != `inline; filename="photo.jpg"` {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+}
+
+// Rows created before the allowlist existed may hold arbitrary strings. They
+// are served as octet-stream + attachment (PRD FR-DL-4). InitUpload can no
+// longer create such a row, so the row is written directly.
+func TestGetContent_legacyContentTypeIsOctetStreamAttachment(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("<script>alert(1)</script>")}
+	router, proc, db := testRouter(t, store, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "image/png", "legacy.png")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+	// Simulate a pre-allowlist row by rewriting the stored type behind the
+	// processor's back, exactly as an old row in the database would look.
+	forceContentType(t, db, created.ID(), "text/html")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+created.ID()+"/content", nil))
+
+	if got := rec.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want application/octet-stream", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("Content-Disposition = %q, want attachment", got)
+	}
+}
+
+// forceContentType rewrites a stored content type directly, which is the only
+// way to reproduce a pre-allowlist row now that InitUpload normalises.
+func forceContentType(t *testing.T, db *gorm.DB, id, contentType string) {
+	t.Helper()
+	if err := db.Model(&Entity{}).Where("id = ?", id).
+		Update("content_type", contentType).Error; err != nil {
+		t.Fatalf("force content type: %v", err)
+	}
+}
+
 // initBody builds the JSON:API envelope POST /media expects.
 func initBody(contentType, filename string) io.Reader {
 	return strings.NewReader(`{"data":{"attributes":{"contentType":"` + contentType +

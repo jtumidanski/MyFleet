@@ -161,9 +161,20 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUp
 			// never stored. A copy that fails *after* this point is a genuine
 			// mid-stream failure; the status is on the wire and cannot be
 			// changed, so it is logged and the client sees a short read.
-			if ct := m.ContentType(); ct != "" {
-				w.Header().Set("Content-Type", ct)
-			}
+			// The Content-Type is re-resolved through the allowlist on every
+			// read rather than trusting the stored value, so shrinking the
+			// allowlist retroactively downgrades already-stored objects and
+			// rows created before the allowlist existed are covered too
+			// (design D15, PRD FR-DL-4).
+			ct, class := allow.Resolve(m.ContentType())
+			w.Header().Set("Content-Type", ct)
+			// nosniff on EVERY response, both classes (PRD FR-DL-1). Together
+			// with attachment on documents this is what prevents an uploaded
+			// file from executing in the application's origin; neither alone
+			// is sufficient.
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Content-Disposition",
+				ContentDisposition(class, m.OriginalFilename(), m.ID()))
 			if size := m.Size(); size > 0 {
 				w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 			}
