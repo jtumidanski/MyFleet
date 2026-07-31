@@ -17,16 +17,23 @@ export function ThemeSync() {
 
   // Tracks whether a session has been observed, so sign-out is distinguishable
   // from "never signed in" — the latter must not clear an override the user set
-  // on a pre-auth page.
+  // on a pre-auth page. Set on ANY authenticated render, independent of
+  // whether themePreference happens to validate this render: if it were only
+  // set inside the adopt effect below, a user whose stored themePreference was
+  // corrupted would sign out without ever setting this flag, leaving a stale
+  // local override in place to suppress adoption on their NEXT sign-in too.
   const wasSignedIn = useRef(false);
 
   const serverPreference = user?.attributes.themePreference;
 
   useEffect(() => {
+    if (user) wasSignedIn.current = true;
+  }, [user]);
+
+  useEffect(() => {
     // Validated even though it comes from our own service: an older service, or
     // a tampered response, must not put an out-of-range value into theme state.
     if (!isThemePreference(serverPreference)) return;
-    wasSignedIn.current = true;
     adoptServerPreference(serverPreference);
   }, [serverPreference, adoptServerPreference]);
 
