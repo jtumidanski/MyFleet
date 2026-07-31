@@ -200,6 +200,19 @@ func (pr *Processor) Confirm(ctx context.Context, id, identityFleetID string) (M
 	if err := AuthorizeAccess(m, identityFleetID); err != nil {
 		return Model{}, err
 	}
+	// Classification decides everything downstream (design §2). ClassUnknown is
+	// deliberately folded in with documents: a pre-allowlist row whose content
+	// type nobody recognises must never be handed to image.Decode. Legacy
+	// JPEG/PNG rows still classify as ClassImage — their stored type is on the
+	// allowlist — so nothing regresses.
+	if pr.allow.Classify(m.ContentType()) != ClassImage {
+		ready, err := MarkReadyDirect(m)
+		if err != nil {
+			return Model{}, err
+		}
+		return pr.a.Update(ready)
+	}
+
 	processing, err := MarkProcessing(m)
 	if err != nil {
 		return Model{}, err

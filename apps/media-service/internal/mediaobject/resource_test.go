@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
+	sharedevents "github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/storage"
@@ -303,5 +304,87 @@ func TestInitUpload_normalizesAndStoresBareType(t *testing.T) {
 	}
 	if m.ContentType() != "text/csv" {
 		t.Fatalf("stored contentType = %q, want text/csv", m.ContentType())
+	}
+}
+
+// countOutboxRows returns the number of unsent outbox rows, which is how
+// "published a media.uploaded event" is observed without standing up Kafka.
+func countOutboxRows(t *testing.T, db *gorm.DB) int {
+	t.Helper()
+	var rows []sharedevents.OutboxRow
+	if err := db.Where("sent_at IS NULL").Find(&rows).Error; err != nil {
+		t.Fatalf("read outbox: %v", err)
+	}
+	return len(rows)
+}
+
+// A document needs no worker, so Confirm takes it straight to ready and
+// publishes nothing. The client's poll-until-ready loop therefore resolves on
+// the first read rather than waiting on a worker that would never run
+// (design D12, api-contracts §6).
+func TestConfirm_documentGoesStraightToReadyWithNoOutboxRow(t *testing.T) {
+	_, proc, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "invoice.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+
+	confirmed, err := proc.Confirm(context.Background(), created.ID(), "fleet-a")
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if confirmed.Status() != StatusReady {
+		t.Fatalf("status = %q, want ready", confirmed.Status())
+	}
+	if n := countOutboxRows(t, db); n != 0 {
+		t.Fatalf("outbox rows = %d, want 0 — a document must not enqueue media.uploaded", n)
+	}
+}
+
+// The image path is unchanged: uploaded → processing plus exactly one outbox row.
+func TestConfirm_imageStillEnqueuesProcessing(t *testing.T) {
+	_, proc, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+
+	confirmed, err := proc.Confirm(context.Background(), created.ID(), "fleet-a")
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if confirmed.Status() != StatusProcessing {
+		t.Fatalf("status = %q, want processing", confirmed.Status())
+	}
+	if n := countOutboxRows(t, db); n != 1 {
+		t.Fatalf("outbox rows = %d, want 1", n)
+	}
+}
+
+// A legacy row whose stored type nobody recognises must never be handed to
+// image.Decode, so it confirms like a document (design D12).
+func TestConfirm_unknownContentTypeConfirmsLikeADocument(t *testing.T) {
+	_, proc, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "image/png", "legacy.png")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+	if err := db.Model(&Entity{}).Where("id = ?", created.ID()).
+		Update("content_type", "application/x-legacy").Error; err != nil {
+		t.Fatalf("force content type: %v", err)
+	}
+
+	confirmed, err := proc.Confirm(context.Background(), created.ID(), "fleet-a")
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if confirmed.Status() != StatusReady {
+		t.Fatalf("status = %q, want ready", confirmed.Status())
+	}
+	if n := countOutboxRows(t, db); n != 0 {
+		t.Fatalf("outbox rows = %d, want 0", n)
 	}
 }
