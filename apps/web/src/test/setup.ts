@@ -30,3 +30,55 @@ Object.defineProperty(globalThis, 'localStorage', {
   writable: true,
   configurable: true,
 });
+
+// jsdom's matchMedia is a stub that never fires `change`, so theme code
+// subscribing to (prefers-color-scheme: dark) cannot be exercised against it.
+// This replacement is driven from tests via setPrefersDark, which is what makes
+// FR-TEST-5's live-update case testable at all.
+const DARK_QUERY = '(prefers-color-scheme: dark)';
+
+type ChangeListener = (event: MediaQueryListEvent) => void;
+
+const mediaListeners = new Set<ChangeListener>();
+let mediaPrefersDark = false;
+
+/** Flip the simulated OS appearance and fire `change` at every listener. */
+export function setPrefersDark(value: boolean): void {
+  if (mediaPrefersDark === value) return;
+  mediaPrefersDark = value;
+  const event = { matches: value, media: DARK_QUERY } as MediaQueryListEvent;
+  mediaListeners.forEach((listener) => listener(event));
+}
+
+/** Restore the default (light) and drop any listeners a test left behind. */
+export function resetMatchMedia(): void {
+  mediaListeners.clear();
+  mediaPrefersDark = false;
+}
+
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  configurable: true,
+  value: (query: string): MediaQueryList =>
+    ({
+      get matches() {
+        return query === DARK_QUERY ? mediaPrefersDark : false;
+      },
+      media: query,
+      onchange: null,
+      addEventListener: (_type: 'change', listener: ChangeListener) => {
+        mediaListeners.add(listener);
+      },
+      removeEventListener: (_type: 'change', listener: ChangeListener) => {
+        mediaListeners.delete(listener);
+      },
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList,
+});
+
+/** Listener count, so a test can assert the provider unsubscribes on unmount. */
+export function mediaListenerCount(): number {
+  return mediaListeners.size;
+}
