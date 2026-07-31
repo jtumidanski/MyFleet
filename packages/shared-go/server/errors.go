@@ -3,12 +3,13 @@ package server
 import "errors"
 
 var (
-	ErrUnauthorized = errors.New("unauthorized") // 401
-	ErrForbidden    = errors.New("forbidden")    // 403
-	ErrNotFound     = errors.New("not found")    // 404
-	ErrConflict     = errors.New("conflict")     // 409
-	ErrGone         = errors.New("gone")         // 410
-	ErrValidation   = errors.New("validation")   // 422
+	ErrUnauthorized          = errors.New("unauthorized")             // 401
+	ErrForbidden             = errors.New("forbidden")                // 403
+	ErrNotFound              = errors.New("not found")                // 404
+	ErrConflict              = errors.New("conflict")                 // 409
+	ErrGone                  = errors.New("gone")                     // 410
+	ErrRequestEntityTooLarge = errors.New("request entity too large") // 413
+	ErrValidation            = errors.New("validation")               // 422
 )
 
 func StatusFor(err error) int {
@@ -23,6 +24,8 @@ func StatusFor(err error) int {
 		return 409
 	case errors.Is(err, ErrGone):
 		return 410
+	case errors.Is(err, ErrRequestEntityTooLarge):
+		return 413
 	case errors.Is(err, ErrValidation):
 		return 422
 	default:

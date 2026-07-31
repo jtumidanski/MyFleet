@@ -3,6 +3,11 @@ name: main
 on:
   push:
     branches: [main]
+    # Guard 1 of 2 against a self-retrigger loop: the bump-overlay job below
+    # pushes a commit that touches only this path. Guard 2 is [skip ci] in that
+    # commit's message.
+    paths-ignore:
+      - 'deploy/k8s/overlays/main/**'
 
 permissions:
   contents: write
@@ -40,10 +45,10 @@ jobs:
         run: npm ci
 
       - name: Frontend test
-        run: npm run -w @myfleet/web test
+        run: make fe-test
 
       - name: Frontend build
-        run: npm run -w @myfleet/web build
+        run: make fe-build
 
   # ── Publish container images to GHCR ─────────────────────────────────────────
   publish:
@@ -51,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [auth-service, fleet-service, media-service, notification-service]
+        service: [auth-service, fleet-service, media-service, notification-service, web]
     steps:
       - uses: actions/checkout@v4
 
@@ -86,7 +91,7 @@ jobs:
       # and hides their findings until the first failure is fixed.
       fail-fast: false
       matrix:
-        service: [auth-service, fleet-service, media-service, notification-service]
+        service: [auth-service, fleet-service, media-service, notification-service, web]
     steps:
       - uses: actions/checkout@v4
 
@@ -132,3 +137,55 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${{ steps.semver.outputs.tag }}"
           git push origin "${{ steps.semver.outputs.tag }}"
+
+  # ── Bump the deployed image SHAs ──────────────────────────────────────────────
+  bump-overlay:
+    needs: [publish, trivy]
+    runs-on: ubuntu-latest
+    # Serialize bump-overlay across overlapping runs (e.g. two merges to main in
+    # quick succession) so a later run's push can never be undone by an earlier
+    # run finishing after it. Scoped to this job, not the whole workflow, so
+    # build-test/publish/trivy for different commits can still run in parallel —
+    # only the overlay-pinning push needs to be a single queue. Never cancel a
+    # queued/running bump: cancelling mid-push risks a half-written commit.
+    concurrency:
+      group: bump-overlay
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Pin overlay images to this commit
+        run: |
+          set -euo pipefail
+          # Stale-run guard: main may have moved past the commit this run built
+          # if a later merge's bump-overlay already landed while this run was
+          # still going through build-test/publish/trivy. Rewriting to this
+          # run's (older) SHA would roll the overlay backwards while every step
+          # still stays green, so bail out loudly instead of pinning stale bits.
+          tip="$(git rev-parse HEAD)"
+          if [ "$tip" != "${{ github.sha }}" ]; then
+            echo "main's tip is now $tip, not this run's ${{ github.sha }} — a newer push already landed (or will bump the overlay itself). Skipping to avoid rewriting the overlay to a stale SHA."
+            exit 0
+          fi
+          f=deploy/k8s/overlays/main/kustomization.yaml
+          # Rewrite every `newTag:` in the images block to this commit's SHA.
+          # Argo CD then sees a real manifest diff and rolls the Deployments.
+          sed -i -E "s/^(    newTag: ).*$/\1${{ github.sha }}/" "$f"
+          # `if` guards the check so a clean diff does not trip `set -e`.
+          if git diff --quiet "$f"; then
+            echo "already pinned to this SHA — nothing to bump"
+            exit 0
+          fi
+          # Fail loudly if the rewrite missed an image rather than deploying a
+          # partially-pinned overlay.
+          test "$(grep -c "    newTag: ${{ github.sha }}" "$f")" -eq 5
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$f"
+          # [skip ci] is guard 2 of 2 against retriggering this workflow;
+          # paths-ignore on the push trigger is guard 1.
+          git commit -m "chore(deploy): pin main overlay to ${{ github.sha }} [skip ci]"
+          git push origin main

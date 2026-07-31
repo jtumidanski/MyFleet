@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+data:
+  APP_BASE_URL: "https://myfleet.tumidanski.com"
+  JWT_ISSUER: "https://myfleet.tumidanski.com"
+  # Traefik strips only /api (auth-stripprefix), and the OIDC callback route
+  # is /auth/callback, so the public path is /api/auth/callback.
+  GOOGLE_REDIRECT_URL: "https://myfleet.tumidanski.com/api/auth/callback"
+  # Required for the Cloudflare host. Note this makes myfleet.home unable to
+  # hold a session: browsers do not send Secure cookies over plain HTTP.
+  COOKIE_SECURE: "true"

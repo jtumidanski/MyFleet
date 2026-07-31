@@ -1,0 +1,54 @@
+---
+# Local-dev routing: no Host match, since local dev hits the NodePort directly.
+# The main overlay ships its own host-matched IngressRoute.
+#
+# Priorities mirror overlays/main/ingressroute.yaml: explicit rather than
+# relying on Traefik's rule-length ordering, so the SPA catch-all loses to
+# every /api/* route.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: myfleet-routes
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: PathPrefix(`/api/auth`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: auth-stripprefix
+      services:
+        - name: auth-service
+          port: 8080
+    - match: PathPrefix(`/api/fleet`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: fleet-stripprefix
+      services:
+        - name: fleet-service
+          port: 8080
+    - match: PathPrefix(`/api/media`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: media-stripprefix
+      services:
+        - name: media-service
+          port: 8080
+    - match: PathPrefix(`/api/notifications`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: notifications-stripprefix
+      services:
+        - name: notification-service
+          port: 8080
+    - match: PathPrefix(`/`)
+      kind: Rule
+      # Catch-all for the SPA: must lose to every /api/* route above.
+      priority: 1
+      services:
+        - name: web
+          port: 80

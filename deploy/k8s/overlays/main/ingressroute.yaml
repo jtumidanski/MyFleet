@@ -1,0 +1,107 @@
+---
+# Terminates any public request aimed at fleet-service's /internal/* endpoints.
+# Those routes are registered WITHOUT JWT (apps/fleet-service/cmd/main.go) on
+# the assumption that they are only reachable from inside the cluster; exposing
+# fleet-service on the internet invalidates that assumption, and
+# /internal/maintenance/due in particular dumps every non-ok maintenance
+# schedule across every fleet with no parameters at all.
+#
+# ipAllowList with an unroutable /32 allows nobody, so every matching request is
+# refused with 403 before the request is ever proxied to fleet-service. This is
+# a routing-layer block only: it lives on bee's Traefik, so in-cluster callers
+# (auth-service FLEET_SERVICE_URL, notification-service FLEET_INTERNAL_URL —
+# both plain http://fleet-service:8080 ClusterVIP, see base/*/configmap.yaml)
+# never traverse it and are completely unaffected.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: internal-deny
+spec:
+  ipAllowList:
+    sourceRange:
+      - 255.255.255.255/32
+    rejectStatusCode: 403
+
+---
+# Both public hosts share one route set. Priorities are explicit rather than
+# relying on Traefik's rule-length ordering: the SPA catch-all must lose to
+# every /api/* route. Entry point `web` is bee's k3s Traefik :80; TLS for the
+# Cloudflare host terminates at the edge.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: myfleet-routes
+spec:
+  entryPoints:
+    - web
+  routes:
+    # Must out-prioritise the /api/fleet router below (100) so nothing reaches
+    # fleet-service's unauthenticated /internal/* surface from outside.
+    #
+    # PathRegexp, not PathPrefix, because neither PathPrefix nor stripPrefix is
+    # segment-bounded. Verified against traefik 3.6.13 (the version bee runs)
+    # driving a chi v5.3.0 router with fleet-service's route shapes:
+    #   * Traefik percent-decodes and lexically cleans the path BEFORE matching,
+    #     so `/api/fleet/x/../internal/…`, `/api//fleet/internal/…`,
+    #     `/api/fleet///internal/…`, `/api/fleet%2finternal/…` and
+    #     `/api/fleet/%69nternal/…` all arrive at the muxer already normalised
+    #     to `/api/fleet/internal/…` — and all five reached the handler before
+    #     this rule existed.
+    #   * fleet-stripprefix removes the literal string `/api/fleet`, not a path
+    #     segment, so `/api/fleetinternal/maintenance/due` also reached the
+    #     handler as `/internal/maintenance/due`. Hence `[^/]*/*` rather than a
+    #     mandatory slash: the segment separator is optional.
+    # `(?i)` is belt-and-braces (chi is case-sensitive, so `/INTERNAL` already
+    # 404s). No legitimate fleet route has a first segment beginning `internal`
+    # (they are /fleets, /vehicles, /invites, /fuel-logs, /maintenance-*), so
+    # this cannot shadow real traffic.
+    #
+    # The service reference is inert: internal-deny short-circuits with 403
+    # before anything is proxied.
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathRegexp(`(?i)^/+api/+fleet[^/]*/*internal`)
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: internal-deny
+      services:
+        - name: fleet-service
+          port: 8080
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathPrefix(`/api/auth`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: auth-stripprefix
+      services:
+        - name: auth-service
+          port: 8080
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathPrefix(`/api/fleet`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: fleet-stripprefix
+      services:
+        - name: fleet-service
+          port: 8080
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathPrefix(`/api/media`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: media-stripprefix
+      services:
+        - name: media-service
+          port: 8080
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)) && PathPrefix(`/api/notifications`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: notifications-stripprefix
+      services:
+        - name: notification-service
+          port: 8080
+    - match: Host(`myfleet.tumidanski.com`) || Host(`myfleet.home`)
+      kind: Rule
+      # Catch-all for the SPA: must lose to every /api/* route above.
+      priority: 1
+      services:
+        - name: web
+          port: 80

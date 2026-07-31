@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: media-service-config
+data:
+  KAFKA_BROKERS: "kafka.home:9093"
+  MINIO_ENDPOINT: "minio.minio.svc.cluster.local:9000"

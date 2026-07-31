@@ -1,18 +1,24 @@
 package mediaobject
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	dtoevents "github.com/jtumidanski/myfleet/packages/dto-go/events"
 	sharedevents "github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/storage"
 )
 
 func TestAuthorizeAccess_404CrossFleet(t *testing.T) {
@@ -295,5 +301,260 @@ func TestConfirm_outboxRollsBackOnEnqueueError(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("after rollback want 0 outbox rows, got %d", len(rows))
+	}
+}
+
+// fakeStore records what was written so the proxy path can be asserted without
+// a live MinIO.
+type fakeStore struct {
+	bucket   string
+	putCalls int
+	putKey   string
+	putBody  []byte
+	putSize  int64
+	putCT    string
+	putErr   error
+
+	getKey  string
+	getBody []byte
+	getErr  error
+}
+
+func (f *fakeStore) Bucket() string { return f.bucket }
+
+func (f *fakeStore) PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error {
+	f.putCalls++
+	if f.putErr != nil {
+		return f.putErr
+	}
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	f.putKey, f.putBody, f.putSize, f.putCT = key, b, size, contentType
+	return nil
+}
+
+func (f *fakeStore) GetObject(ctx context.Context, key string) (io.ReadCloser, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	f.getKey = key
+	return io.NopCloser(bytes.NewReader(f.getBody)), nil
+}
+
+func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media"}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	body := []byte("jpeg-bytes")
+	updated, err := pr.StoreContent(context.Background(), created.ID(), "fleet-a", bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		t.Fatalf("store content: %v", err)
+	}
+
+	if store.putKey != created.ObjectKey() {
+		t.Fatalf("wrote to key %q, want %q", store.putKey, created.ObjectKey())
+	}
+	if string(store.putBody) != string(body) {
+		t.Fatalf("wrote body %q, want %q", store.putBody, body)
+	}
+	// The content type must come from the row created at init, not the request.
+	if store.putCT != "image/jpeg" {
+		t.Fatalf("wrote content-type %q, want image/jpeg", store.putCT)
+	}
+	if updated.Size() != int64(len(body)) {
+		t.Fatalf("size = %d, want %d", updated.Size(), len(body))
+	}
+	if updated.Status() != StatusUploaded {
+		t.Fatalf("status = %q, want uploaded (confirm does the transition)", updated.Status())
+	}
+}
+
+func TestStoreContent_crossFleetIs404(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media"}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	_, err = pr.StoreContent(context.Background(), created.ID(), "fleet-b", bytes.NewReader([]byte("x")), 1)
+	if !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("cross-fleet write must be 404, got %v", err)
+	}
+	if store.putKey != "" {
+		t.Fatalf("cross-fleet write must not touch storage, wrote key %q", store.putKey)
+	}
+}
+
+// TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched verifies that
+// when the object store fails mid-write, StoreContent returns that error and
+// never persists a size — a failed upload must leave the row consistent
+// (still zero, not partially/incorrectly updated).
+func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T) {
+	db := newConfirmTestDB(t)
+	injectErr := errors.New("simulated minio put failure")
+	store := &fakeStore{bucket: "myfleet-media", putErr: injectErr}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	_, err = pr.StoreContent(context.Background(), created.ID(), "fleet-a", bytes.NewReader([]byte("jpeg-bytes")), 10)
+	if !errors.Is(err, injectErr) {
+		t.Fatalf("store content: want %v, got %v", injectErr, err)
+	}
+
+	provider := NewProvider(db)
+	persisted, err := provider.GetByID(created.ID())
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if persisted.Size() != 0 {
+		t.Fatalf("size after failed store: want 0 (untouched), got %d", persisted.Size())
+	}
+}
+
+// TestStoreContent_unknownLengthRecordsActualByteCount verifies that when the
+// caller passes size=-1 (mirroring resource.go's handling of chunked or
+// over-advertised request bodies), PutObject still receives -1 unchanged (the
+// SDK needs it to stream an unknown-length body) but the size recorded on the
+// row is the real number of bytes read, not the -1 sentinel.
+func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media"}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	body := []byte("a body whose length the caller chose not to advertise")
+	updated, err := pr.StoreContent(context.Background(), created.ID(), "fleet-a", bytes.NewReader(body), -1)
+	if err != nil {
+		t.Fatalf("store content: %v", err)
+	}
+
+	if store.putSize != -1 {
+		t.Fatalf("PutObject must still receive the unknown-length sentinel, got %d", store.putSize)
+	}
+	if updated.Size() != int64(len(body)) {
+		t.Fatalf("recorded size = %d, want actual byte count %d", updated.Size(), len(body))
+	}
+
+	provider := NewProvider(db)
+	persisted, err := provider.GetByID(created.ID())
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if persisted.Size() != int64(len(body)) {
+		t.Fatalf("persisted size = %d, want %d", persisted.Size(), len(body))
+	}
+}
+
+func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	m, rc, err := pr.Content(context.Background(), created.ID(), "fleet-a")
+	if err != nil {
+		t.Fatalf("content: %v", err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	if store.getKey != created.ObjectKey() {
+		t.Fatalf("read key %q, want %q", store.getKey, created.ObjectKey())
+	}
+	if m.ContentType() != "image/jpeg" {
+		t.Fatalf("content type = %q, want image/jpeg", m.ContentType())
+	}
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if string(got) != "jpeg-bytes" {
+		t.Fatalf("body = %q, want jpeg-bytes", got)
+	}
+}
+
+func TestContent_crossFleetIs404(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-b"); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("cross-fleet read must be 404, got %v", err)
+	}
+	if store.getKey != "" {
+		t.Fatalf("cross-fleet read must not touch storage, read key %q", store.getKey)
+	}
+}
+
+// TestContent_missingObjectIs404 verifies the store's "the bytes are not there"
+// signal becomes a 404 rather than being handed to the caller as a readable
+// stream. This is the state POST /media leaves behind before any content is
+// PUT, and the state a failed PUT leaves behind (see
+// TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched).
+func TestContent_missingObjectIs404(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getErr: storage.ErrObjectNotFound}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	_, rc, err := pr.Content(context.Background(), created.ID(), "fleet-a")
+	if !errors.Is(err, server.ErrNotFound) {
+		if rc != nil {
+			_ = rc.Close()
+		}
+		t.Fatalf("content for an object with no stored bytes = %v, want ErrNotFound (404)", err)
+	}
+	if rc != nil {
+		t.Fatal("no reader may be returned alongside the error")
+	}
+}
+
+// TestContent_otherStorageFailuresAreNot404 keeps the mapping narrow: only a
+// genuinely absent object becomes 404. Anything else must stay a 500 so a
+// broken MinIO is not reported to clients as "your media does not exist".
+func TestContent_otherStorageFailuresAreNot404(t *testing.T) {
+	db := newConfirmTestDB(t)
+	boom := errors.New("simulated minio outage")
+	store := &fakeStore{bucket: "myfleet-media", getErr: boom}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store)
+
+	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+
+	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-a"); !errors.Is(err, boom) {
+		t.Fatalf("content = %v, want the underlying storage error passed through", err)
 	}
 }

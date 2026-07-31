@@ -1,9 +1,9 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# Reference base
 resources:
   - ../../base
+  - ../../infra-local
 
 # All service deployments run as a single replica in local dev
 replicas:
@@ -23,6 +23,8 @@ replicas:
     count: 1
   - name: traefik
     count: 1
+  - name: web
+    count: 1
 
 # Override images to use local/latest tags for local development
 images:
@@ -33,6 +35,8 @@ images:
   - name: ghcr.io/jtumidanski/myfleet-media-service
     newTag: local
   - name: ghcr.io/jtumidanski/myfleet-notification-service
+    newTag: local
+  - name: ghcr.io/jtumidanski/myfleet-web
     newTag: local
 
 # Patch to relax imagePullPolicy for local images
@@ -61,6 +65,13 @@ patches:
   - target:
       kind: Deployment
       name: notification-service
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
+      name: web
     patch: |-
       - op: add
         path: /spec/template/spec/containers/0/imagePullPolicy

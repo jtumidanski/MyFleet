@@ -1,0 +1,68 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: myfleet
+
+# The bee cluster overlay. Argo CD syncs this path (see argocd-myfleet.yml in
+# the k3s/bee repo). It references base/ only — never infra-local/ — because
+# Postgres, Kafka and MinIO are pre-existing shared cluster services and the
+# dev Traefik would fight bee's cluster Traefik over every IngressRoute.
+#
+# No Secrets here: they are applied out-of-band so Argo CD's prune cannot
+# remove them. See ../../secrets.example.yaml.
+resources:
+  - ../../base
+  - ingressroute.yaml
+
+replicas:
+  - name: auth-service
+    count: 1
+  - name: fleet-service
+    count: 1
+  - name: media-service
+    count: 1
+  - name: notification-service
+    count: 1
+  - name: web
+    count: 1
+
+# newTag values are rewritten to the commit SHA by the bump-overlay CI job on
+# every push to main, so `git log` is an accurate record of what is deployed.
+# `latest` is only the seed for the first sync.
+images:
+  - name: ghcr.io/jtumidanski/myfleet-auth-service
+    newTag: latest
+  - name: ghcr.io/jtumidanski/myfleet-fleet-service
+    newTag: latest
+  - name: ghcr.io/jtumidanski/myfleet-media-service
+    newTag: latest
+  - name: ghcr.io/jtumidanski/myfleet-notification-service
+    newTag: latest
+  - name: ghcr.io/jtumidanski/myfleet-web
+    newTag: latest
+
+patches:
+  - path: patches/auth-service-config.yaml
+  - path: patches/fleet-service-config.yaml
+  - path: patches/media-service-config.yaml
+  - path: patches/notification-service-config.yaml
+  - path: patches/pull-policy.yaml
+    target:
+      kind: Deployment
+      name: auth-service
+  - path: patches/pull-policy.yaml
+    target:
+      kind: Deployment
+      name: fleet-service
+  - path: patches/pull-policy.yaml
+    target:
+      kind: Deployment
+      name: media-service
+  - path: patches/pull-policy.yaml
+    target:
+      kind: Deployment
+      name: notification-service
+  - path: patches/pull-policy.yaml
+    target:
+      kind: Deployment
+      name: web

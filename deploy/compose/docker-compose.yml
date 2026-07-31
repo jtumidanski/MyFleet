@@ -82,12 +82,13 @@ services:
       retries: 10
     labels:
       - "traefik.enable=true"
-      # Route /api/auth/* to this service and strip the /api/auth prefix so the
-      # service sees its own /auth/* (and /.well-known/jwks.json) routes.
+      # Route /api/auth/* to this service and strip only the /api mount point
+      # so the service sees its own /auth/* routes, which already carry the
+      # /auth segment.
       - "traefik.http.routers.auth.rule=PathPrefix(`/api/auth`)"
       - "traefik.http.routers.auth.entrypoints=web"
       - "traefik.http.routers.auth.middlewares=auth-stripprefix"
-      - "traefik.http.middlewares.auth-stripprefix.stripprefix.prefixes=/api/auth"
+      - "traefik.http.middlewares.auth-stripprefix.stripprefix.prefixes=/api"
       - "traefik.http.services.auth.loadbalancer.server.port=8080"
 
   fleet-service:
@@ -149,12 +150,13 @@ services:
         condition: service_healthy
     labels:
       - "traefik.enable=true"
-      # Route /api/media/* to this service and strip the /api/media prefix so
-      # the service sees bare paths (/media, /media/{id}/confirm, ...).
+      # Route /api/media/* to this service and strip only the /api mount point
+      # so the service sees its own /media/... routes (/media,
+      # /media/{id}/confirm, ...), which already carry the /media segment.
       - "traefik.http.routers.media.rule=PathPrefix(`/api/media`)"
       - "traefik.http.routers.media.entrypoints=web"
       - "traefik.http.routers.media.middlewares=media-stripprefix"
-      - "traefik.http.middlewares.media-stripprefix.stripprefix.prefixes=/api/media"
+      - "traefik.http.middlewares.media-stripprefix.stripprefix.prefixes=/api"
       - "traefik.http.services.media.loadbalancer.server.port=8080"
 
   notification-service:

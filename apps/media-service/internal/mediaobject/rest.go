@@ -12,8 +12,6 @@ type Attributes struct {
 	Size             int64  `json:"size,omitempty"`
 	OriginalFilename string `json:"originalFilename,omitempty"`
 	Status           string `json:"status"`
-	UploadURL        string `json:"uploadUrl,omitempty"`
-	DownloadURL      string `json:"downloadUrl,omitempty"`
 }
 
 // Transform converts a Model to a JSON:API Resource.
@@ -32,25 +30,6 @@ func Transform(m Model) server.Resource {
 			Status:           string(m.Status()),
 		},
 	}
-}
-
-// TransformWithUploadURL renders a freshly-created object plus its presigned
-// PUT URL so the client can upload bytes directly to MinIO.
-func TransformWithUploadURL(m Model, uploadURL string) server.Resource {
-	res := Transform(m)
-	attrs := res.Attributes.(Attributes)
-	attrs.UploadURL = uploadURL
-	res.Attributes = attrs
-	return res
-}
-
-// TransformWithDownloadURL renders an object plus its presigned GET URL.
-func TransformWithDownloadURL(m Model, downloadURL string) server.Resource {
-	res := Transform(m)
-	attrs := res.Attributes.(Attributes)
-	attrs.DownloadURL = downloadURL
-	res.Attributes = attrs
-	return res
 }
 
 // TransformSlice converts a slice of Models to JSON:API Resources.

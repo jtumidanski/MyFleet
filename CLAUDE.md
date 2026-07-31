@@ -12,7 +12,49 @@ When asked to understand or plan something, DO NOT start implementing code chang
 
 ## Build & Verification
 
-Once a build system is in place, this section should enumerate the commands required before claiming a branch is "done". As a placeholder, the general expectation for any Go service is `go test -race ./...`, `go vet ./...`, and `go build ./...` clean; for the React UI, `npm run build` and `npm test` clean. Add Docker-build verification once a container build is wired up.
+Run before claiming a branch is done:
+
+```sh
+make ci        # lint-check, vet, test, build, fe-test, fe-build
+```
+
+Individually: `make vet`, `make test`, `make build` (Go); `make fe-test`,
+`make fe-build` (web). `make lint-check` is the check-only lint CI runs; `make
+lint` fixes what it can.
+
+Node is not always on `PATH` — if `npm` is missing, load it first:
+
+```sh
+export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
+```
+
+Deployment manifests (`deploy/k8s`) have no test suite, so render them:
+
+```sh
+kustomize build deploy/k8s/overlays/local   # dev: bundled infra + dev Traefik
+kustomize build deploy/k8s/overlays/main    # bee: shared infra, no PVCs, no Secrets
+```
+
+The `main` overlay must render with no PersistentVolumeClaims, no Secrets, no
+ClusterRole and no placeholder values. Against a reachable cluster, also run
+**both** server dry-runs — rendering alone does not catch namespace or
+cross-resource-reference errors:
+
+```sh
+kustomize build deploy/k8s/overlays/main  | kubectl apply --dry-run=server -f -
+kustomize build deploy/k8s/overlays/local | kubectl apply --dry-run=server -f -
+```
+
+`--dry-run=server` validates against the API server without persisting
+anything, so it is safe to point at the shared `bee` context; it needs the
+`traefik.io` CRDs present, which bee has. The local overlay is not exempt: a
+missing `namespace:` in `deploy/k8s/infra-local/kustomization.yaml` made
+`kubectl apply -k deploy/k8s/overlays/local` fail outright (`ClusterRoleBinding
+"myfleet-traefik" is invalid: subjects[0].namespace: Required value`) and slipped
+through ten reviews because only the `main` dry-run was ever run.
+
+Container builds: `docker build -f apps/<service>/Dockerfile .` (context is the
+repo root for every service, including `apps/web`).
 
 ## Code Patterns
 

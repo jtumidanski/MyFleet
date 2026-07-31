@@ -19,7 +19,7 @@ interface VehicleMediaGalleryProps {
 
 /**
  * Gallery section shown on the vehicle detail page.
- * Lists all media refs for the vehicle, renders thumbnails via presigned GET URLs,
+ * Lists all media refs for the vehicle, renders thumbnails via proxied content URLs,
  * and exposes upload + primary-image selection for member/owner roles.
  */
 export function VehicleMediaGallery({ vehicleId, canWrite }: VehicleMediaGalleryProps) {

@@ -17,8 +17,12 @@ tidy:
 fe-build:
 	npm run -w apps/web build
 
+# Every JS workspace that has tests, not just apps/web. packages/shared-ts owns
+# fetchAuthenticated — the single 401-refresh path every SPA call goes through —
+# and its tests previously ran in no automated gate at all.
 fe-test:
 	npm run -w apps/web test
+	npm run -w packages/shared-ts test
 
 lint: ## fix mode: formatters + auto-fixable lint findings, Go and web
 	./tools/lint.sh

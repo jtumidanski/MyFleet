@@ -1,0 +1,52 @@
+---
+# Strip-prefix Middlewares for each gateway path prefix. Needed by both the
+# local overlay (its own Traefik) and the main overlay (bee's cluster Traefik).
+#
+# auth-service's routes already carry their own /auth/... segment
+# (apps/auth-service/internal/{user,session,oidc}/resource.go), so only the
+# /api mount point is stripped: /api/auth/me -> /auth/me.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: auth-stripprefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /api
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: fleet-stripprefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /api/fleet
+
+---
+# media-service's routes already carry their own /media/... segment
+# (apps/media-service/internal/mediaobject/resource.go), so only the /api
+# mount point is stripped: /api/media/{id}/content -> /media/{id}/content.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: media-stripprefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /api
+
+---
+# notification-service's routes are bare (/notifications, ...) but the
+# frontend's NotificationService already doubles the segment
+# (/api/notifications/notifications/...), so stripping the full
+# /api/notifications prefix here is correct and unchanged.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: notifications-stripprefix
+spec:
+  stripPrefix:
+    prefixes:
+      - /api/notifications
