@@ -8,7 +8,8 @@ var (
 	ErrNotFound              = errors.New("not found")                // 404
 	ErrConflict              = errors.New("conflict")                 // 409
 	ErrGone                  = errors.New("gone")                     // 410
-	ErrRequestEntityTooLarge = errors.New("request entity too large") // 413
+	ErrRequestEntityTooLarge = errors.New("request entity too large")  // 413
+	ErrUnsupportedMediaType  = errors.New("unsupported media type")    // 415
 	ErrValidation            = errors.New("validation")               // 422
 )
 
@@ -26,6 +27,8 @@ func StatusFor(err error) int {
 		return 410
 	case errors.Is(err, ErrRequestEntityTooLarge):
 		return 413
+	case errors.Is(err, ErrUnsupportedMediaType):
+		return 415
 	case errors.Is(err, ErrValidation):
 		return 422
 	default:
