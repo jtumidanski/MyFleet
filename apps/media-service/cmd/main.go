@@ -121,7 +121,7 @@ func main() {
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
-				mediaobject.InitializeRoutes(log, db, store, maxUploadBytes)(pr)
+				mediaobject.InitializeRoutes(log, db, store, variantLookup{p: mediavariant.NewProvider(db)}, maxUploadBytes)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {
@@ -151,6 +151,21 @@ func purgeExpired(ctx context.Context, log logrus.FieldLogger, db *gorm.DB, stor
 		}
 	}
 	return nil
+}
+
+// variantLookup adapts mediavariant.Provider to mediaobject.VariantLookup.
+//
+// It lives here, in the composition root — the one place that already imports
+// both packages — so that mediaobject never imports mediavariant and the two
+// sibling domain packages stay independent (design §3.1).
+type variantLookup struct{ p mediavariant.Provider }
+
+func (v variantLookup) Lookup(mediaObjectID, variant string) (mediaobject.VariantRef, bool, error) {
+	m, found, err := v.p.GetByMediaObjectAndVariant(mediaObjectID, mediavariant.Variant(variant))
+	if err != nil || !found {
+		return mediaobject.VariantRef{}, false, err
+	}
+	return mediaobject.VariantRef{ObjectKey: m.ObjectKey(), ContentType: m.ContentType()}, true, nil
 }
 
 // mustJWKSKeyfunc builds the JWKS keyfunc, retrying up to maxAttempts times with
