@@ -54,3 +54,42 @@ describe('index.html pre-paint theme script', () => {
     expect(body.length).toBeLessThan(500);
   });
 });
+
+// The generator emits the path into BOTH brandMarkPath.ts and favicon.svg
+// (design §8.2). Cheap insurance against someone hand-editing one and not the
+// other, which would silently give the tab a different mark from the sidebar.
+describe('brand mark', () => {
+  it('is identical in brandMarkPath.ts and favicon.svg', () => {
+    const ts = readFileSync(resolve(WEB_ROOT, 'src/components/brandMarkPath.ts'), 'utf8');
+    const svg = readFileSync(resolve(WEB_ROOT, 'public/favicon.svg'), 'utf8');
+
+    const match = /'([^']+)'/.exec(ts);
+    if (!match) throw new Error('brandMarkPath.ts should export a single-quoted path string');
+    expect(svg).toContain(match[1]);
+  });
+});
+
+describe('index.html icon wiring', () => {
+  const html = readFileSync(resolve(WEB_ROOT, 'index.html'), 'utf8');
+
+  it('declares the SVG favicon with the ICO as an explicit alternate', () => {
+    // rel="alternate icon" so SVG-capable browsers prefer the vector
+    // (FR-ICON-5).
+    expect(html).toContain('<link rel="icon" href="/favicon.svg" type="image/svg+xml" />');
+    expect(html).toContain('rel="alternate icon"');
+  });
+
+  it('declares the apple-touch icon and the manifest', () => {
+    expect(html).toContain('rel="apple-touch-icon"');
+    expect(html).toContain('rel="manifest"');
+  });
+
+  // FR-ICON-8: the manifest format has no media-query support, so per-theme
+  // browser chrome comes from these two metas instead. The values are the
+  // rendered equivalents of the --background tokens; nothing enforces that
+  // coupling, so it is recorded in the design's deployment notes.
+  it('declares both theme-color metas', () => {
+    expect(html).toContain('media="(prefers-color-scheme: light)" content="#ffffff"');
+    expect(html).toContain('media="(prefers-color-scheme: dark)" content="#020817"');
+  });
+});
