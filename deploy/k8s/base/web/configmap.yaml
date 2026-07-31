@@ -5,13 +5,21 @@ metadata:
   labels:
     app: web
 data:
-  # Served by the SPA's own nginx at /config/config.json and read once, before
-  # the React tree mounts (apps/web/src/lib/config/runtimeConfig.ts). Editing
-  # this value takes effect on a `kubectl apply` — no image rebuild — which is
-  # the whole reason it is not an inlined Vite env var.
+  # Served by the SPA's own nginx at /config/config.json and fetched once at
+  # startup (apps/web/src/lib/config/runtimeConfig.ts). The tree mounts first
+  # and this arrives after, so the module is an observable store and consumers
+  # subscribe to it — see useRuntimeConfig. Editing this value takes effect on a
+  # `kubectl apply` — no image rebuild — which is the whole reason it is not an
+  # inlined Vite env var.
   #
   # The volume is mounted as a directory rather than with subPath so kubelet
   # propagates updates to running pods.
+  #
+  # carfaxUrlTemplate is duplicated in apps/web/src/lib/schemas/runtimeConfig.ts
+  # and apps/web/public/config/config.json. `make carfax-template` (part of
+  # `make ci`) fails if the three drift: the Carfax button only renders for an
+  # https template containing {vin}, so a bad edit here removes it fleet-wide
+  # with no error anywhere.
   config.json: |
     {
       "carfaxUrlTemplate": "https://www.carfax.com/VehicleHistory/p/Report.cfx?vin={vin}"
