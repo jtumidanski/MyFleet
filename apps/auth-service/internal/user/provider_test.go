@@ -36,14 +36,15 @@ func newTestDB(t *testing.T) *gorm.DB {
 	// are irrelevant to what these tests assert — which column each lookup
 	// filters on.
 	if err := db.Exec(`CREATE TABLE auth.users (
-		id            text primary key,
-		google_sub    text not null unique,
-		email         text not null unique,
-		display_name  text,
-		avatar_url    text,
-		last_login_at datetime,
-		created_at    datetime,
-		updated_at    datetime
+		id               text primary key,
+		google_sub       text not null unique,
+		email            text not null unique,
+		display_name     text,
+		avatar_url       text,
+		theme_preference text not null default 'system',
+		last_login_at    datetime,
+		created_at       datetime,
+		updated_at       datetime
 	)`).Error; err != nil {
 		t.Fatalf("create table: %v", err)
 	}
