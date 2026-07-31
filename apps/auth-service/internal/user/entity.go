@@ -18,8 +18,14 @@ type Entity struct {
 	// (design §3.4), so no insert path depends on it.
 	ThemePreference string `gorm:"not null;default:'system'"`
 	LastLoginAt     time.Time
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// ToEntity never populates CreatedAt (Model carries no such field), so a
+	// full-column gorm.Save from Administrator.Update would otherwise clobber
+	// this with the zero value on every write — including the login-time
+	// ProvisionFromGoogle path and, since this branch, PATCH /auth/me. `<-:create`
+	// tells GORM to include the column on INSERT (where it's DB-default- or
+	// callback-populated) but exclude it from every UPDATE.
+	CreatedAt time.Time `gorm:"<-:create"`
+	UpdatedAt time.Time
 }
 
 func (Entity) TableName() string { return "auth.users" }

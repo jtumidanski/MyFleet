@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
@@ -183,6 +184,34 @@ func TestPatchMe_validationTitleNamesTheFieldNotTheInput(t *testing.T) {
 	}
 	if strings.Contains(body, "purple") || strings.Contains(body, "<script>") {
 		t.Fatalf("the validation error echoed the caller's raw input back: %s", body)
+	}
+}
+
+// Regression for the pre-PR review finding: Administrator.Update issues a full
+// gorm.Save on an Entity whose CreatedAt field ToEntity never populates. Before
+// entity.go tagged CreatedAt `<-:create`, that full-column UPDATE clobbered
+// created_at with the zero value (0001-01-01) on every PATCH /auth/me — and,
+// pre-existing, on every returning-user login via ProvisionFromGoogle.
+func TestPatchMe_doesNotZeroCreatedAt(t *testing.T) {
+	r, db := newAuthRouter(t)
+
+	want := time.Date(2020, 6, 15, 12, 0, 0, 0, time.UTC)
+	if err := db.Exec("UPDATE auth.users SET created_at = ? WHERE id = ?", want, testUserID).Error; err != nil {
+		t.Fatalf("seed created_at: %v", err)
+	}
+
+	rec := serve(r, http.MethodPatch, "/auth/me", fmt.Sprintf(patchBody, ThemeDark), testUserID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH /auth/me = %d, want 200. Body: %s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+
+	var e Entity
+	if err := db.First(&e, "id = ?", testUserID).Error; err != nil {
+		t.Fatalf("read back user: %v", err)
+	}
+	if !e.CreatedAt.Equal(want) {
+		t.Fatalf("PATCH /auth/me changed created_at: got %v, want %v — Administrator.Update must not touch created_at",
+			e.CreatedAt, want)
 	}
 }
 

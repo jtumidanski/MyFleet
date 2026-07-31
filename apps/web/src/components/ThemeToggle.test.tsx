@@ -3,7 +3,7 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import { ThemeToggle } from './ThemeToggle';
 import { ThemeProvider } from '../context/ThemeContext';
 import { THEME_STORAGE_KEY } from '../lib/theme';
-import { resetMatchMedia } from '../test/setup';
+import { resetMatchMedia, setPrefersDark } from '../test/setup';
 
 const mutate = vi.fn();
 vi.mock('../lib/hooks/api/auth', () => ({
@@ -93,10 +93,21 @@ describe('ThemeToggle', () => {
 
   // FR-TOGGLE-3: the icon tracks the PREFERENCE, not the resolved theme, or
   // `system` would be indistinguishable from whichever theme it resolved to.
-  it('shows an icon per preference', () => {
+  // The discriminating case: preference is `system` but the OS reports dark,
+  // so resolvedTheme is `dark`. Keying META on resolvedTheme (the bug this
+  // guards against) would render the moon; keying on preference renders the
+  // monitor. lucide-react stamps each icon's own `lucide-<kebab-name>` class
+  // onto its <svg> (see createLucideIcon), which is what lets the assertion
+  // tell the two apart.
+  it('shows the icon for the preference, not the resolved theme', () => {
     localStorage.setItem(THEME_STORAGE_KEY, 'system');
+    setPrefersDark(true);
     renderToggle();
 
-    expect(screen.getByRole('button').querySelector('svg')).toBeTruthy();
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+
+    const svg = screen.getByRole('button').querySelector('svg');
+    expect(svg).toHaveClass('lucide-monitor');
+    expect(svg).not.toHaveClass('lucide-moon');
   });
 });
