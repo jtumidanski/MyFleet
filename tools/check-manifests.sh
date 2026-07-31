@@ -82,29 +82,44 @@ else:
     print(f"  route sets identical ({len(wr)} routes on both entrypoints)")
 
 # The deny rules are the reason parity matters; assert them explicitly rather
-# than trusting that "identical" means "present". There is one deny rule per
-# service with an unauthenticated /internal/* surface (fleet-service,
-# media-service, ...), so the count is allowed to grow — what must never
-# happen is a service's deny rule being absent, or present with the wrong
-# priority/middleware, on either entrypoint.
-deny_counts = set()
+# than trusting that "identical" means "present". Every service with an
+# unauthenticated /internal/* surface MUST have exactly one priority-200
+# internal-deny rule on EACH entrypoint. This is checked by service name, not
+# just by aggregate count: an aggregate-count-and-symmetry check would still
+# pass if, say, the media-service rule were deleted from both entrypoints at
+# once (a realistic failure mode, since kustomize `replacements` keeps :80
+# and :443 in lockstep) — it would just see "1 deny rule, present on both
+# sides" and call that fine. Naming the required set closes that hole.
+REQUIRED_DENY_SERVICES = {"fleet-service", "media-service"}
+
 for label, routes in (("web", wr), ("tls", tr)):
     deny = [r for r in routes if "internal" in r.get("match", "")]
-    if not deny:
-        print(f"  FAIL: {label} has no internal-deny routes"); ok = False
-        continue
-    deny_counts.add(len(deny))
+    by_service = {}
     for d in deny:
+        svc_names = [s.get("name") for s in d.get("services", [])]
+        key = svc_names[0] if len(svc_names) == 1 else tuple(svc_names)
+        by_service.setdefault(key, []).append(d)
+
+    for svc in REQUIRED_DENY_SERVICES:
+        matches = by_service.get(svc, [])
+        if len(matches) != 1:
+            print(f"  FAIL: {label} has {len(matches)} internal-deny route(s) for service {svc!r} (expected 1)"); ok = False
+            continue
+        d = matches[0]
         if d.get("priority") != 200:
-            print(f"  FAIL: {label} internal-deny route {d.get('match','')[:40]!r} priority is {d.get('priority')}, expected 200"); ok = False
+            print(f"  FAIL: {label} internal-deny route for {svc!r} priority is {d.get('priority')}, expected 200"); ok = False
         if "internal-deny" not in [m.get("name") for m in d.get("middlewares", [])]:
-            print(f"  FAIL: {label} internal-deny route {d.get('match','')[:40]!r} is missing the internal-deny middleware"); ok = False
+            print(f"  FAIL: {label} internal-deny route for {svc!r} is missing the internal-deny middleware"); ok = False
 
-if len(deny_counts) > 1:
-    print(f"  FAIL: web and tls have different internal-deny route counts {deny_counts}"); ok = False
+    unexpected = set(by_service) - REQUIRED_DENY_SERVICES
+    if unexpected:
+        print(f"  FAIL: {label} has internal-deny route(s) for unexpected service(s) {unexpected} — add them to REQUIRED_DENY_SERVICES if intentional"); ok = False
 
+# Secondary diagnostic only: the route-set equality check above (wr == tr) is
+# what actually guarantees :80/:443 parity for every route, deny or not. This
+# just restates that fact in deny-rule terms for a human skimming output.
 if ok:
-    print(f"  internal-deny present at priority 200 on both entrypoints ({deny_counts.pop() if deny_counts else 0} rule(s))")
+    print(f"  internal-deny present at priority 200 on both entrypoints for {sorted(REQUIRED_DENY_SERVICES)}")
 
 # Every host must appear in every rule. A host present in the catch-all but
 # missing from the deny rule would expose /internal/* on that hostname.
