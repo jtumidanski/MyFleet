@@ -81,21 +81,30 @@ elif json.dumps(wr, sort_keys=True) != json.dumps(tr, sort_keys=True):
 else:
     print(f"  route sets identical ({len(wr)} routes on both entrypoints)")
 
-# The deny rule is the reason parity matters; assert it explicitly rather than
-# trusting that "identical" means "present".
+# The deny rules are the reason parity matters; assert them explicitly rather
+# than trusting that "identical" means "present". There is one deny rule per
+# service with an unauthenticated /internal/* surface (fleet-service,
+# media-service, ...), so the count is allowed to grow — what must never
+# happen is a service's deny rule being absent, or present with the wrong
+# priority/middleware, on either entrypoint.
+deny_counts = set()
 for label, routes in (("web", wr), ("tls", tr)):
     deny = [r for r in routes if "internal" in r.get("match", "")]
-    if len(deny) != 1:
-        print(f"  FAIL: {label} has {len(deny)} internal-deny routes (expected 1)"); ok = False
+    if not deny:
+        print(f"  FAIL: {label} has no internal-deny routes"); ok = False
         continue
-    d = deny[0]
-    if d.get("priority") != 200:
-        print(f"  FAIL: {label} internal-deny priority is {d.get('priority')}, expected 200"); ok = False
-    if "internal-deny" not in [m.get("name") for m in d.get("middlewares", [])]:
-        print(f"  FAIL: {label} internal-deny route is missing the internal-deny middleware"); ok = False
+    deny_counts.add(len(deny))
+    for d in deny:
+        if d.get("priority") != 200:
+            print(f"  FAIL: {label} internal-deny route {d.get('match','')[:40]!r} priority is {d.get('priority')}, expected 200"); ok = False
+        if "internal-deny" not in [m.get("name") for m in d.get("middlewares", [])]:
+            print(f"  FAIL: {label} internal-deny route {d.get('match','')[:40]!r} is missing the internal-deny middleware"); ok = False
+
+if len(deny_counts) > 1:
+    print(f"  FAIL: web and tls have different internal-deny route counts {deny_counts}"); ok = False
 
 if ok:
-    print("  internal-deny present at priority 200 on both entrypoints")
+    print(f"  internal-deny present at priority 200 on both entrypoints ({deny_counts.pop() if deny_counts else 0} rule(s))")
 
 # Every host must appear in every rule. A host present in the catch-all but
 # missing from the deny rule would expose /internal/* on that hostname.
