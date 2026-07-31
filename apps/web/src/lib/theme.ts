@@ -20,7 +20,7 @@ export type ResolvedTheme = 'light' | 'dark';
 const VALID: readonly ThemePreference[] = ['light', 'dark', 'system'];
 
 export function isThemePreference(value: unknown): value is ThemePreference {
-  return typeof value === 'string' && VALID.includes(value);
+  return typeof value === 'string' && (VALID as readonly string[]).includes(value);
 }
 
 /**
