@@ -32,9 +32,10 @@ func (pr *Processor) GetByID(id string) (Model, error) {
 	return m, nil
 }
 
-// ListByVehicle returns a page of maintenance records for a vehicle.
-func (pr *Processor) ListByVehicle(vehicleID string, page server.Page) ([]Model, int, error) {
-	return pr.p.ListByVehicle(vehicleID, page)
+// ListByVehicle returns a page of records for a vehicle, optionally constrained
+// to a set of category IDs (design D3 for the nil/empty semantics).
+func (pr *Processor) ListByVehicle(vehicleID string, categoryIDs []string, page server.Page) ([]Model, int, error) {
+	return pr.p.ListByVehicle(vehicleID, categoryIDs, page)
 }
 
 // Create inserts a new maintenance record.
@@ -42,13 +43,19 @@ func (pr *Processor) Create(m Model) (Model, error) {
 	return pr.a.Insert(m)
 }
 
-// Update applies a partial update to an existing maintenance record.
+// Update applies a partial update to an existing maintenance record. The
+// applied model is validated before it reaches the administrator, so PATCH is
+// guarded by the same invariants as create (design D4).
 func (pr *Processor) Update(id string, apply func(Model) Model) (Model, error) {
 	m, err := pr.GetByID(id)
 	if err != nil {
 		return Model{}, err
 	}
-	return pr.a.Update(apply(m))
+	updated := apply(m)
+	if err := Validate(updated); err != nil {
+		return Model{}, err
+	}
+	return pr.a.Update(updated)
 }
 
 // SoftDelete marks a maintenance record as deleted.

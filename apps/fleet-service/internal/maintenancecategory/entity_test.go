@@ -1,10 +1,13 @@
 package maintenancecategory
 
 import (
+	"errors"
 	"testing"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 func newTestDB(t *testing.T) *gorm.DB {
@@ -42,5 +45,67 @@ func TestSeedIsIdempotent(t *testing.T) {
 	}
 	if count != int64(len(seeds)) {
 		t.Fatalf("want %d categories after double-seed, got %d", len(seeds), count)
+	}
+}
+
+// ParseKind is the single place the permitted ?kind= values are defined, so the
+// category and record endpoints cannot drift on what they accept.
+func TestParseKind(t *testing.T) {
+	if k, err := ParseKind(""); err != nil || k != "" {
+		t.Fatalf(`ParseKind("")=(%q,%v) want ("",nil) — empty means "no filter"`, k, err)
+	}
+	if k, err := ParseKind("maintenance"); err != nil || k != KindMaintenance {
+		t.Fatalf("ParseKind(maintenance)=(%q,%v)", k, err)
+	}
+	if k, err := ParseKind("modification"); err != nil || k != KindModification {
+		t.Fatalf("ParseKind(modification)=(%q,%v)", k, err)
+	}
+	// An unrecognised value is a validation error, never a silent empty result.
+	for _, in := range []string{"bogus", "MAINTENANCE", "mod", " maintenance"} {
+		if _, err := ParseKind(in); !errors.Is(err, server.ErrValidation) {
+			t.Fatalf("ParseKind(%q) err = %v, want ErrValidation", in, err)
+		}
+	}
+}
+
+// The eight pre-existing rows must read as maintenance after migration with no
+// manual backfill; the twelve modification categories must seed alongside them.
+func TestSeed_classifiesEveryCategory(t *testing.T) {
+	db := newTestDB(t)
+	if err := Seed(db); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var maintenance, modification int64
+	if err := db.Model(&Entity{}).Where("kind = ?", string(KindMaintenance)).
+		Count(&maintenance).Error; err != nil {
+		t.Fatalf("count maintenance: %v", err)
+	}
+	if err := db.Model(&Entity{}).Where("kind = ?", string(KindModification)).
+		Count(&modification).Error; err != nil {
+		t.Fatalf("count modification: %v", err)
+	}
+
+	if maintenance != 8 {
+		t.Fatalf("maintenance categories = %d, want 8", maintenance)
+	}
+	if modification != 12 {
+		t.Fatalf("modification categories = %d, want 12", modification)
+	}
+	if int(maintenance+modification) != len(seeds) {
+		t.Fatalf("kinds sum to %d but seeds has %d rows", maintenance+modification, len(seeds))
+	}
+}
+
+// No modification name may collide with an existing maintenance name — Seed is
+// keyed by Name, so a collision would silently reclassify nothing and leave a
+// category missing.
+func TestSeed_namesAreUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, s := range seeds {
+		if seen[s.Name] {
+			t.Fatalf("duplicate seed name %q", s.Name)
+		}
+		seen[s.Name] = true
 	}
 }

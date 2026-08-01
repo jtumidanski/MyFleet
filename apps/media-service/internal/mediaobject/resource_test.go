@@ -3,7 +3,9 @@ package mediaobject
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +14,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
+	sharedevents "github.com/jtumidanski/myfleet/packages/shared-go/events"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/storage"
@@ -74,14 +78,36 @@ func testRouterWithVariants(t *testing.T, store ObjectStore, variants VariantLoo
 // the right status reached the client.
 func testRouterCapturingLogs(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor, *logrusTestHook) {
 	t.Helper()
+	router, proc, hook, _ := buildTestRouter(t, store, variants, maxUploadBytes)
+	return router, proc, hook
+}
+
+// testRouterWithDB is testRouter plus the *gorm.DB, for the tests that inspect
+// the outbox or rewrite a stored content type behind the processor's back —
+// the only way to reproduce a pre-allowlist row now that InitUpload normalises.
+func testRouterWithDB(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Handler, *Processor, *gorm.DB) {
+	t.Helper()
+	router, proc, _, db := buildTestRouter(t, store, &fakeVariants{}, maxUploadBytes)
+	return router, proc, db
+}
+
+// buildTestRouter is the single construction point every testRouter* helper
+// delegates to, so the allowlist and the variant lookup are wired identically
+// no matter which shape a test asks for.
+func buildTestRouter(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor, *logrusTestHook, *gorm.DB) {
+	t.Helper()
 	db := newConfirmTestDB(t)
 	log := logrus.New()
 	log.SetOutput(io.Discard)
 	hook := &logrusTestHook{}
 	log.AddHook(hook)
+	allow, err := ParseAllowlist(DefaultAllowedContentTypes)
+	if err != nil {
+		t.Fatalf("ParseAllowlist: %v", err)
+	}
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db, store, variants, maxUploadBytes))
-	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants), hook
+	r.Group(InitializeRoutes(log, db, store, variants, maxUploadBytes, allow))
+	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants, allow), hook, db
 }
 
 func memberRequest(method, target string, body io.Reader) *http.Request {
@@ -260,6 +286,342 @@ func TestGetContent_crossFleetIs404(t *testing.T) {
 	}
 }
 
+func TestGetContent_pdfIsAttachmentWithNosniff(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("%PDF-1.7")}
+	router, proc, _ := testRouterWithDB(t, store, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "invoice.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+created.ID()+"/content", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "application/pdf" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); got != `attachment; filename="invoice.pdf"` {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+}
+
+// inline + a correct image/jpeg still renders in an <img>; nosniff only stops
+// the browser second-guessing the declared type.
+func TestGetContent_jpegIsInlineWithNosniff(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("\xff\xd8\xff")}
+	router, proc, _ := testRouterWithDB(t, store, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+created.ID()+"/content", nil))
+
+	if got := rec.Header().Get("Content-Disposition"); got != `inline; filename="photo.jpg"` {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+}
+
+// Rows created before the allowlist existed may hold arbitrary strings. They
+// are served as octet-stream + attachment (PRD FR-DL-4). InitUpload can no
+// longer create such a row, so the row is written directly.
+func TestGetContent_legacyContentTypeIsOctetStreamAttachment(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("<script>alert(1)</script>")}
+	router, proc, db := testRouterWithDB(t, store, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "image/png", "legacy.png")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+	// Simulate a pre-allowlist row by rewriting the stored type behind the
+	// processor's back, exactly as an old row in the database would look.
+	forceContentType(t, db, created.ID(), "text/html")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+created.ID()+"/content", nil))
+
+	if got := rec.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want application/octet-stream", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("Content-Disposition = %q, want attachment", got)
+	}
+}
+
+// forceContentType rewrites a stored content type directly, which is the only
+// way to reproduce a pre-allowlist row now that InitUpload normalises.
+func forceContentType(t *testing.T, db *gorm.DB, id, contentType string) {
+	t.Helper()
+	if err := db.Model(&Entity{}).Where("id = ?", id).
+		Update("content_type", contentType).Error; err != nil {
+		t.Fatalf("force content type: %v", err)
+	}
+}
+
+// initBody builds the JSON:API envelope POST /media expects.
+func initBody(contentType, filename string) io.Reader {
+	return strings.NewReader(`{"data":{"attributes":{"contentType":"` + contentType +
+		`","originalFilename":"` + filename + `"}}}`)
+}
+
+func TestInitUpload_pdfIsAccepted(t *testing.T) {
+	router, _, _ := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("application/pdf", "invoice.pdf")))
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// The allowlist is a security control, not a UX affordance: broadening the
+// accepted file types without it would turn media download into a same-origin
+// stored-XSS vector.
+func TestInitUpload_htmlIs415(t *testing.T) {
+	router, _, _ := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("text/html", "evil.html")))
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415; body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "application/pdf") {
+		t.Fatalf("415 body does not name the accepted types: %s", rec.Body.String())
+	}
+}
+
+func TestInitUpload_emptyContentTypeIs415(t *testing.T) {
+	router, _, _ := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("", "mystery")))
+
+	if rec.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415", rec.Code)
+	}
+}
+
+// text/csv; charset=utf-8 is what a browser actually sends. The parameters are
+// discarded and the bare type is what gets stored (design D10).
+func TestInitUpload_normalizesAndStoresBareType(t *testing.T) {
+	_, proc, _ := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	m, err := proc.InitUpload("fleet-a", "u1", "TEXT/CSV; charset=utf-8", "mileage.csv")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+	if m.ContentType() != "text/csv" {
+		t.Fatalf("stored contentType = %q, want text/csv", m.ContentType())
+	}
+}
+
+// countOutboxRows returns the number of unsent outbox rows, which is how
+// "published a media.uploaded event" is observed without standing up Kafka.
+func countOutboxRows(t *testing.T, db *gorm.DB) int {
+	t.Helper()
+	var rows []sharedevents.OutboxRow
+	if err := db.Where("sent_at IS NULL").Find(&rows).Error; err != nil {
+		t.Fatalf("read outbox: %v", err)
+	}
+	return len(rows)
+}
+
+// A document needs no worker, so Confirm takes it straight to ready and
+// publishes nothing. The client's poll-until-ready loop therefore resolves on
+// the first read rather than waiting on a worker that would never run
+// (design D12, api-contracts §6).
+func TestConfirm_documentGoesStraightToReadyWithNoOutboxRow(t *testing.T) {
+	_, proc, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "invoice.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+
+	confirmed, err := proc.Confirm(context.Background(), created.ID(), "fleet-a")
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if confirmed.Status() != StatusReady {
+		t.Fatalf("status = %q, want ready", confirmed.Status())
+	}
+	if n := countOutboxRows(t, db); n != 0 {
+		t.Fatalf("outbox rows = %d, want 0 — a document must not enqueue media.uploaded", n)
+	}
+}
+
+// The image path is unchanged: uploaded → processing plus exactly one outbox row.
+func TestConfirm_imageStillEnqueuesProcessing(t *testing.T) {
+	_, proc, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+
+	confirmed, err := proc.Confirm(context.Background(), created.ID(), "fleet-a")
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if confirmed.Status() != StatusProcessing {
+		t.Fatalf("status = %q, want processing", confirmed.Status())
+	}
+	if n := countOutboxRows(t, db); n != 1 {
+		t.Fatalf("outbox rows = %d, want 1", n)
+	}
+}
+
+// A legacy row whose stored type nobody recognises must never be handed to
+// image.Decode, so it confirms like a document (design D12).
+func TestConfirm_unknownContentTypeConfirmsLikeADocument(t *testing.T) {
+	_, proc, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	created, err := proc.InitUpload("fleet-a", "u1", "image/png", "legacy.png")
+	if err != nil {
+		t.Fatalf("InitUpload: %v", err)
+	}
+	if err := db.Model(&Entity{}).Where("id = ?", created.ID()).
+		Update("content_type", "application/x-legacy").Error; err != nil {
+		t.Fatalf("force content type: %v", err)
+	}
+
+	confirmed, err := proc.Confirm(context.Background(), created.ID(), "fleet-a")
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if confirmed.Status() != StatusReady {
+		t.Fatalf("status = %q, want ready", confirmed.Status())
+	}
+	if n := countOutboxRows(t, db); n != 0 {
+		t.Fatalf("outbox rows = %d, want 0", n)
+	}
+}
+
+// internalRouter mounts the no-JWT internal routes over the same DB the
+// authenticated router uses, so a test can create objects through the processor
+// and then query them the way fleet-service will.
+func internalRouter(t *testing.T, db *gorm.DB) http.Handler {
+	t.Helper()
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+	r := chi.NewRouter()
+	r.Group(InitializeInternalRoutes(log, db))
+	return r
+}
+
+// getInternal issues an unauthenticated GET — this route has no JWT middleware,
+// so no identity is attached to the context.
+func getInternal(t *testing.T, h http.Handler, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
+	return rec
+}
+
+// The response contains only the requested IDs that are active AND in the
+// fleet. Whether a missing ID does not exist, was deleted, or belongs to
+// someone else is indistinguishable — that non-disclosure property falls out of
+// the endpoint's shape rather than needing handler-side care (design D6).
+func TestInternalMedia_returnsOnlySameFleetActiveIDs(t *testing.T) {
+	_, proc, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	h := internalRouter(t, db)
+
+	mine, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "a.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload(mine): %v", err)
+	}
+	theirs, err := proc.InitUpload("fleet-b", "u2", "application/pdf", "b.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload(theirs): %v", err)
+	}
+	deleted, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "c.pdf")
+	if err != nil {
+		t.Fatalf("InitUpload(deleted): %v", err)
+	}
+	if err := proc.SoftDelete(deleted.ID(), "fleet-a"); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+
+	ids := strings.Join([]string{mine.ID(), theirs.ID(), deleted.ID(), "does-not-exist"}, ",")
+	rec := getInternal(t, h, "/internal/media?fleet_id=fleet-a&ids="+ids)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var got InternalMediaResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Media) != 1 || got.Media[0].ID != mine.ID() {
+		t.Fatalf("got %+v, want exactly the caller's own active object", got.Media)
+	}
+	if got.Media[0].ContentType != "application/pdf" {
+		t.Fatalf("content_type = %q", got.Media[0].ContentType)
+	}
+}
+
+func TestInternalMedia_missingFleetIDIs422(t *testing.T) {
+	_, _, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := getInternal(t, internalRouter(t, db), "/internal/media?ids=x")
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+}
+
+func TestInternalMedia_emptyIdsReturnsEmptyList(t *testing.T) {
+	_, _, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	rec := getInternal(t, internalRouter(t, db), "/internal/media?fleet_id=fleet-a")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var got InternalMediaResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Media) != 0 {
+		t.Fatalf("got %+v, want an empty list", got.Media)
+	}
+}
+
+// The endpoint is unauthenticated, so its input must be bounded.
+func TestInternalMedia_tooManyIdsIs422(t *testing.T) {
+	_, _, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+
+	ids := make([]string, MaxInternalLookupIDs+1)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("id-%d", i)
+	}
+	rec := getInternal(t, internalRouter(t, db), "/internal/media?fleet_id=fleet-a&ids="+strings.Join(ids, ","))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+}
+
 // seedStoredObject creates a media object and records its bytes, returning the
 // media id — the state a completed upload leaves behind.
 func seedStoredObject(t *testing.T, pr *Processor, fleetID string, payload []byte) string {
@@ -272,6 +634,64 @@ func seedStoredObject(t *testing.T, pr *Processor, fleetID string, payload []byt
 		t.Fatalf("store content: %v", err)
 	}
 	return created.ID()
+}
+
+// A variant response carries the same download hardening as the original.
+// The two features landed on separate branches — variants, and the
+// allowlist/nosniff/Content-Disposition work — so nothing on either branch
+// alone covered their intersection. nosniff in particular has to be on EVERY
+// response: a variant is bytes served from the application's origin like any
+// other, and "it was re-encoded by our own worker" is an argument about how it
+// got there, not about what a browser will do with it.
+func TestGetContent_variantIsHardenedLikeTheOriginal(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	// A thumbnail is a renderable image, so it is served inline under the
+	// ORIGINAL's filename — the variant has no filename of its own, and
+	// offering "photo.png" is what the user recognises.
+	if got := rec.Header().Get("Content-Disposition"); got != `inline; filename="photo.png"` {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+}
+
+// A variant whose recorded content type is not on the allowlist must degrade
+// exactly like a legacy original: octet-stream plus attachment. The worker only
+// ever writes jpeg today, so this is a guard against a future variant format
+// being served as a type the browser is willing to execute.
+func TestGetContent_offAllowlistVariantDegradesToAttachment(t *testing.T) {
+	store := &fakeStore{
+		bucket:    "myfleet-media",
+		getBody:   []byte("original-bytes"),
+		getBodies: map[string][]byte{"fleet-a/odd.bin": []byte("<script>alert(1)</script>")},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-a/odd.bin", ContentType: "text/html"},
+	}}
+	router, proc := testRouterWithVariants(t, store, variants, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if got := rec.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want application/octet-stream", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("Content-Disposition = %q, want attachment", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
 }
 
 func thumbnailRouter(t *testing.T) (http.Handler, *Processor, *fakeStore) {

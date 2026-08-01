@@ -8,7 +8,12 @@ import (
 
 // Provider is the read-only interface for maintenance category data access.
 type Provider interface {
-	List(page server.Page) ([]Model, int, error)
+	// List returns a page of categories. An empty kind means no filter.
+	List(kind Kind, page server.Page) ([]Model, int, error)
+	// IDsByKind returns every category ID of a kind. It always returns a
+	// non-nil slice, because the record provider reads nil as "no filter"
+	// and empty-non-nil as "match nothing" (design D3).
+	IDsByKind(kind Kind) ([]string, error)
 }
 
 type dbProvider struct{ db *gorm.DB }
@@ -16,13 +21,23 @@ type dbProvider struct{ db *gorm.DB }
 // NewProvider returns a read-only Provider backed by the given database.
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
-func (p *dbProvider) List(page server.Page) ([]Model, int, error) {
+func (p *dbProvider) List(kind Kind, page server.Page) ([]Model, int, error) {
+	// Two independent query builders: reusing one after Count() carries the
+	// aggregate's state into the Find.
+	count := p.db.Model(&Entity{})
+	find := p.db.Model(&Entity{})
+	if kind != "" {
+		count = count.Where("kind = ?", string(kind))
+		find = find.Where("kind = ?", string(kind))
+	}
+
 	var total int64
-	if err := p.db.Model(&Entity{}).Count(&total).Error; err != nil {
+	if err := count.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var es []Entity
-	if err := p.db.Order("name asc").Offset(page.Offset()).Limit(page.Size).Find(&es).Error; err != nil {
+	if err := find.Order("name asc").Offset(page.Offset()).Limit(page.Size).
+		Find(&es).Error; err != nil {
 		return nil, 0, err
 	}
 	out := make([]Model, 0, len(es))
@@ -30,4 +45,16 @@ func (p *dbProvider) List(page server.Page) ([]Model, int, error) {
 		out = append(out, Make(e))
 	}
 	return out, int(total), nil
+}
+
+func (p *dbProvider) IDsByKind(kind Kind) ([]string, error) {
+	var ids []string
+	if err := p.db.Model(&Entity{}).Where("kind = ?", string(kind)).
+		Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, nil
 }

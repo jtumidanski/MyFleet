@@ -5,40 +5,61 @@ import {
   maintenanceRecordSchema,
   type MaintenanceRecordFormInput,
 } from '../../../../lib/schemas/maintenanceRecord';
+import { usePendingAttachments } from '../../../../lib/hooks/usePendingAttachments';
 import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Textarea } from '../../../ui/textarea';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
-import type { MaintenanceCategory } from '../../../../types/models/maintenanceCategory';
+import { AttachmentPicker } from './AttachmentPicker';
+import type {
+  MaintenanceCategory,
+  MaintenanceCategoryKind,
+} from '../../../../types/models/maintenanceCategory';
 
 interface MaintenanceRecordFormProps {
   categories: MaintenanceCategory[];
   defaultMileage?: number;
-  onSubmit: (values: MaintenanceRecordFormInput) => Promise<void> | void;
+  /**
+   * Restricts the category picker to one kind and relabels the submit button.
+   * The picker is not grouped by kind because it never shows more than one kind
+   * at a time (design D19).
+   */
+  kind?: MaintenanceCategoryKind;
+  onSubmit: (
+    values: MaintenanceRecordFormInput,
+    documentMediaIds: string[],
+  ) => Promise<void> | void;
   onCancel?: () => void;
   submitting?: boolean;
 }
 
 /**
  * Form for logging a maintenance record.
- * - Category dropdown populated from GET /maintenance-categories.
+ * - Category dropdown populated from GET /maintenance-categories, filtered by `kind`.
  * - Mileage pre-filled from latest mileage record (auto-fill).
  */
 export function MaintenanceRecordForm({
   categories,
   defaultMileage,
+  kind,
   onSubmit,
   onCancel,
   submitting,
 }: MaintenanceRecordFormProps) {
   const now = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM for datetime-local
+  const attachments = usePendingAttachments();
+
+  const visibleCategories = kind
+    ? categories.filter((c) => c.attributes.kind === kind)
+    : categories;
 
   const form = useForm<MaintenanceRecordFormInput>({
     resolver: zodResolver(maintenanceRecordSchema),
     defaultValues: {
       categoryId: '',
       performedAt: now,
+      description: '',
       mileage: defaultMileage,
       cost: undefined,
       vendor: '',
@@ -49,7 +70,10 @@ export function MaintenanceRecordForm({
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit((values) => onSubmit(values))} className="space-y-4">
+      <form
+        onSubmit={form.handleSubmit((values) => onSubmit(values, attachments.commit()))}
+        className="space-y-4"
+      >
         <FormField
           control={form.control}
           name="categoryId"
@@ -63,7 +87,7 @@ export function MaintenanceRecordForm({
                   </SelectTrigger>
                 </FormControl>
                 <SelectContent>
-                  {categories.map((cat) => (
+                  {visibleCategories.map((cat) => (
                     <SelectItem key={cat.id} value={cat.id}>
                       {cat.attributes.name}
                     </SelectItem>
@@ -83,6 +107,25 @@ export function MaintenanceRecordForm({
               <FormLabel>Date Performed</FormLabel>
               <FormControl>
                 <Input type="datetime-local" {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="description"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Description</FormLabel>
+              <FormControl>
+                <Input
+                  type="text"
+                  placeholder="Cat-back exhaust, Borla S-Type"
+                  {...field}
+                  value={field.value ?? ''}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -166,15 +209,23 @@ export function MaintenanceRecordForm({
           )}
         />
 
+        <AttachmentPicker
+          items={attachments.items}
+          onAdd={attachments.add}
+          onRemove={attachments.remove}
+        />
+
         <div className="flex justify-end gap-2">
           {onCancel && (
             <Button type="button" variant="outline" onClick={onCancel}>
               Cancel
             </Button>
           )}
-          <Button type="submit" disabled={submitting}>
-            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Log Record
+          <Button type="submit" disabled={submitting || attachments.isUploading}>
+            {(submitting || attachments.isUploading) && (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            )}
+            {kind === 'modification' ? 'Log Modification' : 'Log Record'}
           </Button>
         </div>
       </form>

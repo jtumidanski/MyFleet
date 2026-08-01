@@ -7,6 +7,9 @@ type Attributes struct {
 	Name          string `json:"name"`
 	Description   string `json:"description,omitempty"`
 	SystemDefined bool   `json:"systemDefined"`
+	// No omitempty: the column is NOT NULL, so kind is always present and
+	// never null (api-contracts §1).
+	Kind string `json:"kind"`
 }
 
 // Transform converts a Model to a JSON:API Resource.
@@ -18,6 +21,7 @@ func Transform(m Model) server.Resource {
 			Name:          m.Name(),
 			Description:   m.Description(),
 			SystemDefined: m.SystemDefined(),
+			Kind:          string(m.Kind()),
 		},
 	}
 }

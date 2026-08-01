@@ -51,6 +51,23 @@ export const MEDIA_MAX_UPLOAD_BYTES = 26214400;
 /** JSON:API-style code used for the client-side size rejection. */
 export const MEDIA_TOO_LARGE_CODE = 'payload_too_large';
 
+/**
+ * Client-side mirror of the media-service `MEDIA_ALLOWED_CONTENT_TYPES` config
+ * key, formatted for a file input's `accept` attribute.
+ *
+ * Like `MEDIA_MAX_UPLOAD_BYTES` this is a UX affordance, NOT a security
+ * control: the server validates the content type against its own allowlist and
+ * answers 415 regardless of what this string says.
+ */
+export const ACCEPTED_UPLOAD_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+].join(',');
+
 /** Bytes → a human-readable MB string ("25 MB", "31.5 MB"). */
 export function formatUploadSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
@@ -69,7 +86,10 @@ export interface UploadDeps {
  *  2. PUT the bytes to /api/media/{id}/content (proxied to MinIO by the service).
  *  3. Confirm — transitions the row from uploaded → processing.
  *
- * After confirm, the caller should poll GET /media/{id} until status === 'ready'.
+ * Documents come back `ready` from confirm; images come back `processing` and
+ * finish asynchronously. Callers do NOT need to poll for `ready` before using
+ * the result — the server validates attachment ownership, not readiness, so
+ * an in-flight image is just as attachable as a finished one.
  *
  * Oversized files are rejected here, before step 1, so nothing reaches the
  * network and no orphaned media row is created.
@@ -179,12 +199,27 @@ export function useVehicleMedia(vehicleId: string | null | undefined) {
 // Mutations
 // ---------------------------------------------------------------------------
 
+export interface MediaUploadOptions {
+  /**
+   * Query keys to invalidate once the upload settles. Empty by default: a
+   * receipt attached to a maintenance record has no gallery to refresh, and the
+   * previous hard-coded vehicle-media invalidation was exactly what made the
+   * old hook unusable for one.
+   */
+  invalidateKeys?: ReadonlyArray<readonly unknown[]>;
+}
+
 /**
- * Full upload flow: init → putContent → confirm.
- * The mutation variable is a File. Invalidates vehicle-media list on success.
+ * Full upload flow: init → putContent → confirm. The mutation variable is a
+ * File; the result is the confirmed media resource.
+ *
+ * Documents come back `ready` from confirm; images come back `processing` and
+ * finish asynchronously. Callers do NOT need to wait for `ready` — the server
+ * validates attachment ownership, not readiness (design D8).
  */
-export function useUploadMedia(vehicleId: string) {
+export function useMediaUpload(options: MediaUploadOptions = {}) {
   const queryClient = useQueryClient();
+  const { invalidateKeys } = options;
   return useMutation({
     mutationFn: (file: File) =>
       performMediaUpload(file, {
@@ -193,11 +228,16 @@ export function useUploadMedia(vehicleId: string) {
         confirm: (id) => mediaService.confirm(id),
       }),
     onSettled: () => {
-      void queryClient.invalidateQueries({
-        queryKey: mediaKeys.vehicleMedia(vehicleId),
-      });
+      for (const key of invalidateKeys ?? []) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
     },
   });
+}
+
+/** Upload a file and refresh a vehicle's media gallery. */
+export function useUploadMedia(vehicleId: string) {
+  return useMediaUpload({ invalidateKeys: [mediaKeys.vehicleMedia(vehicleId)] });
 }
 
 /**
@@ -234,15 +274,35 @@ export function useSetPrimaryImage(vehicleId: string) {
   });
 }
 
-/** DELETE /api/media/{id} — soft delete. Invalidates vehicle media list. */
-export function useDeleteMedia(vehicleId: string) {
+export interface MediaDeleteOptions {
+  /**
+   * Query keys to invalidate once the delete settles. Empty by default: a
+   * media object cleaned up before it's attached to anything (PRD
+   * FR-DOC-2/FR-DOC-3) has no gallery to refresh.
+   */
+  invalidateKeys?: ReadonlyArray<readonly unknown[]>;
+}
+
+/**
+ * DELETE /api/media/{id} — soft delete, with no gallery coupling by default.
+ * Used to clean up an attachment that was uploaded but never attached to a
+ * saved record. Best-effort: the 5-day purge_after sweep is the authoritative
+ * backstop.
+ */
+export function useDeleteMediaObject(options: MediaDeleteOptions = {}) {
   const queryClient = useQueryClient();
+  const { invalidateKeys } = options;
   return useMutation({
     mutationFn: (mediaId: string) => mediaService.remove(mediaId),
     onSettled: () => {
-      void queryClient.invalidateQueries({
-        queryKey: mediaKeys.vehicleMedia(vehicleId),
-      });
+      for (const key of invalidateKeys ?? []) {
+        void queryClient.invalidateQueries({ queryKey: key });
+      }
     },
   });
+}
+
+/** DELETE /api/media/{id} — soft delete. Invalidates vehicle media list. */
+export function useDeleteMedia(vehicleId: string) {
+  return useDeleteMediaObject({ invalidateKeys: [mediaKeys.vehicleMedia(vehicleId)] });
 }

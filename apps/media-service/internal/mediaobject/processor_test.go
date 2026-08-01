@@ -385,7 +385,7 @@ func (f *fakeVariants) Lookup(ctx context.Context, mediaObjectID, variant string
 func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -419,7 +419,7 @@ func TestStoreContent_streamsToObjectStoreAndRecordsSize(t *testing.T) {
 func TestStoreContent_crossFleetIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -443,7 +443,7 @@ func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T)
 	db := newConfirmTestDB(t)
 	injectErr := errors.New("simulated minio put failure")
 	store := &fakeStore{bucket: "myfleet-media", putErr: injectErr}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -473,7 +473,7 @@ func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T)
 func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media"}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -506,7 +506,7 @@ func TestStoreContent_unknownLengthRecordsActualByteCount(t *testing.T) {
 func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -537,7 +537,7 @@ func TestContent_returnsBytesAndModelForOwnFleet(t *testing.T) {
 func TestContent_crossFleetIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -560,7 +560,7 @@ func TestContent_crossFleetIs404(t *testing.T) {
 func TestContent_missingObjectIs404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getErr: storage.ErrObjectNotFound}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -586,7 +586,7 @@ func TestContent_otherStorageFailuresAreNot404(t *testing.T) {
 	db := newConfirmTestDB(t)
 	boom := errors.New("simulated minio outage")
 	store := &fakeStore{bucket: "myfleet-media", getErr: boom}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{})
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
 	created, err := pr.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -595,6 +595,44 @@ func TestContent_otherStorageFailuresAreNot404(t *testing.T) {
 
 	if _, _, err := pr.Content(context.Background(), created.ID(), "fleet-a", ContentOriginal); !errors.Is(err, boom) {
 		t.Fatalf("content = %v, want the underlying storage error passed through", err)
+	}
+}
+
+// MarkReadyDirect is the documents-only shortcut: uploaded → ready with no
+// worker in between (design D12). Any other source state is a conflict.
+func TestMarkReadyDirect_requiresUploaded(t *testing.T) {
+	uploaded := Model{status: StatusUploaded}
+	got, err := MarkReadyDirect(uploaded)
+	if err != nil {
+		t.Fatalf("MarkReadyDirect(uploaded): %v", err)
+	}
+	if got.Status() != StatusReady {
+		t.Fatalf("status = %q, want ready", got.Status())
+	}
+
+	for _, s := range []Status{StatusProcessing, StatusReady, StatusFailed} {
+		if _, err := MarkReadyDirect(Model{status: s}); !errors.Is(err, server.ErrConflict) {
+			t.Fatalf("MarkReadyDirect(%q) err = %v, want ErrConflict", s, err)
+		}
+	}
+}
+
+// MarkFailed is the only terminal transition out of the pipeline that is not
+// ready. It accepts uploaded or processing (design D13).
+func TestMarkFailed_acceptsUploadedAndProcessing(t *testing.T) {
+	for _, s := range []Status{StatusUploaded, StatusProcessing} {
+		got, err := MarkFailed(Model{status: s})
+		if err != nil {
+			t.Fatalf("MarkFailed(%q): %v", s, err)
+		}
+		if got.Status() != StatusFailed {
+			t.Fatalf("MarkFailed(%q) status = %q, want failed", s, got.Status())
+		}
+	}
+	for _, s := range []Status{StatusReady, StatusFailed} {
+		if _, err := MarkFailed(Model{status: s}); !errors.Is(err, server.ErrConflict) {
+			t.Fatalf("MarkFailed(%q) err = %v, want ErrConflict", s, err)
+		}
 	}
 }
 
@@ -629,7 +667,7 @@ func TestContent_originalIsUnchanged(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
 	variants := &fakeVariants{}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 
@@ -664,7 +702,7 @@ func TestContent_variantFoundServesVariantBytes(t *testing.T) {
 	variants := &fakeVariants{refs: map[string]VariantRef{
 		"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
 	}}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 
@@ -708,7 +746,7 @@ func TestContent_variantMissingIs404AndServesNoOriginal(t *testing.T) {
 	db := newConfirmTestDB(t)
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
 	variants := &fakeVariants{} // no rows at all
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 	callsBefore := len(store.getCalls)
@@ -750,7 +788,7 @@ func TestContent_variantObjectMissingIs404AndServesNoOriginal(t *testing.T) {
 	log.SetLevel(logrus.WarnLevel)
 	var logged logrusTestHook
 	log.AddHook(&logged)
-	pr := NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants)
+	pr := NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 	callsBefore := len(store.getCalls)
@@ -806,7 +844,7 @@ func TestContent_crossFleetNeverTouchesLookupOrStore(t *testing.T) {
 	variants := &fakeVariants{refs: map[string]VariantRef{
 		"thumbnail": {ObjectKey: "fleet-b/thumb.jpg", ContentType: "image/jpeg"},
 	}}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 
 	obj := seedReadyObject(t, pr, "fleet-b", []byte("original-bytes"))
 
@@ -830,7 +868,7 @@ func TestContent_lookupErrorIsReturned(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
 	boom := errors.New("simulated variant query failure")
 	variants := &fakeVariants{err: boom}
-	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 

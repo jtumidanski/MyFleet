@@ -94,6 +94,28 @@ spec:
       services:
         - name: fleet-service
           port: 8080
+    # Same obligation as the fleet-service rule above, for the same reasons.
+    # media-service registers GET /internal/media WITHOUT JWT
+    # (apps/media-service/cmd/main.go) on the assumption that it is only
+    # reachable from inside the cluster; exposing media-service on the internet
+    # invalidates that assumption, and /internal/media is a cross-fleet
+    # media-existence oracle for anyone who can guess a fleet ID.
+    #
+    # PathRegexp, not PathPrefix: Traefik normalises the path before matching,
+    # and media-stripprefix removes the literal string `/api` rather than a path
+    # segment, so `/api/mediainternal/media?...` would otherwise reach the
+    # handler as `/internal/media`. Hence `[^/]*/*` — the separator is optional.
+    #
+    # The service reference is inert: internal-deny short-circuits with 403
+    # before anything is proxied.
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathRegexp(`(?i)^/+api/+media[^/]*/*internal`)
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: internal-deny
+      services:
+        - name: media-service
+          port: 8080
     - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathPrefix(`/api/auth`)
       kind: Rule
       priority: 100

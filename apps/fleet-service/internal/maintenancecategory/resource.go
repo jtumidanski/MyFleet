@@ -18,8 +18,17 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 	return func(r chi.Router) {
 		// GET /maintenance-categories — list categories (paged).
 		r.Get("/maintenance-categories", func(w http.ResponseWriter, req *http.Request) {
+			// An unrecognised kind is 422, not a silent empty list
+			// (PRD FR-KIND-4). 422 rather than 400 because shared-go has no 400
+			// sentinel and ErrValidation is the established mapping.
+			kind, err := ParseKind(req.URL.Query().Get("kind"))
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+
 			page := server.ParsePage(req)
-			ms, total, err := proc.List(page)
+			ms, total, err := proc.List(kind, page)
 			if err != nil {
 				log.WithError(err).Error("list maintenance categories")
 				server.WriteError(w, err)

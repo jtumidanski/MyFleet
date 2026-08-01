@@ -1,6 +1,15 @@
 import type { JsonApiResource } from '@myfleet/shared-ts';
 
 /**
+ * Lifecycle states of a media object, mirroring
+ * apps/media-service/internal/mediaobject/model.go.
+ *
+ * 'failed' is terminal: it means the bytes could not be processed and never
+ * will be. Documents skip 'processing' entirely and go straight to 'ready'.
+ */
+export type MediaStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
+
+/**
  * Renditions served by GET /api/media/{id}/content?variant=…
  * (apps/media-service/internal/mediaobject/contentvariant.go). Omitting the
  * parameter means 'original'; the list view asks for 'thumbnail' so a card
@@ -21,8 +30,7 @@ export interface MediaObjectAttributes {
   contentType?: string;
   size?: number;
   originalFilename?: string;
-  /** 'uploaded' | 'processing' | 'ready' | 'error' */
-  status: string;
+  status: MediaStatus;
 }
 
 export type MediaObject = JsonApiResource<MediaObjectAttributes>;

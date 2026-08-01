@@ -7,3 +7,7 @@ data:
   LOG_LEVEL: "info"
   JWKS_URL: "http://auth-service:8080/.well-known/jwks.json"
   KAFKA_BROKERS: "redpanda:9092"
+  # media-service's network-restricted internal API, used to prove a
+  # maintenance record's documentMediaIds belong to the caller's fleet
+  # (PRD FR-DOC-6). Cluster-internal ClusterVIP; never traverses the edge.
+  MEDIA_INTERNAL_URL: "http://media-service:8080"

@@ -59,6 +59,7 @@ func (a *dbAdministrator) Update(m Model) (Model, error) {
 			"cost":         e.Cost,
 			"vendor":       e.Vendor,
 			"notes":        e.Notes,
+			"description":  e.Description,
 		}).Error; err != nil {
 		return Model{}, err
 	}

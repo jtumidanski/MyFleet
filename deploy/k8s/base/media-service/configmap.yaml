@@ -12,3 +12,8 @@ data:
   MEDIA_BUCKET: "myfleet-media"
   MEDIA_WORKERS: "2"
   MEDIA_MAX_UPLOAD_BYTES: "26214400"
+  # Server-side upload allowlist (PRD FR-MEDIA-2). This is a security control,
+  # not a UX affordance: the client's `accept` attribute is a convenience only.
+  # Adding a document type here is safe; renderable image types are hard-coded
+  # in mediaobject/contenttype.go because they need a decoder.
+  MEDIA_ALLOWED_CONTENT_TYPES: "image/jpeg,image/png,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"

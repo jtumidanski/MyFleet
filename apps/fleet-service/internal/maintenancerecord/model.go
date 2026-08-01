@@ -1,12 +1,29 @@
 package maintenancerecord
 
-import "time"
+import (
+	"strings"
+	"time"
+	"unicode/utf8"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+)
+
+// MaxDescriptionRunes bounds the record's short summary (PRD FR-REC-1).
+// Measured in runes, not bytes.
+const MaxDescriptionRunes = 200
+
+// MaxDocuments bounds attachments per record (design D9). It bounds three
+// things at once: the ids= query string on media-service's internal endpoint,
+// the per-record fan-out when an attachment list is expanded, and the size of a
+// single InsertTx document loop.
+const MaxDocuments = 10
 
 // Model is the immutable maintenance record domain model (design §8.2).
 type Model struct {
 	id               string
 	vehicleID        string
 	categoryID       string
+	description      string
 	performedAt      time.Time
 	mileage          int
 	cost             float64
@@ -22,6 +39,7 @@ type Model struct {
 func (m Model) ID() string                 { return m.id }
 func (m Model) VehicleID() string          { return m.vehicleID }
 func (m Model) CategoryID() string         { return m.categoryID }
+func (m Model) Description() string        { return m.description }
 func (m Model) PerformedAt() time.Time     { return m.performedAt }
 func (m Model) Mileage() int               { return m.mileage }
 func (m Model) Cost() float64              { return m.cost }
@@ -50,3 +68,28 @@ func (m Model) WithPerformedAt(t time.Time) Model { m.performedAt = t; return m 
 
 // WithDocumentMediaIDs returns a copy with the attached media references set.
 func (m Model) WithDocumentMediaIDs(ids []string) Model { m.documentMediaIDs = ids; return m }
+
+// WithDescription returns a copy with the description changed. The value is
+// trimmed here so measurement and storage always agree.
+func (m Model) WithDescription(d string) Model {
+	m.description = strings.TrimSpace(d)
+	return m
+}
+
+// Validate enforces the model's invariants. It is called by Builder.Build and
+// by Processor.Update after the mutation function is applied, so every write
+// path is covered by construction — putting the check in the handler would
+// duplicate it, and putting it only in the builder would leave PATCH unguarded
+// (design D4).
+func Validate(m Model) error {
+	if m.vehicleID == "" || m.categoryID == "" || m.performedAt.IsZero() {
+		return server.ErrValidation
+	}
+	if utf8.RuneCountInString(m.description) > MaxDescriptionRunes {
+		return server.ErrValidation
+	}
+	if len(m.documentMediaIDs) > MaxDocuments {
+		return server.ErrValidation
+	}
+	return nil
+}

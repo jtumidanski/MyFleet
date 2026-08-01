@@ -25,6 +25,8 @@ func codeFor(status int) string {
 		return "gone"
 	case 413:
 		return "payload_too_large"
+	case 415:
+		return "unsupported_media_type"
 	case 422:
 		return "validation_error"
 	default:

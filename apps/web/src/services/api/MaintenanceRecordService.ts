@@ -5,6 +5,7 @@ import type {
   CreateMaintenanceRecordAttributes,
   UpdateMaintenanceRecordAttributes,
 } from '../../types/models/maintenanceRecord';
+import type { MaintenanceCategoryKind } from '../../types/models/maintenanceCategory';
 import { BaseService } from './BaseService';
 
 /**
@@ -25,9 +26,10 @@ class MaintenanceRecordService extends BaseService<
   protected readonly resourceType = 'maintenanceRecords';
   protected readonly basePath = '/api/fleet/maintenance-records';
 
-  /** GET /api/fleet/vehicles/{vehicleId}/maintenance-records */
-  listByVehicle(vehicleId: string) {
-    return this.listAt(`/api/fleet/vehicles/${vehicleId}/maintenance-records`);
+  /** GET /api/fleet/vehicles/{vehicleId}/maintenance-records[?kind=…] */
+  listByVehicle(vehicleId: string, kind?: MaintenanceCategoryKind) {
+    const path = `/api/fleet/vehicles/${vehicleId}/maintenance-records`;
+    return this.listAt(kind ? `${path}?kind=${kind}` : path);
   }
 
   /** POST /api/fleet/vehicles/{vehicleId}/maintenance-records */

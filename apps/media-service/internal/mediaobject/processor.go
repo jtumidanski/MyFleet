@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,10 +73,20 @@ type VariantLookup interface {
 // of the Model is what lets the handler set headers from the bytes it is about
 // to write.
 type ContentInfo struct {
+	// ContentType is always re-resolved through the allowlist, never the raw
+	// stored value, so an unrecognised type degrades to octet-stream rather
+	// than being echoed back to the browser (design D15, PRD FR-DL-4).
 	ContentType string
 	// Size is 0 when unknown; the handler then omits Content-Length. The
 	// original's size must never be sent for a variant response.
 	Size int64
+	// Disposition is the complete Content-Disposition header value. It is
+	// built here rather than in the handler because it needs the Model — the
+	// original filename and the ID fallback — which the handler no longer
+	// sees. Building it alongside ContentType is also what stops the two
+	// drifting: the class that picks inline-vs-attachment is the same class
+	// the type was resolved to.
+	Disposition string
 }
 
 // AuthorizeAccess enforces fleet scoping. media-service trusts the token's
@@ -105,6 +117,28 @@ func MarkReady(m Model) (Model, error) {
 	return m.WithStatus(StatusReady), nil
 }
 
+// MarkReadyDirect transitions uploaded → ready for objects that need no
+// processing (documents). Any other source state is a conflict (409). MarkReady
+// is deliberately left untouched so the worker's behaviour and tests are
+// unchanged (design D12).
+func MarkReadyDirect(m Model) (Model, error) {
+	if m.Status() != StatusUploaded {
+		return Model{}, server.ErrConflict
+	}
+	return m.WithStatus(StatusReady), nil
+}
+
+// MarkFailed is the terminal failure transition. It accepts uploaded or
+// processing; anything else is a conflict. It is what guarantees no object
+// stays in processing forever and no Kafka partition is blocked by one bad
+// file (design D13, PRD FR-MEDIA-5).
+func MarkFailed(m Model) (Model, error) {
+	if m.Status() != StatusUploaded && m.Status() != StatusProcessing {
+		return Model{}, server.ErrConflict
+	}
+	return m.WithStatus(StatusFailed), nil
+}
+
 // Processor contains media-object business logic, injected with Provider,
 // Administrator, and an ObjectStore (MinIO). Event publication is handled by the
 // transactional-outbox relay (design A8); the processor never calls Publish
@@ -115,16 +149,34 @@ type Processor struct {
 	a        Administrator
 	storage  ObjectStore
 	variants VariantLookup
+	allow    Allowlist
 }
 
-func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore, variants VariantLookup) *Processor {
-	return &Processor{log: log, p: p, a: a, storage: st, variants: variants}
+func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore, variants VariantLookup, allow Allowlist) *Processor {
+	return &Processor{log: log, p: p, a: a, storage: st, variants: variants, allow: allow}
 }
 
 // InitUpload creates a media-object row in the uploaded state. The client then
 // PUTs the bytes to /media/{id}/content; this service proxies them to object
 // storage so MinIO is never reachable from the browser.
+//
+// The client-supplied content type is validated against the server-side
+// allowlist and stored NORMALISED (parameters discarded, lowercased), so no
+// arbitrary client string is ever persisted and GET /media/{id}/content cannot
+// echo one back (PRD FR-MEDIA-1, design D10).
 func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (Model, error) {
+	normalized, ok := pr.allow.Normalize(contentType)
+	if !ok {
+		// Log the offending type, never the bytes and never the filename.
+		pr.log.WithFields(logrus.Fields{
+			"content_type": contentType,
+			"fleet_id":     fleetID,
+			"user_id":      userID,
+		}).Warn("upload rejected: content type is not on the allowlist")
+		return Model{}, fmt.Errorf("%w: accepted types are %s",
+			server.ErrUnsupportedMediaType, strings.Join(pr.allow.Accepted(), ", "))
+	}
+
 	id := uuid.NewString()
 	key := storage.ObjectKey(fleetID, id, filename)
 	m, err := NewBuilder().
@@ -133,18 +185,14 @@ func (pr *Processor) InitUpload(fleetID, userID, contentType, filename string) (
 		SetUploadedByUserID(userID).
 		SetBucket(pr.storage.Bucket()).
 		SetObjectKey(key).
-		SetContentType(contentType).
+		SetContentType(normalized).
 		SetOriginalFilename(filename).
 		SetStatus(StatusUploaded).
 		Build()
 	if err != nil {
 		return Model{}, err
 	}
-	created, err := pr.a.Insert(m)
-	if err != nil {
-		return Model{}, err
-	}
-	return created, nil
+	return pr.a.Insert(m)
 }
 
 // countingReader wraps an io.Reader and tallies the bytes actually read, so
@@ -201,6 +249,19 @@ func (pr *Processor) Confirm(ctx context.Context, id, identityFleetID string) (M
 	if err := AuthorizeAccess(m, identityFleetID); err != nil {
 		return Model{}, err
 	}
+	// Classification decides everything downstream (design §2). ClassUnknown is
+	// deliberately folded in with documents: a pre-allowlist row whose content
+	// type nobody recognises must never be handed to image.Decode. Legacy
+	// JPEG/PNG rows still classify as ClassImage — their stored type is on the
+	// allowlist — so nothing regresses.
+	if pr.allow.Classify(m.ContentType()) != ClassImage {
+		ready, err := MarkReadyDirect(m)
+		if err != nil {
+			return Model{}, err
+		}
+		return pr.a.Update(ready)
+	}
+
 	processing, err := MarkProcessing(m)
 	if err != nil {
 		return Model{}, err
@@ -302,9 +363,18 @@ func (pr *Processor) Content(ctx context.Context, id, identityFleetID string, wa
 				// slightly wrong one.
 				ct = m.ContentType()
 			}
+			// A variant is re-encoded by the worker rather than supplied by a
+			// client, but it is still resolved through the allowlist so every
+			// response — original or variant — is described by the same
+			// trusted vocabulary, and a type nobody recognises degrades to
+			// octet-stream + attachment instead of being served as-is.
+			resolved, class := pr.allow.Resolve(ct)
 			// Size stays 0: media_variants records width/height/content_type
 			// but no byte count, so Content-Length is omitted (FR-7.8).
-			return ContentInfo{ContentType: ct}, rc, nil
+			return ContentInfo{
+				ContentType: resolved,
+				Disposition: ContentDisposition(class, m.OriginalFilename(), m.ID()),
+			}, rc, nil
 		case errors.Is(err, storage.ErrObjectNotFound):
 			// DB/store drift, unlike the miss above — someone should see it,
 			// so this stays a Warn even though the response is the same 404.
@@ -336,9 +406,15 @@ func (pr *Processor) openOriginal(ctx context.Context, m Model) (ContentInfo, io
 		}
 		return ContentInfo{}, nil, err
 	}
+	// The Content-Type is re-resolved through the allowlist on every read
+	// rather than trusting the stored value, so shrinking the allowlist
+	// retroactively downgrades already-stored objects and rows created before
+	// the allowlist existed are covered too (design D15, PRD FR-DL-4).
+	ct, class := pr.allow.Resolve(m.ContentType())
 	return ContentInfo{
-		ContentType: m.ContentType(),
+		ContentType: ct,
 		Size:        m.Size(),
+		Disposition: ContentDisposition(class, m.OriginalFilename(), m.ID()),
 	}, rc, nil
 }
 

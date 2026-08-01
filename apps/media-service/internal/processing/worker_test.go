@@ -1,6 +1,7 @@
 package processing
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/mediaobject"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processedevents"
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/storage"
 	"github.com/jtumidanski/myfleet/packages/shared-go/events"
 )
 
@@ -34,6 +36,10 @@ type fakeProvider struct{ m mediaobject.Model }
 
 func (f *fakeProvider) GetByID(_ string) (mediaobject.Model, error)                 { return f.m, nil }
 func (f *fakeProvider) GetByIDIncludingDeleted(_ string) (mediaobject.Model, error) { return f.m, nil }
+
+func (f *fakeProvider) ListActiveByFleetAndIDs(_ string, _ []string) ([]mediaobject.Model, error) {
+	return nil, nil
+}
 
 // fakeObjectAdmin implements mediaobject.Administrator; records Update calls.
 type fakeObjectAdmin struct{ updated []mediaobject.Model }
@@ -255,5 +261,86 @@ func TestResizeDims_squareExactEdge(t *testing.T) {
 	w, h := ResizeDims(320, 320, 320)
 	if w != 320 || h != 320 {
 		t.Fatalf("square at edge: want (320,320), got (%d,%d)", w, h)
+	}
+}
+
+// bytesStore returns fixed bytes from GetObject so the decode path can be
+// exercised with content that is not a valid image.
+type bytesStore struct{ data []byte }
+
+func (b *bytesStore) GetObject(_ context.Context, _ string) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(b.data)), nil
+}
+
+func (b *bytesStore) PutObject(_ context.Context, _ string, _ io.Reader, _ int64, _ string) error {
+	return nil
+}
+
+// A corrupt or mislabelled file will never become decodable, so retrying it
+// forever blocks the partition for every other object behind it. It must reach
+// a terminal state AND have its event recorded (PRD FR-MEDIA-5, design D13).
+func TestHandle_undecodableBytesMarkFailedAndProcessed(t *testing.T) {
+	db := newWorkerTestDB(t)
+	dedupe := processedevents.New(logrus.New(), db)
+
+	obj := buildProcessingObj(t)
+	objStore := &bytesStore{data: []byte("this is definitely not a jpeg")}
+	objAdmin := &fakeObjectAdmin{}
+
+	worker := NewWorker(logrus.New(), objStore, &fakeProvider{m: obj}, objAdmin, &fakeVariantAdmin{}, dedupe)
+
+	env := events.Envelope{
+		EventID: "evt-undecodable",
+		Type:    mediaobject.EventTypeMediaUploaded,
+		Data:    map[string]any{"media_id": "media-1"},
+	}
+
+	if err := worker.handle(context.Background(), env); err != nil {
+		t.Fatalf("handle returned %v; a permanent failure must be committed, not retried", err)
+	}
+
+	if len(objAdmin.updated) != 1 || objAdmin.updated[0].Status() != mediaobject.StatusFailed {
+		t.Fatalf("object was not moved to failed: %+v", objAdmin.updated)
+	}
+
+	recorded, err := dedupe.Exists("evt-undecodable")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !recorded {
+		t.Fatal("event was not marked processed; it would redeliver forever and block the partition")
+	}
+}
+
+// An original whose bytes were never stored is permanent too: the PUT that
+// would have created them already failed and will not retry itself.
+func TestHandle_missingOriginalMarksFailedAndProcessed(t *testing.T) {
+	db := newWorkerTestDB(t)
+	dedupe := processedevents.New(logrus.New(), db)
+
+	obj := buildProcessingObj(t)
+	objStore := &fakeObjectStore{errGet: storage.ErrObjectNotFound}
+	objAdmin := &fakeObjectAdmin{}
+
+	worker := NewWorker(logrus.New(), objStore, &fakeProvider{m: obj}, objAdmin, &fakeVariantAdmin{}, dedupe)
+
+	env := events.Envelope{
+		EventID: "evt-missing-original",
+		Type:    mediaobject.EventTypeMediaUploaded,
+		Data:    map[string]any{"media_id": "media-1"},
+	}
+
+	if err := worker.handle(context.Background(), env); err != nil {
+		t.Fatalf("handle returned %v; a missing original is permanent", err)
+	}
+	if len(objAdmin.updated) != 1 || objAdmin.updated[0].Status() != mediaobject.StatusFailed {
+		t.Fatalf("object was not moved to failed: %+v", objAdmin.updated)
+	}
+	recorded, err := dedupe.Exists("evt-missing-original")
+	if err != nil {
+		t.Fatalf("Exists: %v", err)
+	}
+	if !recorded {
+		t.Fatal("event was not marked processed")
 	}
 }

@@ -40,3 +40,31 @@ func TransformSlice(ms []Model) []server.Resource {
 	}
 	return out
 }
+
+// InternalMedia is the flat (deliberately NOT JSON:API) payload the
+// network-restricted GET /internal/media returns, matching the shape
+// fleet-service's other internal clients already consume.
+type InternalMedia struct {
+	ID          string `json:"id"`
+	Status      string `json:"status"`
+	ContentType string `json:"content_type"`
+}
+
+// InternalMediaResponse wraps the list so the payload can gain fields later
+// without becoming a breaking change for the client.
+type InternalMediaResponse struct {
+	Media []InternalMedia `json:"media"`
+}
+
+// TransformInternalMedia converts Models to the internal payload.
+func TransformInternalMedia(ms []Model) []InternalMedia {
+	out := make([]InternalMedia, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, InternalMedia{
+			ID:          m.ID(),
+			Status:      string(m.Status()),
+			ContentType: m.ContentType(),
+		})
+	}
+	return out
+}

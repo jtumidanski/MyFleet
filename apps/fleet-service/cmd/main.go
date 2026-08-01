@@ -30,6 +30,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancecategory"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancerecord"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenanceschedule"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mediaclient"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
@@ -161,6 +162,16 @@ func main() {
 		return err
 	})
 
+	// Category accessor for the record list's ?kind= filter. The processor is
+	// stateless, so constructing a second one here rather than reshaping
+	// maintenancecategory.InitializeRoutes costs nothing.
+	categoryProc := maintenancecategory.NewProcessor(log, maintenancecategory.NewProvider(db))
+
+	// Attachment ownership validation (PRD FR-DOC-6). Cluster-internal; the
+	// endpoint it calls is kept off the public internet by the priority-200
+	// internal-deny rule in the main overlay's ingressroute.
+	mediaClient := mediaclient.NewClient(config.Get("MEDIA_INTERNAL_URL", "http://media-service:8080"))
+
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
 		// Internal routes: no JWT, network-restricted (consumed by other services).
@@ -178,7 +189,7 @@ func main() {
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
 				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, emitFuelLogged)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
-				maintenancerecord.InitializeRoutes(log, db, vehicleProc)(pr)
+				maintenancerecord.InitializeRoutes(log, db, vehicleProc, categoryProc, mediaClient)(pr)
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)
 				activity.InitializeRoutes(log, db, vehicleProc)(pr)
 				dashboard.InitializeRoutes(log, db, scheduleProc, activityProc, vehicleProc)(pr)
