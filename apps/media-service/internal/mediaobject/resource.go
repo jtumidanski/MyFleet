@@ -42,8 +42,8 @@ func classifyUploadError(err error) error {
 // carry their own /media segment (the gateway strips only /api). Event
 // emission uses the transactional outbox (design A8); no Kafka producer is
 // needed here.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUploadBytes int64, allow Allowlist) func(chi.Router) {
-	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db), st, allow)
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, variants VariantLookup, maxUploadBytes int64, allow Allowlist) func(chi.Router) {
+	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db), st, variants, allow)
 	return func(r chi.Router) {
 		// POST /media — init upload: create the row in the uploaded state.
 		r.Post("/media", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
@@ -146,11 +146,32 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUp
 		// GET /media/{id}/content — stream the bytes after authz. Proxied, not
 		// presigned: MinIO is a shared cluster service and is never exposed
 		// outside the cluster.
+		//
+		// The optional ?variant= parameter selects a stored rendition
+		// (thumbnail/display); omitting it serves the original, byte-for-byte
+		// as before. An unrecognised value is a 400, never a silent fallback —
+		// a typo would otherwise ship multi-megabyte responses undetected — and
+		// a derived variant that cannot be served is a 404 for the same reason
+		// (see Processor.Content).
 		r.Get("/media/{id}/content", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
-			m, rc, err := proc.Content(req.Context(), id, identity.ActiveFleetID)
+			v, err := ParseContentVariant(req.URL.Query().Get("variant"))
 			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			info, rc, err := proc.Content(req.Context(), id, identity.ActiveFleetID, v)
+			if err != nil {
+				// Expected outcomes (404 for a missing object or an unservable
+				// variant, 403, 410) are the client's business, not an operator's;
+				// a 500 here means the variant query or the object store failed
+				// and must leave a server-side trace, as its sibling handlers do.
+				if server.StatusFor(err) >= http.StatusInternalServerError {
+					log.WithError(err).WithField("media_id", id).
+						WithField("variant", string(v)).
+						Error("media content read failed")
+				}
 				server.WriteError(w, err)
 				return
 			}
@@ -162,22 +183,26 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, maxUp
 			// never stored. A copy that fails *after* this point is a genuine
 			// mid-stream failure; the status is on the wire and cannot be
 			// changed, so it is logged and the client sees a short read.
-			// The Content-Type is re-resolved through the allowlist on every
-			// read rather than trusting the stored value, so shrinking the
-			// allowlist retroactively downgrades already-stored objects and
-			// rows created before the allowlist existed are covered too
-			// (design D15, PRD FR-DL-4).
-			ct, class := allow.Resolve(m.ContentType())
-			w.Header().Set("Content-Type", ct)
+			//
+			// Headers come from ContentInfo, i.e. from the bytes about to be
+			// written — a variant is re-encoded and has its own content type,
+			// and its length is unknown, so Content-Length is omitted for it
+			// rather than describing the original. The type and the
+			// disposition are both resolved through the allowlist inside
+			// Processor.Content, where the Model is still in scope.
+			if info.ContentType != "" {
+				w.Header().Set("Content-Type", info.ContentType)
+			}
 			// nosniff on EVERY response, both classes (PRD FR-DL-1). Together
 			// with attachment on documents this is what prevents an uploaded
 			// file from executing in the application's origin; neither alone
 			// is sufficient.
 			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("Content-Disposition",
-				ContentDisposition(class, m.OriginalFilename(), m.ID()))
-			if size := m.Size(); size > 0 {
-				w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+			if info.Disposition != "" {
+				w.Header().Set("Content-Disposition", info.Disposition)
+			}
+			if info.Size > 0 {
+				w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 			}
 			// Per-fleet authorized bytes — never store in a shared cache.
 			w.Header().Set("Cache-Control", "private, max-age=300")

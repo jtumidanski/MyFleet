@@ -10,6 +10,14 @@ import type { JsonApiResource } from '@myfleet/shared-ts';
 export type MediaStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
 
 /**
+ * Renditions served by GET /api/media/{id}/content?variant=…
+ * (apps/media-service/internal/mediaobject/contentvariant.go). Omitting the
+ * parameter means 'original'; the list view asks for 'thumbnail' so a card
+ * costs kilobytes rather than the full-size upload.
+ */
+export type MediaVariant = 'original' | 'thumbnail' | 'display';
+
+/**
  * Mirrors apps/media-service/internal/mediaobject/rest.go Attributes.
  * Bytes are fetched from /api/media/{id}/content, not from a URL in the
  * payload — see MediaService.

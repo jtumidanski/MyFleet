@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -134,7 +135,7 @@ func main() {
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
-				mediaobject.InitializeRoutes(log, db, store, maxUploadBytes, allow)(pr)
+				mediaobject.InitializeRoutes(log, db, store, variantLookup{p: mediavariant.NewProvider(db)}, maxUploadBytes, allow)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {
@@ -164,6 +165,27 @@ func purgeExpired(ctx context.Context, log logrus.FieldLogger, db *gorm.DB, stor
 		}
 	}
 	return nil
+}
+
+// variantLookup adapts mediavariant.Provider to mediaobject.VariantLookup.
+//
+// It lives here, in the composition root — the one place that already imports
+// both packages — so that mediaobject never imports mediavariant and the two
+// sibling domain packages stay independent (design §3.1).
+// It is also where mediavariant.ErrNotFound is translated into the port's
+// found=false, so mediaobject never has to import the sibling package's
+// sentinel to tell "not generated yet" from "the database is broken".
+type variantLookup struct{ p mediavariant.Provider }
+
+func (v variantLookup) Lookup(ctx context.Context, mediaObjectID, variant string) (mediaobject.VariantRef, bool, error) {
+	m, err := v.p.GetByMediaObjectAndVariant(ctx, mediaObjectID, mediavariant.Variant(variant))
+	if errors.Is(err, mediavariant.ErrNotFound) {
+		return mediaobject.VariantRef{}, false, nil
+	}
+	if err != nil {
+		return mediaobject.VariantRef{}, false, err
+	}
+	return mediaobject.VariantRef{ObjectKey: m.ObjectKey(), ContentType: m.ContentType()}, true, nil
 }
 
 // mustJWKSKeyfunc builds the JWKS keyfunc, retrying up to maxAttempts times with

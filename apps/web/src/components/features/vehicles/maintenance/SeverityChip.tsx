@@ -7,20 +7,21 @@ interface SeverityChipProps {
   className?: string;
 }
 
-// Intentional status colors: severity values have no shadcn semantic equivalent.
-// red=urgent, amber=recommended, blue=informational are consistent severity indicators.
+// Status colours come from the semantic families in apps/web/src/index.css:
+// urgent -> danger, recommended -> warning, informational -> info. Each chip
+// also carries a text label, so colour is never the only signal (FR-A11Y-2).
 const severityConfig: Record<Severity, { label: string; className: string }> = {
   urgent: {
     label: 'Urgent',
-    className: 'bg-red-100 text-red-800 border-red-200',
+    className: 'bg-danger-subtle text-danger-subtle-foreground border-danger-border',
   },
   recommended: {
     label: 'Recommended',
-    className: 'bg-amber-100 text-amber-800 border-amber-200',
+    className: 'bg-warning-subtle text-warning-subtle-foreground border-warning-border',
   },
   informational: {
     label: 'Info',
-    className: 'bg-blue-100 text-blue-800 border-blue-200',
+    className: 'bg-info-subtle text-info-subtle-foreground border-info-border',
   },
 };
 

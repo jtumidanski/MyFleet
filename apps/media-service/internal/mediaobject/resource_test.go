@@ -58,20 +58,56 @@ func TestClassifyUploadError_passesOtherErrorsThrough(t *testing.T) {
 }
 
 // testRouter mounts the real routes over an in-memory DB and the supplied
-// store, and injects the identity the JWT middleware would normally put on the
-// context so the handlers can be exercised end to end.
-func testRouter(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Handler, *Processor, *gorm.DB) {
+// store, with no stored variants — the shape every pre-variant test needs.
+func testRouter(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Handler, *Processor) {
+	t.Helper()
+	return testRouterWithVariants(t, store, &fakeVariants{}, maxUploadBytes)
+}
+
+// testRouterWithVariants mounts the real routes with a variant lookup under the
+// test's control, and injects the identity the JWT middleware would normally put
+// on the context so the handlers can be exercised end to end.
+func testRouterWithVariants(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor) {
+	t.Helper()
+	router, proc, _ := testRouterCapturingLogs(t, store, variants, maxUploadBytes)
+	return router, proc
+}
+
+// testRouterCapturingLogs is testRouterWithVariants plus the hook, for the tests
+// that assert an operator-facing log was actually emitted rather than only that
+// the right status reached the client.
+func testRouterCapturingLogs(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor, *logrusTestHook) {
+	t.Helper()
+	router, proc, hook, _ := buildTestRouter(t, store, variants, maxUploadBytes)
+	return router, proc, hook
+}
+
+// testRouterWithDB is testRouter plus the *gorm.DB, for the tests that inspect
+// the outbox or rewrite a stored content type behind the processor's back —
+// the only way to reproduce a pre-allowlist row now that InitUpload normalises.
+func testRouterWithDB(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Handler, *Processor, *gorm.DB) {
+	t.Helper()
+	router, proc, _, db := buildTestRouter(t, store, &fakeVariants{}, maxUploadBytes)
+	return router, proc, db
+}
+
+// buildTestRouter is the single construction point every testRouter* helper
+// delegates to, so the allowlist and the variant lookup are wired identically
+// no matter which shape a test asks for.
+func buildTestRouter(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor, *logrusTestHook, *gorm.DB) {
 	t.Helper()
 	db := newConfirmTestDB(t)
 	log := logrus.New()
 	log.SetOutput(io.Discard)
+	hook := &logrusTestHook{}
+	log.AddHook(hook)
 	allow, err := ParseAllowlist(DefaultAllowedContentTypes)
 	if err != nil {
 		t.Fatalf("ParseAllowlist: %v", err)
 	}
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db, store, maxUploadBytes, allow))
-	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, allow), db
+	r.Group(InitializeRoutes(log, db, store, variants, maxUploadBytes, allow))
+	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants, allow), hook, db
 }
 
 func memberRequest(method, target string, body io.Reader) *http.Request {
@@ -93,7 +129,7 @@ func memberRequest(method, target string, body io.Reader) *http.Request {
 func TestPutContent_overCapContentLengthIs413BeforeStorage(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media"}
 	const cap = 1024
-	router, proc, _ := testRouter(t, store, cap)
+	router, proc := testRouter(t, store, cap)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -120,7 +156,7 @@ func TestPutContent_overCapContentLengthIs413BeforeStorage(t *testing.T) {
 // must still reach the store with the unknown-length sentinel.
 func TestPutContent_unknownLengthStillUploads(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media"}
-	router, proc, _ := testRouter(t, store, 1024)
+	router, proc := testRouter(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -149,7 +185,7 @@ func TestPutContent_unknownLengthStillUploads(t *testing.T) {
 // path.
 func TestPutContent_withinCapContentLengthIsPassedThrough(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media"}
-	router, proc, _ := testRouter(t, store, 1024)
+	router, proc := testRouter(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -175,7 +211,7 @@ func TestPutContent_withinCapContentLengthIsPassedThrough(t *testing.T) {
 // an empty body. The status has to be decided before any header is committed.
 func TestGetContent_missingObjectIs404NotEmpty200(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getErr: storage.ErrObjectNotFound}
-	router, proc, _ := testRouter(t, store, 1024)
+	router, proc := testRouter(t, store, 1024)
 
 	// Exactly the state POST /media leaves behind: row created, nothing PUT.
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
@@ -201,7 +237,7 @@ func TestGetContent_missingObjectIs404NotEmpty200(t *testing.T) {
 func TestGetContent_presentObjectStreams200(t *testing.T) {
 	payload := []byte("jpeg-bytes")
 	store := &fakeStore{bucket: "myfleet-media", getBody: payload}
-	router, proc, _ := testRouter(t, store, 1024)
+	router, proc := testRouter(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -231,7 +267,7 @@ func TestGetContent_presentObjectStreams200(t *testing.T) {
 // never be touched.
 func TestGetContent_crossFleetIs404(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("jpeg-bytes")}
-	router, proc, _ := testRouter(t, store, 1024)
+	router, proc := testRouter(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-b", "u2", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -252,7 +288,7 @@ func TestGetContent_crossFleetIs404(t *testing.T) {
 
 func TestGetContent_pdfIsAttachmentWithNosniff(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("%PDF-1.7")}
-	router, proc, _ := testRouter(t, store, 1024)
+	router, proc, _ := testRouterWithDB(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "invoice.pdf")
 	if err != nil {
@@ -283,7 +319,7 @@ func TestGetContent_pdfIsAttachmentWithNosniff(t *testing.T) {
 // the browser second-guessing the declared type.
 func TestGetContent_jpegIsInlineWithNosniff(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("\xff\xd8\xff")}
-	router, proc, _ := testRouter(t, store, 1024)
+	router, proc, _ := testRouterWithDB(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -309,7 +345,7 @@ func TestGetContent_jpegIsInlineWithNosniff(t *testing.T) {
 // longer create such a row, so the row is written directly.
 func TestGetContent_legacyContentTypeIsOctetStreamAttachment(t *testing.T) {
 	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("<script>alert(1)</script>")}
-	router, proc, db := testRouter(t, store, 1024)
+	router, proc, db := testRouterWithDB(t, store, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/png", "legacy.png")
 	if err != nil {
@@ -347,7 +383,7 @@ func initBody(contentType, filename string) io.Reader {
 }
 
 func TestInitUpload_pdfIsAccepted(t *testing.T) {
-	router, _, _ := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	router, _, _ := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("application/pdf", "invoice.pdf")))
@@ -361,7 +397,7 @@ func TestInitUpload_pdfIsAccepted(t *testing.T) {
 // accepted file types without it would turn media download into a same-origin
 // stored-XSS vector.
 func TestInitUpload_htmlIs415(t *testing.T) {
-	router, _, _ := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	router, _, _ := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("text/html", "evil.html")))
@@ -375,7 +411,7 @@ func TestInitUpload_htmlIs415(t *testing.T) {
 }
 
 func TestInitUpload_emptyContentTypeIs415(t *testing.T) {
-	router, _, _ := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	router, _, _ := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, memberRequest(http.MethodPost, "/media", initBody("", "mystery")))
@@ -388,7 +424,7 @@ func TestInitUpload_emptyContentTypeIs415(t *testing.T) {
 // text/csv; charset=utf-8 is what a browser actually sends. The parameters are
 // discarded and the bare type is what gets stored (design D10).
 func TestInitUpload_normalizesAndStoresBareType(t *testing.T) {
-	_, proc, _ := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	_, proc, _ := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	m, err := proc.InitUpload("fleet-a", "u1", "TEXT/CSV; charset=utf-8", "mileage.csv")
 	if err != nil {
@@ -415,7 +451,7 @@ func countOutboxRows(t *testing.T, db *gorm.DB) int {
 // the first read rather than waiting on a worker that would never run
 // (design D12, api-contracts §6).
 func TestConfirm_documentGoesStraightToReadyWithNoOutboxRow(t *testing.T) {
-	_, proc, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	_, proc, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "invoice.pdf")
 	if err != nil {
@@ -436,7 +472,7 @@ func TestConfirm_documentGoesStraightToReadyWithNoOutboxRow(t *testing.T) {
 
 // The image path is unchanged: uploaded → processing plus exactly one outbox row.
 func TestConfirm_imageStillEnqueuesProcessing(t *testing.T) {
-	_, proc, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	_, proc, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/jpeg", "photo.jpg")
 	if err != nil {
@@ -458,7 +494,7 @@ func TestConfirm_imageStillEnqueuesProcessing(t *testing.T) {
 // A legacy row whose stored type nobody recognises must never be handed to
 // image.Decode, so it confirms like a document (design D12).
 func TestConfirm_unknownContentTypeConfirmsLikeADocument(t *testing.T) {
-	_, proc, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	_, proc, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	created, err := proc.InitUpload("fleet-a", "u1", "image/png", "legacy.png")
 	if err != nil {
@@ -507,7 +543,7 @@ func getInternal(t *testing.T, h http.Handler, target string) *httptest.Response
 // someone else is indistinguishable — that non-disclosure property falls out of
 // the endpoint's shape rather than needing handler-side care (design D6).
 func TestInternalMedia_returnsOnlySameFleetActiveIDs(t *testing.T) {
-	_, proc, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	_, proc, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 	h := internalRouter(t, db)
 
 	mine, err := proc.InitUpload("fleet-a", "u1", "application/pdf", "a.pdf")
@@ -545,7 +581,7 @@ func TestInternalMedia_returnsOnlySameFleetActiveIDs(t *testing.T) {
 }
 
 func TestInternalMedia_missingFleetIDIs422(t *testing.T) {
-	_, _, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	_, _, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	rec := getInternal(t, internalRouter(t, db), "/internal/media?ids=x")
 
@@ -555,7 +591,7 @@ func TestInternalMedia_missingFleetIDIs422(t *testing.T) {
 }
 
 func TestInternalMedia_emptyIdsReturnsEmptyList(t *testing.T) {
-	_, _, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	_, _, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	rec := getInternal(t, internalRouter(t, db), "/internal/media?fleet_id=fleet-a")
 
@@ -573,7 +609,7 @@ func TestInternalMedia_emptyIdsReturnsEmptyList(t *testing.T) {
 
 // The endpoint is unauthenticated, so its input must be bounded.
 func TestInternalMedia_tooManyIdsIs422(t *testing.T) {
-	_, _, db := testRouter(t, &fakeStore{bucket: "myfleet-media"}, 1024)
+	_, _, db := testRouterWithDB(t, &fakeStore{bucket: "myfleet-media"}, 1024)
 
 	ids := make([]string, MaxInternalLookupIDs+1)
 	for i := range ids {
@@ -583,5 +619,256 @@ func TestInternalMedia_tooManyIdsIs422(t *testing.T) {
 
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+}
+
+// seedStoredObject creates a media object and records its bytes, returning the
+// media id — the state a completed upload leaves behind.
+func seedStoredObject(t *testing.T, pr *Processor, fleetID string, payload []byte) string {
+	t.Helper()
+	created, err := pr.InitUpload(fleetID, "u1", "image/png", "photo.png")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+	if _, err := pr.StoreContent(context.Background(), created.ID(), fleetID, bytes.NewReader(payload), int64(len(payload))); err != nil {
+		t.Fatalf("store content: %v", err)
+	}
+	return created.ID()
+}
+
+func thumbnailRouter(t *testing.T) (http.Handler, *Processor, *fakeStore) {
+	t.Helper()
+	store := &fakeStore{
+		bucket:  "myfleet-media",
+		getBody: []byte("original-bytes"),
+		getBodies: map[string][]byte{
+			"fleet-a/thumb.jpg":   []byte("thumb-bytes"),
+			"fleet-a/display.jpg": []byte("display-bytes"),
+		},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+		"display":   {ObjectKey: "fleet-a/display.jpg", ContentType: "image/jpeg"},
+	}}
+	router, proc := testRouterWithVariants(t, store, variants, 1024)
+	return router, proc, store
+}
+
+// TestGetContent_noVariantParamIsUnchanged is the backwards-compatibility gate:
+// a request with no ?variant= must behave exactly as it did before this feature,
+// Content-Length included. Every existing caller depends on it.
+func TestGetContent_noVariantParamIsUnchanged(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "original-bytes" {
+		t.Fatalf("body = %q, want original-bytes", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", ct)
+	}
+	if cl := rec.Header().Get("Content-Length"); cl != "14" {
+		t.Fatalf("Content-Length = %q, want 14 (len(\"original-bytes\"))", cl)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q, want private, max-age=300", cc)
+	}
+}
+
+// TestGetContent_thumbnailServesVariantWithoutContentLength is the request the
+// vehicles list makes. media_variants records no byte count, so sending the
+// ORIGINAL's Content-Length here would truncate or hang the response.
+func TestGetContent_thumbnailServesVariantWithoutContentLength(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "thumb-bytes" {
+		t.Fatalf("body = %q, want thumb-bytes", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Fatalf("Content-Type = %q, want the variant's own image/jpeg", ct)
+	}
+	if cl := rec.Header().Get("Content-Length"); cl != "" {
+		t.Fatalf("Content-Length = %q, want it omitted — that value describes the original, not the variant", cl)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q, want private, max-age=300 on a variant response too", cc)
+	}
+}
+
+func TestGetContent_displayAndOriginalVariantsAreAccepted(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	for _, tc := range []struct{ variant, want string }{
+		{"display", "display-bytes"},
+		{"original", "original-bytes"},
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant="+tc.variant, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("?variant=%s status = %d, want 200; body: %s", tc.variant, rec.Code, rec.Body.String())
+		}
+		if rec.Body.String() != tc.want {
+			t.Fatalf("?variant=%s body = %q, want %q", tc.variant, rec.Body.String(), tc.want)
+		}
+	}
+}
+
+// TestGetContent_variantWithNoRowIs404WithNoOriginalBytes: the normal state for
+// a media object whose processing has not completed yet is now a 404 over the
+// wire, not the original. A 12-card grid must not be able to turn 12 thumbnail
+// requests into 12 full-size downloads.
+func TestGetContent_variantWithNoRowIs404WithNoOriginalBytes(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc := testRouterWithVariants(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+	callsBefore := len(store.getCalls)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "original-bytes") {
+		t.Fatalf("the 404 body carried the original's bytes: %s", rec.Body.String())
+	}
+	if len(store.getCalls) != callsBefore {
+		t.Fatalf("an unservable variant read the object store: %v", store.getCalls[callsBefore:])
+	}
+}
+
+// TestGetContent_originalIsUnaffectedByAnUnservableVariant is the
+// backwards-compatibility half of the same change: making a derived variant 404
+// must leave ?variant=original and the bare request serving the original with
+// its Content-Length, on the very same object that 404s for a thumbnail.
+func TestGetContent_originalIsUnaffectedByAnUnservableVariant(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc := testRouterWithVariants(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	for _, target := range []string{
+		"/media/" + id + "/content",
+		"/media/" + id + "/content?variant=original",
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, memberRequest(http.MethodGet, target, nil))
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200; body: %s", target, rec.Code, rec.Body.String())
+		}
+		if rec.Body.String() != "original-bytes" {
+			t.Fatalf("GET %s body = %q, want original-bytes", target, rec.Body.String())
+		}
+		if cl := rec.Header().Get("Content-Length"); cl != "14" {
+			t.Fatalf("GET %s Content-Length = %q, want 14 — the original's contract is unchanged", target, cl)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+			t.Fatalf("GET %s Content-Type = %q, want image/png", target, ct)
+		}
+	}
+}
+
+// TestGetContent_lookupFailureIs500AndIsLogged: a broken variant query is a
+// server fault, and a 500 that leaves no server-side trace is undebuggable. Its
+// sibling handlers in this file log every failure they turn into an error
+// response; this one must too.
+func TestGetContent_lookupFailureIs500AndIsLogged(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	variants := &fakeVariants{err: errors.New("simulated variant query failure")}
+	router, proc, hook := testRouterCapturingLogs(t, store, variants, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", rec.Code, rec.Body.String())
+	}
+	if !hook.hasError() {
+		t.Fatal("a 500 from the variant lookup was returned with no server-side log")
+	}
+}
+
+// TestGetContent_expectedErrorsAreNotLoggedAsFaults: a thumbnail that has not
+// been generated yet is the normal state of freshly uploaded media. Logging each
+// one at Error would bury the genuine faults the test above pins.
+func TestGetContent_expectedErrorsAreNotLoggedAsFaults(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc, hook := testRouterCapturingLogs(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if hook.hasError() {
+		t.Fatal("an expected 404 was logged at Error level")
+	}
+}
+
+// TestGetContent_bogusVariantIs400WithNoBytes: a typo must be loud, not a
+// silent multi-megabyte download.
+func TestGetContent_bogusVariantIs400WithNoBytes(t *testing.T) {
+	router, proc, store := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+	callsBefore := len(store.getCalls)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=bogus", nil))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"errors"`) || !strings.Contains(rec.Body.String(), `"bad_request"`) {
+		t.Fatalf("body = %s, want a JSON:API error envelope with code bad_request", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "original-bytes") || strings.Contains(rec.Body.String(), "thumb-bytes") {
+		t.Fatalf("a rejected variant returned image bytes: %s", rec.Body.String())
+	}
+	if len(store.getCalls) != callsBefore {
+		t.Fatalf("a rejected variant touched storage: %v", store.getCalls[callsBefore:])
+	}
+}
+
+// TestGetContent_variantCrossFleetIs404WithNoStoreRead: a variant must never be
+// reachable by a caller who could not read the original, and the 404 (not 403)
+// keeps cross-fleet existence unleakable.
+func TestGetContent_variantCrossFleetIs404WithNoStoreRead(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-b/thumb.jpg", ContentType: "image/jpeg"},
+	}}
+	router, proc := testRouterWithVariants(t, store, variants, 1024)
+	id := seedStoredObject(t, proc, "fleet-b", []byte("original-bytes")) // other fleet
+	callsBefore := len(store.getCalls)
+
+	rec := httptest.NewRecorder()
+	// memberRequest carries ActiveFleetID "fleet-a".
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for a cross-fleet variant read", rec.Code)
+	}
+	if len(store.getCalls) != callsBefore {
+		t.Fatalf("cross-fleet variant read touched storage: %v", store.getCalls[callsBefore:])
+	}
+	if len(variants.calls) != 0 {
+		t.Fatalf("cross-fleet variant read ran the variant lookup: %v", variants.calls)
 	}
 }

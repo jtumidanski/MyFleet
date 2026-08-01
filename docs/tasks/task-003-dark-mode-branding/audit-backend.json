@@ -1,0 +1,61 @@
+{
+  "service": "auth-service",
+  "path": "apps/auth-service",
+  "scope": "apps/auth-service/internal/user (diff 352e8c1..41c5d3b, Go only)",
+  "date": "2026-07-31",
+  "build": "pass",
+  "testsPassed": -1,
+  "testsFailed": 0,
+  "testNote": "make ci exit 0 verified by controller; full suite not re-run. One audit probe run via `go test -overlay=` left the working tree clean.",
+  "overallStatus": "needs-work",
+  "domains": [
+    {
+      "name": "user",
+      "type": "domain",
+      "checks": [
+        { "id": "DOM-01", "name": "builder.go exists with validating Build()", "status": "fail", "evidence": "apps/auth-service/internal/user/builder.go:21 — Build() returns b.m with no validation; builder.go:20 SetThemePreference accepts any string" },
+        { "id": "DOM-02", "name": "ToEntity() method", "status": "pass", "evidence": "apps/auth-service/internal/user/entity.go:40-41" },
+        { "id": "DOM-03", "name": "Make(Entity) function", "status": "warn", "evidence": "apps/auth-service/internal/user/entity.go:29 — returns Model, not (Model, error) per file-responsibilities.md:18; repo-wide convention, pre-existing" },
+        { "id": "DOM-04", "name": "Transform function", "status": "pass", "evidence": "apps/auth-service/internal/user/rest.go:14" },
+        { "id": "DOM-05", "name": "TransformSlice function", "status": "pass", "evidence": "apps/auth-service/internal/user/rest.go:18; no inline transform loop in resource.go" },
+        { "id": "DOM-06", "name": "Processor accepts logrus.FieldLogger", "status": "pass", "evidence": "apps/auth-service/internal/user/processor.go:11,16" },
+        { "id": "DOM-07", "name": "No logrus.StandardLogger() in handlers", "status": "pass", "evidence": "grep StandardLogger apps/auth-service/internal/user/*.go -> no matches; injected log threaded from resource.go:34-35" },
+        { "id": "DOM-08", "name": "PATCH uses RegisterInputHandler", "status": "pass", "evidence": "apps/auth-service/internal/user/resource.go:76" },
+        { "id": "DOM-09", "name": "Transform errors handled", "status": "pass", "evidence": "rest.go:14 Transform returns no error; resource.go:64,101 do not discard with _" },
+        { "id": "DOM-10", "name": "Providers use lazy evaluation", "status": "warn", "evidence": "apps/auth-service/internal/user/provider.go:44,58 — database.Query(...)() invoked immediately; eager. Pre-existing, file unchanged" },
+        { "id": "DOM-11", "name": "No os.Getenv() in handlers", "status": "pass", "evidence": "grep os.Getenv apps/auth-service/internal/user/*.go -> no matches" },
+        { "id": "DOM-12", "name": "No cross-domain logic in handlers", "status": "pass", "evidence": "apps/auth-service/internal/user/resource.go:44,81 call only the user processor" },
+        { "id": "DOM-13", "name": "Handlers don't call providers directly", "status": "pass", "evidence": "resource.go:44 proc.GetByID, resource.go:81 proc.UpdateTheme; NewProvider only as wiring at resource.go:35" },
+        { "id": "DOM-14", "name": "No direct entity writes in handlers", "status": "pass", "evidence": "grep db.Create|db.Save|db.Delete|db.Where apps/auth-service/internal/user/resource.go -> no matches" },
+        { "id": "DOM-15", "name": "administrator.go is the write path and is correct", "status": "fail", "evidence": "apps/auth-service/internal/user/administrator.go:24-29 db.Save(m.ToEntity()) issues a full-column UPDATE; entity.go:41 ToEntity() omits CreatedAt, so PATCH /auth/me writes created_at=0001-01-01 (empirically confirmed)" },
+        { "id": "DOM-16", "name": "Domain error -> HTTP status mapping", "status": "warn", "evidence": "resource.go:84-96 maps validation->422 (not the guideline's 400), not-found->404, else->500. Documented at design.md:37-50 and coherent, but prd.md:344-345 still says 400" },
+        { "id": "DOM-17", "name": "JSON:API GetName/GetID/SetID on REST models", "status": "warn", "evidence": "apps/auth-service/internal/user/rest.go:14 uses server.Resource (shared-go/server/jsonapi.go:9-14) instead; repo-wide convention, pre-existing" },
+        { "id": "DOM-18", "name": "Request models flat and defined in rest.go", "status": "fail", "evidence": "apps/auth-service/internal/user/resource.go:76-78 — anonymous inline struct in the handler signature; file-responsibilities.md:118 requires a named request model in rest.go" },
+        { "id": "DOM-19", "name": "Table-driven tests", "status": "pass", "evidence": "theme_test.go:5-25, entity_test.go:9-30, resource_test.go TestPatchMe_rejectsInvalidValues" }
+      ]
+    }
+  ],
+  "security": [
+    { "id": "SEC-01", "name": "JWT validation uses verified parsing", "status": "pass", "evidence": "packages/shared-go/auth/middleware.go:24-25 jwt.ParseWithClaims + WithValidMethods([RS256]) + !tok.Valid gate; no ParseUnverified in repo" },
+    { "id": "SEC-02", "name": "Claims only from validated tokens", "status": "pass", "evidence": "packages/shared-go/auth/middleware.go:29-34 builds Identity after the :25 validity gate" },
+    { "id": "SEC-03", "name": "No open redirect", "status": "pass", "evidence": "n/a — no http.Redirect or Location header in apps/auth-service/internal/user/resource.go" },
+    { "id": "SEC-04", "name": "No hardcoded secrets", "status": "pass", "evidence": "grep -niE 'secret|password|apikey|private_key' apps/auth-service/internal/user/*.go -> no matches" },
+    { "id": "FR-SEC-1", "name": "No horizontal privilege escalation on PATCH /auth/me", "status": "pass", "evidence": "apps/auth-service/cmd/main.go:91-96 mounts the route inside the JWT group; resource.go:80-81 targets id.UserID only; no path/query/body user id. Probe: extra email attribute in body silently ignored, no mass assignment" },
+    { "id": "FR-SEC-3a", "name": "Persistence failure renders errInternal only", "status": "pass", "evidence": "apps/auth-service/internal/user/resource.go:96 WriteError(w, errInternal); sentinel at resource.go:19; raw err only logged at resource.go:92" },
+    { "id": "FR-SEC-3b", "name": "Validation sentinel is a compile-time-constant message", "status": "pass", "evidence": "apps/auth-service/internal/user/resource.go:28-29 — package-level fmt.Errorf with %w on server.ErrValidation only; no caller-controlled verb" },
+    { "id": "FR-DATA-3", "name": "themePreference never enters the JWT", "status": "pass", "evidence": "apps/auth-service/internal/session/processor.go:61-70 claims are sub/email/active_fleet_id/role/iss/aud/iat/exp; repo-wide grep for theme outside internal/user -> no matches" },
+    { "id": "SUB-OVERLOAD", "name": "Update path uses GetByID, not GetBySub", "status": "pass", "evidence": "resource.go:81 -> processor.go:58 pr.p.GetByID -> provider.go:37 WHERE id = ?; guarded by resource_test.go TestPatchMe_unknownUserIsNotFound" }
+  ],
+  "blocking": [
+    "DOM-15: apps/auth-service/internal/user/administrator.go:24-29 — db.Save(m.ToEntity()) issues a full-column UPDATE, and entity.go:41 ToEntity() omits CreatedAt, so PATCH /auth/me overwrites created_at with 0001-01-01. Empirically confirmed via overlay probe.",
+    "DOM-18: apps/auth-service/internal/user/resource.go:76-78 — PATCH request model is an anonymous inline struct rather than a named request type in rest.go (file-responsibilities.md:118)."
+  ],
+  "nonBlocking": [
+    "DOM-01: apps/auth-service/internal/user/builder.go:20-21 — SetThemePreference has zero callers repo-wide (dead code, anti-patterns.md:162) and Build() performs no validation.",
+    "DOM-16: docs/tasks/task-003-dark-mode-branding/prd.md:344-345 still specifies 400; the 422 decision is sound and documented but the PRD was never amended.",
+    "DOM-03: apps/auth-service/internal/user/entity.go:29 — Make returns Model, not (Model, error). Repo-wide convention, pre-existing.",
+    "DOM-10: apps/auth-service/internal/user/provider.go:44,58 — database.Query(...) invoked immediately; eager despite the lazy wrapper. Pre-existing, file unchanged.",
+    "DOM-17: apps/auth-service/internal/user/rest.go:14 — server.Resource instead of GetName/GetID/SetID. Repo-wide convention; guideline describes an api2go stack shared-go does not use.",
+    "Context propagation: apps/auth-service/internal/user/provider.go:37 and administrator.go:18,26 use the bare db rather than db.WithContext(ctx) (testing-guide.md:593); the processor is built once at resource.go:35 and shared across requests. Pre-existing."
+  ]
+}

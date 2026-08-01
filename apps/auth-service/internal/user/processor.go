@@ -42,3 +42,22 @@ func (pr *Processor) ProvisionFromGoogle(gp GoogleProfile) (Model, error) {
 	}
 	return pr.a.Update(existing.WithLogin(gp.Name, gp.Avatar, time.Now()))
 }
+
+// UpdateTheme validates, loads, mutates and persists the caller's theme
+// preference (PRD §5.2).
+//
+// Validation runs before the read on purpose: an out-of-range value then costs
+// no database round trip and cannot leave a partially-applied state. The three
+// error outcomes — ErrInvalidTheme, ErrNotFound, and anything else — are
+// distinguishable at the call site, which is what lets the handler render 422,
+// 404 and a bare 500 apart.
+func (pr *Processor) UpdateTheme(userID string, pref string) (Model, error) {
+	if !IsValidTheme(pref) {
+		return Model{}, ErrInvalidTheme
+	}
+	m, err := pr.p.GetByID(userID)
+	if err != nil {
+		return Model{}, err
+	}
+	return pr.a.Update(m.WithThemePreference(pref))
+}

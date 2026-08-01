@@ -25,7 +25,7 @@ export function OverdueMaintenanceWidget({ fleetId }: OverdueMaintenanceWidgetPr
   return (
     <Card>
       <CardContent className="pt-4">
-        <h3 className="text-sm font-semibold mb-3 text-red-700">Overdue Maintenance</h3>
+        <h3 className="text-sm font-semibold mb-3 text-danger">Overdue Maintenance</h3>
         {!items || items.length === 0 ? (
           <p className="text-sm text-muted-foreground">No overdue maintenance.</p>
         ) : (

@@ -1,10 +1,14 @@
 export type VehicleStatus = 'Healthy' | 'Upcoming Maintenance' | 'Overdue' | 'Inactive';
 
+// Semantic status families from apps/web/src/index.css. This package is already
+// in the web app's Tailwind content globs (apps/web/tailwind.config.ts:9), so
+// the classes are picked up with no config change. Each badge shows its status
+// as text, so colour is never the only signal (FR-A11Y-2).
 const VARIANT: Record<VehicleStatus, string> = {
-  Healthy: 'bg-green-100 text-green-800',
-  'Upcoming Maintenance': 'bg-amber-100 text-amber-800',
-  Overdue: 'bg-red-100 text-red-800',
-  Inactive: 'bg-gray-100 text-gray-700',
+  Healthy: 'bg-success-subtle text-success-subtle-foreground',
+  'Upcoming Maintenance': 'bg-warning-subtle text-warning-subtle-foreground',
+  Overdue: 'bg-danger-subtle text-danger-subtle-foreground',
+  Inactive: 'bg-muted text-muted-foreground',
 };
 
 export function StatusBadge({ status }: { status: VehicleStatus }) {

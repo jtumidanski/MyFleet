@@ -3,6 +3,7 @@ package server
 import "errors"
 
 var (
+	ErrBadRequest            = errors.New("bad request")              // 400
 	ErrUnauthorized          = errors.New("unauthorized")             // 401
 	ErrForbidden             = errors.New("forbidden")                // 403
 	ErrNotFound              = errors.New("not found")                // 404
@@ -15,6 +16,8 @@ var (
 
 func StatusFor(err error) int {
 	switch {
+	case errors.Is(err, ErrBadRequest):
+		return 400
 	case errors.Is(err, ErrUnauthorized):
 		return 401
 	case errors.Is(err, ErrForbidden):

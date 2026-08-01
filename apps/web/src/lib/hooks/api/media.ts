@@ -3,19 +3,29 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { mediaService } from '../../../services/api/MediaService';
 import { vehicleMediaService } from '../../../services/api/VehicleMediaService';
 import { ApiError, type JsonApiResource } from '@myfleet/shared-ts';
-import type { MediaObjectAttributes, InitMediaUploadAttributes } from '../../../types/models/media';
+import type {
+  MediaObjectAttributes,
+  InitMediaUploadAttributes,
+  MediaVariant,
+} from '../../../types/models/media';
 
 // Hierarchical query-key factory.
 // all                       -> ['media']
 // detail('m1')              -> ['media', 'detail', 'm1']
-// content('m1')             -> ['media', 'content', 'm1']
+// content('m1')             -> ['media', 'content', 'm1', 'original']
+// content('m1','thumbnail') -> ['media', 'content', 'm1', 'thumbnail']
 // vehicleMedia(vehicleId)   -> ['media', 'vehicle', vehicleId]
 export const mediaKeys = {
   all: ['media'] as const,
   details: () => [...mediaKeys.all, 'detail'] as const,
   detail: (id: string) => [...mediaKeys.details(), id] as const,
   contents: () => [...mediaKeys.all, 'content'] as const,
-  content: (id: string) => [...mediaKeys.contents(), id] as const,
+  // The variant is part of the key because a thumbnail and an original for the
+  // same media id hold different bytes; without it one would be served in place
+  // of the other. The `contents()` prefix is unchanged, so prefix-based
+  // invalidation still matches every variant of an id.
+  content: (id: string, variant: MediaVariant = 'original') =>
+    [...mediaKeys.contents(), id, variant] as const,
   vehicleMediaAll: () => [...mediaKeys.all, 'vehicle'] as const,
   vehicleMedia: (vehicleId: string) => [...mediaKeys.vehicleMediaAll(), vehicleId] as const,
 };
@@ -137,10 +147,13 @@ export function useMediaObject(id: string | null | undefined) {
  * defect this hook exists to avoid — at the cost of one extra skeleton
  * frame whenever the blob changes (id switch or refetch), which is accepted.
  */
-export function useMediaContentUrl(id: string | null | undefined) {
+export function useMediaContentUrl(
+  id: string | null | undefined,
+  variant: MediaVariant = 'original',
+) {
   const { data, isLoading, isError, error } = useQuery({
-    queryKey: mediaKeys.content(id ?? ''),
-    queryFn: () => mediaService.getContentBlob(id as string),
+    queryKey: mediaKeys.content(id ?? '', variant),
+    queryFn: () => mediaService.getContentBlob(id as string, variant),
     enabled: !!id,
     staleTime: 5 * 60 * 1000,
     gcTime: 6 * 60 * 1000,
