@@ -636,6 +636,64 @@ func seedStoredObject(t *testing.T, pr *Processor, fleetID string, payload []byt
 	return created.ID()
 }
 
+// A variant response carries the same download hardening as the original.
+// The two features landed on separate branches — variants, and the
+// allowlist/nosniff/Content-Disposition work — so nothing on either branch
+// alone covered their intersection. nosniff in particular has to be on EVERY
+// response: a variant is bytes served from the application's origin like any
+// other, and "it was re-encoded by our own worker" is an argument about how it
+// got there, not about what a browser will do with it.
+func TestGetContent_variantIsHardenedLikeTheOriginal(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	// A thumbnail is a renderable image, so it is served inline under the
+	// ORIGINAL's filename — the variant has no filename of its own, and
+	// offering "photo.png" is what the user recognises.
+	if got := rec.Header().Get("Content-Disposition"); got != `inline; filename="photo.png"` {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+}
+
+// A variant whose recorded content type is not on the allowlist must degrade
+// exactly like a legacy original: octet-stream plus attachment. The worker only
+// ever writes jpeg today, so this is a guard against a future variant format
+// being served as a type the browser is willing to execute.
+func TestGetContent_offAllowlistVariantDegradesToAttachment(t *testing.T) {
+	store := &fakeStore{
+		bucket:    "myfleet-media",
+		getBody:   []byte("original-bytes"),
+		getBodies: map[string][]byte{"fleet-a/odd.bin": []byte("<script>alert(1)</script>")},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-a/odd.bin", ContentType: "text/html"},
+	}}
+	router, proc := testRouterWithVariants(t, store, variants, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if got := rec.Header().Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("Content-Type = %q, want application/octet-stream", got)
+	}
+	if got := rec.Header().Get("Content-Disposition"); !strings.HasPrefix(got, "attachment;") {
+		t.Fatalf("Content-Disposition = %q, want attachment", got)
+	}
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+}
+
 func thumbnailRouter(t *testing.T) (http.Handler, *Processor, *fakeStore) {
 	t.Helper()
 	store := &fakeStore{
