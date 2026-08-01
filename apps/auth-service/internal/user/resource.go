@@ -2,6 +2,7 @@ package user
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -17,8 +18,19 @@ import (
 // underlying error would publish database internals to any authenticated caller.
 var errInternal = errors.New("internal server error")
 
-// InitializeRoutes wires GET /auth/me (design §8.1, FR-AUTH-3). Active fleet/role
-// are read from the validated token's Identity; profile from the DB.
+// errThemeValidation names the offending field and the accepted values without
+// echoing the caller's input (PRD §5.2, FR-SEC-2). It wraps server.ErrValidation
+// so StatusFor still yields 422, and the message is a compile-time constant so
+// no attacker-supplied string can reach the response title.
+//
+// Note the pair: user.ErrInvalidTheme is the DOMAIN error the processor
+// returns; errThemeValidation is the TRANSPORT envelope rendered for it.
+var errThemeValidation = fmt.Errorf("%w: themePreference must be one of light, dark, system",
+	server.ErrValidation)
+
+// InitializeRoutes wires GET /auth/me (design §8.1, FR-AUTH-3) and
+// PATCH /auth/me (PRD §5.2). Active fleet/role are read from the validated
+// token's Identity; profile from the DB.
 func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
 	return func(r chi.Router) {
@@ -53,5 +65,40 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 				Meta: map[string]any{"activeFleetId": id.ActiveFleetID, "role": id.Role},
 			})
 		})
+
+		// PATCH /auth/me — updates the caller's own preferences (PRD §5.2).
+		//
+		// The target user is id.UserID, the validated JWT `sub`. There is no
+		// path parameter, no body field and no query parameter carrying a user
+		// identifier, so horizontal privilege escalation is not a check that
+		// could be forgotten but a shape that cannot express the attack
+		// (FR-SEC-1).
+		r.Patch("/auth/me", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
+			ThemePreference string `json:"themePreference"`
+		},
+		) {
+			id := auth.IdentityFromContext(req.Context())
+			m, err := proc.UpdateTheme(id.UserID, attrs.ThemePreference)
+			if err != nil {
+				// Client errors are not incidents — do not log them (FR-OBS-1).
+				if errors.Is(err, ErrInvalidTheme) {
+					server.WriteError(w, errThemeValidation)
+					return
+				}
+				if errors.Is(err, ErrNotFound) {
+					server.WriteError(w, server.ErrNotFound)
+					return
+				}
+				log.WithError(err).WithField("user_id", id.UserID).Error("auth/me theme update failed")
+				// Deliberately not WriteError(w, err): the envelope puts
+				// err.Error() in the title, which would leak database internals
+				// (FR-SEC-3).
+				server.WriteError(w, errInternal)
+				return
+			}
+			// No meta block: active fleet and role are token-derived and
+			// unaffected by this call (PRD §5.2).
+			server.WriteJSON(w, http.StatusOK, server.Document{Data: Transform(m)})
+		}))
 	}
 }

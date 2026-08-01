@@ -4,7 +4,7 @@ export function PlaceholderPage({ title }: { title: string }) {
   return (
     <div>
       <h1 className="text-2xl font-semibold">{title}</h1>
-      <p className="mt-2 text-sm text-gray-500">Coming soon.</p>
+      <p className="mt-2 text-sm text-muted-foreground">Coming soon.</p>
     </div>
   );
 }

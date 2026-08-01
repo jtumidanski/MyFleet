@@ -23,6 +23,29 @@
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
+
+    /* Semantic status families (FR-TOKEN-1). The bare token is for text and
+       numerals on --background/--card; the -subtle / -subtle-foreground /
+       -border trio is for chips and callout blocks. Distinct from
+       --destructive, which styles destructive CONTROLS and is untouched
+       (FR-TOKEN-4). Measured contrast ratios: docs/tasks/
+       task-003-dark-mode-branding/contrast.md */
+    --success: 142.4 71.8% 29.2%;
+    --success-subtle: 140.6 84.2% 92.5%;
+    --success-subtle-foreground: 142.8 64.2% 24.1%;
+    --success-border: 141 78.9% 85.1%;
+    --warning: 26 90.5% 37.1%;
+    --warning-subtle: 48 96.5% 88.8%;
+    --warning-subtle-foreground: 22.7 82.5% 31.4%;
+    --warning-border: 48 96.6% 76.7%;
+    --danger: 0 72.2% 41.1%;
+    --danger-subtle: 0 93.3% 94.1%;
+    --danger-subtle-foreground: 0 70% 35.3%;
+    --danger-border: 0 96.3% 89.4%;
+    --info: 224.3 76.3% 48%;
+    --info-subtle: 214.3 94.6% 92.7%;
+    --info-subtle-foreground: 226 70.7% 40.2%;
+    --info-border: 213.3 96.9% 87.3%;
     --radius: 0.5rem;
   }
 
@@ -46,6 +69,28 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
+
+    /* Not inversions (FR-TOKEN-5). The fills are low-lightness/moderate
+       saturation and the foregrounds high-lightness, mirroring the light
+       -100/-800 relationship rather than negating it. The bare tokens move to
+       the 400 band because a 700-band colour on a 222.2 84% 4.9% background
+       fails badly. */
+    --success: 141.7 76.6% 73.1%;
+    --success-subtle: 142 40% 14%;
+    --success-subtle-foreground: 142 70% 78%;
+    --success-border: 142 35% 24%;
+    --warning: 43.3 96.4% 56.3%;
+    --warning-subtle: 30 45% 14%;
+    --warning-subtle-foreground: 43 90% 76%;
+    --warning-border: 32 40% 25%;
+    --danger: 0 90.6% 70.8%;
+    --danger-subtle: 0 45% 15%;
+    --danger-subtle-foreground: 0 90% 80%;
+    --danger-border: 0 40% 26%;
+    --info: 213.1 93.9% 67.8%;
+    --info-subtle: 217 45% 17%;
+    --info-subtle-foreground: 213 92% 80%;
+    --info-border: 217 40% 28%;
   }
 }
 

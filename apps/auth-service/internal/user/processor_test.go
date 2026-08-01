@@ -1,6 +1,7 @@
 package user
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/sirupsen/logrus"
@@ -55,5 +56,54 @@ func TestProvisionFromGoogle_updatesLoginWhenExisting(t *testing.T) {
 	}
 	if w.updated != 1 || w.created != 0 {
 		t.Fatalf("expected update only; created=%d updated=%d", w.created, w.updated)
+	}
+}
+
+func TestUpdateTheme_persistsEachValidValue(t *testing.T) {
+	for _, pref := range []string{ThemeLight, ThemeDark, ThemeSystem} {
+		t.Run(pref, func(t *testing.T) {
+			existing := Make(Entity{ID: "u1", Email: "a@b.com", ThemePreference: ThemeSystem})
+			w := &fakeAdmin{}
+			p := NewProcessor(logrus.New(), &fakeProvider{byID: map[string]Model{"u1": existing}}, w)
+
+			got, err := p.UpdateTheme("u1", pref)
+			if err != nil {
+				t.Fatalf("UpdateTheme(%q) returned %v", pref, err)
+			}
+			if got.ThemePreference() != pref {
+				t.Fatalf("UpdateTheme(%q) returned preference %q", pref, got.ThemePreference())
+			}
+			if w.updated != 1 {
+				t.Fatalf("expected exactly one persist call, got %d", w.updated)
+			}
+		})
+	}
+}
+
+// An invalid value must be rejected BEFORE the read, so it can never leave a
+// partially-applied state and costs no database round trip (design §7.2).
+func TestUpdateTheme_rejectsInvalidWithoutTouchingStorage(t *testing.T) {
+	for _, pref := range []string{"", "purple", "Dark"} {
+		t.Run(pref, func(t *testing.T) {
+			existing := Make(Entity{ID: "u1", ThemePreference: ThemeLight})
+			w := &fakeAdmin{}
+			p := NewProcessor(logrus.New(), &fakeProvider{byID: map[string]Model{"u1": existing}}, w)
+
+			if _, err := p.UpdateTheme("u1", pref); !errors.Is(err, ErrInvalidTheme) {
+				t.Fatalf("UpdateTheme(%q) = %v, want ErrInvalidTheme", pref, err)
+			}
+			if w.updated != 0 {
+				t.Fatalf("UpdateTheme(%q) persisted %d time(s); an invalid value must not reach storage", pref, w.updated)
+			}
+		})
+	}
+}
+
+func TestUpdateTheme_unknownUserIsNotFound(t *testing.T) {
+	w := &fakeAdmin{}
+	p := NewProcessor(logrus.New(), &fakeProvider{byID: map[string]Model{}}, w)
+
+	if _, err := p.UpdateTheme("nobody", ThemeDark); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateTheme for an unknown user = %v, want ErrNotFound", err)
 	}
 }
