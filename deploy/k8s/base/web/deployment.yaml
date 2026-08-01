@@ -56,6 +56,14 @@ spec:
             # filesystem is read-only, so give it tmpfs.
             - name: nginx-tmp
               mountPath: /tmp
+            # Runtime config. Mounted over the directory the image bakes in
+            # (not with subPath) so a ConfigMap edit reaches running pods.
+            - name: web-config
+              mountPath: /usr/share/nginx/html/config
+              readOnly: true
       volumes:
         - name: nginx-tmp
           emptyDir: {}
+        - name: web-config
+          configMap:
+            name: web-config

@@ -6,6 +6,7 @@ import { ApiError } from '@myfleet/shared-ts';
 import { mediaKeys, useMediaContentUrl } from './media';
 import { performMediaUpload, MEDIA_MAX_UPLOAD_BYTES, MEDIA_TOO_LARGE_CODE } from './media';
 import { mediaService } from '../../../services/api/MediaService';
+import { stubObjectUrl, unstubObjectUrl } from '../../../test/objectUrl';
 
 // useMediaContentUrl goes through mediaService.getContentBlob; mock the
 // module so no network call is needed and each test controls what blob
@@ -20,7 +21,8 @@ describe('mediaKeys', () => {
   it('is hierarchical', () => {
     expect(mediaKeys.all).toEqual(['media']);
     expect(mediaKeys.detail('m1')).toEqual(['media', 'detail', 'm1']);
-    expect(mediaKeys.content('m1')).toEqual(['media', 'content', 'm1']);
+    expect(mediaKeys.content('m1')).toEqual(['media', 'content', 'm1', 'original']);
+    expect(mediaKeys.content('m1', 'thumbnail')).toEqual(['media', 'content', 'm1', 'thumbnail']);
   });
 });
 
@@ -123,16 +125,6 @@ describe('performMediaUpload', () => {
 // including across React StrictMode's dev-only double-invocation.
 // ---------------------------------------------------------------------------
 
-// jsdom does not implement createObjectURL/revokeObjectURL; stub them so the
-// hook has something to call, and so we can assert on call counts/args.
-function stubObjectUrl() {
-  let counter = 0;
-  const createObjectURL = vi.fn(() => `blob:mock-${counter++}`);
-  const revokeObjectURL = vi.fn();
-  vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }));
-  return { createObjectURL, revokeObjectURL };
-}
-
 function makeQueryWrapper(queryClient: QueryClient, strict: boolean) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
     const tree = React.createElement(QueryClientProvider, { client: queryClient }, children);
@@ -152,7 +144,7 @@ describe('useMediaContentUrl', () => {
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    unstubObjectUrl();
   });
 
   it('never reports settled (isLoading: false) with a null url once the blob has arrived — no "No image" flash', async () => {

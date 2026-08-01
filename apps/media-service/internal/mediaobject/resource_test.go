@@ -54,16 +54,34 @@ func TestClassifyUploadError_passesOtherErrorsThrough(t *testing.T) {
 }
 
 // testRouter mounts the real routes over an in-memory DB and the supplied
-// store, and injects the identity the JWT middleware would normally put on the
-// context so the handlers can be exercised end to end.
+// store, with no stored variants — the shape every pre-variant test needs.
 func testRouter(t *testing.T, store ObjectStore, maxUploadBytes int64) (http.Handler, *Processor) {
+	t.Helper()
+	return testRouterWithVariants(t, store, &fakeVariants{}, maxUploadBytes)
+}
+
+// testRouterWithVariants mounts the real routes with a variant lookup under the
+// test's control, and injects the identity the JWT middleware would normally put
+// on the context so the handlers can be exercised end to end.
+func testRouterWithVariants(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor) {
+	t.Helper()
+	router, proc, _ := testRouterCapturingLogs(t, store, variants, maxUploadBytes)
+	return router, proc
+}
+
+// testRouterCapturingLogs is testRouterWithVariants plus the hook, for the tests
+// that assert an operator-facing log was actually emitted rather than only that
+// the right status reached the client.
+func testRouterCapturingLogs(t *testing.T, store ObjectStore, variants VariantLookup, maxUploadBytes int64) (http.Handler, *Processor, *logrusTestHook) {
 	t.Helper()
 	db := newConfirmTestDB(t)
 	log := logrus.New()
 	log.SetOutput(io.Discard)
+	hook := &logrusTestHook{}
+	log.AddHook(hook)
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db, store, maxUploadBytes))
-	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store)
+	r.Group(InitializeRoutes(log, db, store, variants, maxUploadBytes))
+	return r, NewProcessor(log, NewProvider(db), NewAdministrator(db), store, variants), hook
 }
 
 func memberRequest(method, target string, body io.Reader) *http.Request {
@@ -239,5 +257,256 @@ func TestGetContent_crossFleetIs404(t *testing.T) {
 	}
 	if store.getKey != "" {
 		t.Fatalf("cross-fleet read touched storage (key %q)", store.getKey)
+	}
+}
+
+// seedStoredObject creates a media object and records its bytes, returning the
+// media id — the state a completed upload leaves behind.
+func seedStoredObject(t *testing.T, pr *Processor, fleetID string, payload []byte) string {
+	t.Helper()
+	created, err := pr.InitUpload(fleetID, "u1", "image/png", "photo.png")
+	if err != nil {
+		t.Fatalf("init upload: %v", err)
+	}
+	if _, err := pr.StoreContent(context.Background(), created.ID(), fleetID, bytes.NewReader(payload), int64(len(payload))); err != nil {
+		t.Fatalf("store content: %v", err)
+	}
+	return created.ID()
+}
+
+func thumbnailRouter(t *testing.T) (http.Handler, *Processor, *fakeStore) {
+	t.Helper()
+	store := &fakeStore{
+		bucket:  "myfleet-media",
+		getBody: []byte("original-bytes"),
+		getBodies: map[string][]byte{
+			"fleet-a/thumb.jpg":   []byte("thumb-bytes"),
+			"fleet-a/display.jpg": []byte("display-bytes"),
+		},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+		"display":   {ObjectKey: "fleet-a/display.jpg", ContentType: "image/jpeg"},
+	}}
+	router, proc := testRouterWithVariants(t, store, variants, 1024)
+	return router, proc, store
+}
+
+// TestGetContent_noVariantParamIsUnchanged is the backwards-compatibility gate:
+// a request with no ?variant= must behave exactly as it did before this feature,
+// Content-Length included. Every existing caller depends on it.
+func TestGetContent_noVariantParamIsUnchanged(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "original-bytes" {
+		t.Fatalf("body = %q, want original-bytes", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", ct)
+	}
+	if cl := rec.Header().Get("Content-Length"); cl != "14" {
+		t.Fatalf("Content-Length = %q, want 14 (len(\"original-bytes\"))", cl)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q, want private, max-age=300", cc)
+	}
+}
+
+// TestGetContent_thumbnailServesVariantWithoutContentLength is the request the
+// vehicles list makes. media_variants records no byte count, so sending the
+// ORIGINAL's Content-Length here would truncate or hang the response.
+func TestGetContent_thumbnailServesVariantWithoutContentLength(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "thumb-bytes" {
+		t.Fatalf("body = %q, want thumb-bytes", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Fatalf("Content-Type = %q, want the variant's own image/jpeg", ct)
+	}
+	if cl := rec.Header().Get("Content-Length"); cl != "" {
+		t.Fatalf("Content-Length = %q, want it omitted — that value describes the original, not the variant", cl)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q, want private, max-age=300 on a variant response too", cc)
+	}
+}
+
+func TestGetContent_displayAndOriginalVariantsAreAccepted(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	for _, tc := range []struct{ variant, want string }{
+		{"display", "display-bytes"},
+		{"original", "original-bytes"},
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant="+tc.variant, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("?variant=%s status = %d, want 200; body: %s", tc.variant, rec.Code, rec.Body.String())
+		}
+		if rec.Body.String() != tc.want {
+			t.Fatalf("?variant=%s body = %q, want %q", tc.variant, rec.Body.String(), tc.want)
+		}
+	}
+}
+
+// TestGetContent_variantWithNoRowIs404WithNoOriginalBytes: the normal state for
+// a media object whose processing has not completed yet is now a 404 over the
+// wire, not the original. A 12-card grid must not be able to turn 12 thumbnail
+// requests into 12 full-size downloads.
+func TestGetContent_variantWithNoRowIs404WithNoOriginalBytes(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc := testRouterWithVariants(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+	callsBefore := len(store.getCalls)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "original-bytes") {
+		t.Fatalf("the 404 body carried the original's bytes: %s", rec.Body.String())
+	}
+	if len(store.getCalls) != callsBefore {
+		t.Fatalf("an unservable variant read the object store: %v", store.getCalls[callsBefore:])
+	}
+}
+
+// TestGetContent_originalIsUnaffectedByAnUnservableVariant is the
+// backwards-compatibility half of the same change: making a derived variant 404
+// must leave ?variant=original and the bare request serving the original with
+// its Content-Length, on the very same object that 404s for a thumbnail.
+func TestGetContent_originalIsUnaffectedByAnUnservableVariant(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc := testRouterWithVariants(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	for _, target := range []string{
+		"/media/" + id + "/content",
+		"/media/" + id + "/content?variant=original",
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, memberRequest(http.MethodGet, target, nil))
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d, want 200; body: %s", target, rec.Code, rec.Body.String())
+		}
+		if rec.Body.String() != "original-bytes" {
+			t.Fatalf("GET %s body = %q, want original-bytes", target, rec.Body.String())
+		}
+		if cl := rec.Header().Get("Content-Length"); cl != "14" {
+			t.Fatalf("GET %s Content-Length = %q, want 14 — the original's contract is unchanged", target, cl)
+		}
+		if ct := rec.Header().Get("Content-Type"); ct != "image/png" {
+			t.Fatalf("GET %s Content-Type = %q, want image/png", target, ct)
+		}
+	}
+}
+
+// TestGetContent_lookupFailureIs500AndIsLogged: a broken variant query is a
+// server fault, and a 500 that leaves no server-side trace is undebuggable. Its
+// sibling handlers in this file log every failure they turn into an error
+// response; this one must too.
+func TestGetContent_lookupFailureIs500AndIsLogged(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	variants := &fakeVariants{err: errors.New("simulated variant query failure")}
+	router, proc, hook := testRouterCapturingLogs(t, store, variants, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body: %s", rec.Code, rec.Body.String())
+	}
+	if !hook.hasError() {
+		t.Fatal("a 500 from the variant lookup was returned with no server-side log")
+	}
+}
+
+// TestGetContent_expectedErrorsAreNotLoggedAsFaults: a thumbnail that has not
+// been generated yet is the normal state of freshly uploaded media. Logging each
+// one at Error would bury the genuine faults the test above pins.
+func TestGetContent_expectedErrorsAreNotLoggedAsFaults(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc, hook := testRouterCapturingLogs(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if hook.hasError() {
+		t.Fatal("an expected 404 was logged at Error level")
+	}
+}
+
+// TestGetContent_bogusVariantIs400WithNoBytes: a typo must be loud, not a
+// silent multi-megabyte download.
+func TestGetContent_bogusVariantIs400WithNoBytes(t *testing.T) {
+	router, proc, store := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+	callsBefore := len(store.getCalls)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=bogus", nil))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"errors"`) || !strings.Contains(rec.Body.String(), `"bad_request"`) {
+		t.Fatalf("body = %s, want a JSON:API error envelope with code bad_request", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "original-bytes") || strings.Contains(rec.Body.String(), "thumb-bytes") {
+		t.Fatalf("a rejected variant returned image bytes: %s", rec.Body.String())
+	}
+	if len(store.getCalls) != callsBefore {
+		t.Fatalf("a rejected variant touched storage: %v", store.getCalls[callsBefore:])
+	}
+}
+
+// TestGetContent_variantCrossFleetIs404WithNoStoreRead: a variant must never be
+// reachable by a caller who could not read the original, and the 404 (not 403)
+// keeps cross-fleet existence unleakable.
+func TestGetContent_variantCrossFleetIs404WithNoStoreRead(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-b/thumb.jpg", ContentType: "image/jpeg"},
+	}}
+	router, proc := testRouterWithVariants(t, store, variants, 1024)
+	id := seedStoredObject(t, proc, "fleet-b", []byte("original-bytes")) // other fleet
+	callsBefore := len(store.getCalls)
+
+	rec := httptest.NewRecorder()
+	// memberRequest carries ActiveFleetID "fleet-a".
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 for a cross-fleet variant read", rec.Code)
+	}
+	if len(store.getCalls) != callsBefore {
+		t.Fatalf("cross-fleet variant read touched storage: %v", store.getCalls[callsBefore:])
+	}
+	if len(variants.calls) != 0 {
+		t.Fatalf("cross-fleet variant read ran the variant lookup: %v", variants.calls)
 	}
 }

@@ -39,6 +39,44 @@ type ObjectStore interface {
 	Bucket() string
 }
 
+// VariantRef is what the processor needs in order to stream a derived image:
+// where the bytes live and what they are. Nothing else about a variant is
+// relevant here.
+type VariantRef struct {
+	ObjectKey   string
+	ContentType string
+}
+
+// VariantLookup resolves a derived image for a media object. It is declared
+// here, in the package that consumes it, and implemented in the composition
+// root — the same shape as ObjectStore above — so mediaobject never imports the
+// sibling mediavariant package and the dependency graph stays a tree.
+//
+// variant crosses the port as a plain string so the implementer does not need
+// mediaobject's types either. ctx is the request context, threaded so the
+// implementation can cancel its query when the client disconnects — the same
+// shape as ObjectStore above, whose every method takes one.
+//
+// A miss is a normal outcome (found=false), not an error: variants do not exist
+// until the processing worker has run, and never exist for non-image media.
+// Content still refuses to serve anything for such a request (see Content), but
+// it must be able to tell "not generated" apart from "the database is broken".
+type VariantLookup interface {
+	Lookup(ctx context.Context, mediaObjectID, variant string) (VariantRef, bool, error)
+}
+
+// ContentInfo describes the bytes actually being served, which are not always
+// the media object's own metadata: a variant is re-encoded and carries its own
+// content type, and its length is not recorded anywhere. Returning this instead
+// of the Model is what lets the handler set headers from the bytes it is about
+// to write.
+type ContentInfo struct {
+	ContentType string
+	// Size is 0 when unknown; the handler then omits Content-Length. The
+	// original's size must never be sent for a variant response.
+	Size int64
+}
+
 // AuthorizeAccess enforces fleet scoping. media-service trusts the token's
 // active_fleet_id claim (design §9): if the object belongs to a different fleet
 // we return 404 so cross-fleet existence is never leaked.
@@ -72,14 +110,15 @@ func MarkReady(m Model) (Model, error) {
 // transactional-outbox relay (design A8); the processor never calls Publish
 // directly.
 type Processor struct {
-	log     logrus.FieldLogger
-	p       Provider
-	a       Administrator
-	storage ObjectStore
+	log      logrus.FieldLogger
+	p        Provider
+	a        Administrator
+	storage  ObjectStore
+	variants VariantLookup
 }
 
-func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore) *Processor {
-	return &Processor{log: log, p: p, a: a, storage: st}
+func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore, variants VariantLookup) *Processor {
+	return &Processor{log: log, p: p, a: a, storage: st, variants: variants}
 }
 
 // InitUpload creates a media-object row in the uploaded state. The client then
@@ -206,14 +245,84 @@ func (pr *Processor) GetByID(id, identityFleetID string) (Model, error) {
 	return m, nil
 }
 
-// Content authorizes by fleet and opens the object's bytes for streaming to the
-// client. The caller owns closing the returned ReadCloser. Bytes are proxied
-// rather than presigned so MinIO stays unreachable from the browser.
-func (pr *Processor) Content(ctx context.Context, id, identityFleetID string) (Model, io.ReadCloser, error) {
+// Content authorizes by fleet and opens the requested rendition's bytes for
+// streaming to the client. The caller owns closing the returned ReadCloser.
+// Bytes are proxied rather than presigned so MinIO stays unreachable from the
+// browser.
+//
+// The media object is resolved and fleet-scoped FIRST, before any variant
+// lookup or object-store read, so a variant is never reachable by a caller who
+// could not read the original (FR-7.5). A cross-fleet caller exits here with
+// 404 — never 403, which would restore the existence oracle AuthorizeAccess
+// exists to prevent.
+//
+// A derived variant that cannot be served is a 404 — it does NOT fall back to
+// the original. Falling back looks harmless per request and is ruinous per page:
+// a twelve-card grid asking for thumbnails would quietly pull twelve full-size
+// originals, up to 25 MiB each, which is precisely the cost the thumbnail
+// variant exists to avoid. The caller asked for a small rendition; if there
+// isn't one, it must be told so rather than handed something orders of
+// magnitude larger. Both ways a derived variant can be unservable — no variant
+// row at all, and a row whose object is missing from the store — end in the
+// same 404, because the size consequence of serving the original is identical
+// in both.
+//
+// ?variant=original and a request with no parameter are untouched by any of
+// this: they serve the original with its Content-Length exactly as they always
+// have. That is the backwards-compatibility contract every pre-existing caller
+// depends on.
+func (pr *Processor) Content(ctx context.Context, id, identityFleetID string, want ContentVariant) (ContentInfo, io.ReadCloser, error) {
 	m, err := pr.GetByID(id, identityFleetID)
 	if err != nil {
-		return Model{}, nil, err
+		return ContentInfo{}, nil, err
 	}
+
+	if want != ContentOriginal {
+		ref, found, err := pr.variants.Lookup(ctx, id, string(want))
+		if err != nil {
+			// A miss is found=false, so an error here means the database is
+			// broken — and GetByID just read the same database successfully.
+			// A 500 is the honest answer; a 404 would hide a real fault.
+			return ContentInfo{}, nil, err
+		}
+		if !found {
+			// Expected whenever processing has not run yet, or the media is not
+			// a processable image; debug, not warn.
+			pr.log.WithField("media_id", id).WithField("variant", string(want)).
+				Debug("no stored variant for the requested rendition")
+			return ContentInfo{}, nil, server.ErrNotFound
+		}
+		rc, err := pr.storage.GetObject(ctx, ref.ObjectKey)
+		switch {
+		case err == nil:
+			ct := ref.ContentType
+			if ct == "" {
+				// Should never happen — variants are re-encoded and always
+				// record a type — but an empty header is worse than a
+				// slightly wrong one.
+				ct = m.ContentType()
+			}
+			// Size stays 0: media_variants records width/height/content_type
+			// but no byte count, so Content-Length is omitted (FR-7.8).
+			return ContentInfo{ContentType: ct}, rc, nil
+		case errors.Is(err, storage.ErrObjectNotFound):
+			// DB/store drift, unlike the miss above — someone should see it,
+			// so this stays a Warn even though the response is the same 404.
+			pr.log.WithField("media_id", id).WithField("variant", string(want)).
+				WithField("object_key", ref.ObjectKey).
+				Warn("variant row has no object in storage")
+			return ContentInfo{}, nil, server.ErrNotFound
+		default:
+			return ContentInfo{}, nil, err
+		}
+	}
+
+	return pr.openOriginal(ctx, m)
+}
+
+// openOriginal streams the uploaded bytes. Kept separate from Content so the
+// not-found mapping for the original has exactly one implementation.
+func (pr *Processor) openOriginal(ctx context.Context, m Model) (ContentInfo, io.ReadCloser, error) {
 	rc, err := pr.storage.GetObject(ctx, m.ObjectKey())
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotFound) {
@@ -223,11 +332,14 @@ func (pr *Processor) Content(ctx context.Context, id, identityFleetID string) (M
 			// server-side — this sub-resource simply does not exist yet — and
 			// it matches what the client used to see when it followed a
 			// presigned URL straight to MinIO.
-			return Model{}, nil, server.ErrNotFound
+			return ContentInfo{}, nil, server.ErrNotFound
 		}
-		return Model{}, nil, err
+		return ContentInfo{}, nil, err
 	}
-	return m, rc, nil
+	return ContentInfo{
+		ContentType: m.ContentType(),
+		Size:        m.Size(),
+	}, rc, nil
 }
 
 // SoftDelete marks an object deleted (sets deleted_at + purge_after), scoped to

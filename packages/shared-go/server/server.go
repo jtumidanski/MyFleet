@@ -11,6 +11,8 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 func codeFor(status int) string {
 	switch status {
+	case 400:
+		return "bad_request"
 	case 401:
 		return "unauthorized"
 	case 403:
@@ -21,6 +23,8 @@ func codeFor(status int) string {
 		return "conflict"
 	case 410:
 		return "gone"
+	case 413:
+		return "payload_too_large"
 	case 422:
 		return "validation_error"
 	default:
