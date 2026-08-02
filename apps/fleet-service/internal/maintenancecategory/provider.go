@@ -1,6 +1,8 @@
 package maintenancecategory
 
 import (
+	"errors"
+
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
@@ -15,6 +17,11 @@ type Provider interface {
 	// a non-nil slice, because the record provider reads nil as "no filter"
 	// and empty-non-nil as "match nothing" (design D3).
 	IDsByKind(kind Kind, fleetID string) ([]string, error)
+	// Create inserts a category and returns the stored Model.
+	Create(e Entity) (Model, error)
+	// FindByName resolves a visible category by case-insensitive name and kind.
+	// The bool reports whether one was found.
+	FindByName(fleetID, name string, kind Kind) (Model, bool, error)
 }
 
 type dbProvider struct{ db *gorm.DB }
@@ -72,4 +79,27 @@ func (p *dbProvider) IDsByKind(kind Kind, fleetID string) ([]string, error) {
 		ids = []string{}
 	}
 	return ids, nil
+}
+
+func (p *dbProvider) Create(e Entity) (Model, error) {
+	if err := p.db.Create(&e).Error; err != nil {
+		return Model{}, err
+	}
+	return Make(e), nil
+}
+
+func (p *dbProvider) FindByName(fleetID, name string, kind Kind) (Model, bool, error) {
+	var e Entity
+	// LOWER() on both sides rather than ILIKE: ILIKE is PostgreSQL-only and
+	// these providers are unit-tested against SQLite.
+	err := visibleTo(p.db.Model(&Entity{}), fleetID).
+		Where("LOWER(name) = LOWER(?) AND kind = ?", name, string(kind)).
+		First(&e).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Model{}, false, nil
+	}
+	if err != nil {
+		return Model{}, false, err
+	}
+	return Make(e), true, nil
 }

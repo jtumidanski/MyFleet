@@ -1,12 +1,14 @@
 package maintenancecategory
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
@@ -42,6 +44,46 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 				Data: TransformSlice(ms),
 				Meta: page.Meta(total),
 			})
+		})
+
+		// POST /maintenance-categories — create a free-form category scoped to
+		// the caller's fleet. Idempotent: an existing case-insensitive match is
+		// returned instead of a duplicate.
+		r.Post("/maintenance-categories", func(w http.ResponseWriter, req *http.Request) {
+			identity := auth.IdentityFromContext(req.Context())
+			if err := authz.RequireWrite(identity); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			// No active fleet means there is nothing to scope the row to.
+			if identity.ActiveFleetID == "" {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+
+			var body struct {
+				Data struct {
+					Attributes CreateAttributes `json:"attributes"`
+				} `json:"data"`
+			}
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+
+			kind, err := ParseKind(body.Data.Attributes.Kind)
+			if err != nil || kind == "" {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+
+			m, err := proc.Create(identity.ActiveFleetID, body.Data.Attributes.Name, kind)
+			if err != nil {
+				log.WithError(err).Error("create maintenance category")
+				server.WriteError(w, err)
+				return
+			}
+			server.WriteJSON(w, http.StatusCreated, server.Document{Data: Transform(m)})
 		})
 	}
 }

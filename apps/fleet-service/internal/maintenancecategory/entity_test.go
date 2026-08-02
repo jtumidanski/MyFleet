@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
@@ -131,6 +132,47 @@ func TestSeedIsIdempotent(t *testing.T) {
 	}
 	if count != int64(len(seeds)) {
 		t.Fatalf("want %d categories after double-seed, got %d", len(seeds), count)
+	}
+}
+
+// TestSeed_ignoresFleetScopedNameCollision proves Seed's name lookup is
+// constrained to system rows (fleet_id IS NULL): a fleet-scoped row sharing a
+// system name must NOT satisfy the FirstOrCreate lookup, or the system row
+// would never get created on a later startup that runs Seed after a fleet
+// already created a same-named category.
+func TestSeed_ignoresFleetScopedNameCollision(t *testing.T) {
+	db := newTestDB(t)
+
+	fleetA := "11111111-1111-1111-1111-111111111111"
+	if err := db.Create(&Entity{
+		ID:      uuid.NewString(),
+		Name:    "Oil Change",
+		Kind:    string(KindMaintenance),
+		FleetID: &fleetA,
+	}).Error; err != nil {
+		t.Fatalf("create fleet-scoped row: %v", err)
+	}
+
+	if err := Seed(db); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var systemCount int64
+	if err := db.Model(&Entity{}).
+		Where("name = ? AND fleet_id IS NULL", "Oil Change").
+		Count(&systemCount).Error; err != nil {
+		t.Fatalf("count system rows: %v", err)
+	}
+	if systemCount != 1 {
+		t.Fatalf("want exactly 1 system-defined 'Oil Change' row after seed, got %d", systemCount)
+	}
+
+	var total int64
+	if err := db.Model(&Entity{}).Where("name = ?", "Oil Change").Count(&total).Error; err != nil {
+		t.Fatalf("count all rows: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("want the fleet-scoped row AND the system row to coexist (2 total), got %d", total)
 	}
 }
 

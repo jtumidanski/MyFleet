@@ -67,10 +67,16 @@ var seeds = []Entity{
 
 // Seed inserts the system-defined categories. It is idempotent: FirstOrCreate
 // keyed by name means re-running does not create duplicates (plan Task 9.1).
+//
+// The lookup is constrained to fleet_id IS NULL (system rows) as well as
+// name: now that fleets can create their own free-form categories (Task 2), a
+// fleet-scoped row sharing a system name would otherwise satisfy a
+// name-only match and make Seed skip creating the system row on a later
+// startup.
 func Seed(db *gorm.DB) error {
 	for _, s := range seeds {
 		var e Entity
-		if err := db.Where("name = ?", s.Name).
+		if err := db.Where("name = ? AND fleet_id IS NULL", s.Name).
 			Attrs(Entity{
 				ID:            uuid.NewString(),
 				Name:          s.Name,
