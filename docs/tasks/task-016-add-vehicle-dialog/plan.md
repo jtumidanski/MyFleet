@@ -1,6 +1,6 @@
 # Add Vehicle Dialog Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Replace the inline create-vehicle form on the Vehicles page with a focused, accessible modal dialog, introducing the shared `Dialog` primitive the application currently lacks.
 
@@ -100,7 +100,7 @@ The design says `dialog.tsx` gets no dedicated test file, on the grounds that "a
     `DialogContentProps = React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { dismissible?: boolean }`,
     exported as `DialogContentProps`. `dismissible` defaults to `true`.
 
-- [ ] **Step 1: Install the dependency**
+- [x] **Step 1: Install the dependency**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -122,7 +122,7 @@ Move the new entry if npm placed it elsewhere. `dialog` sorts *before* `label`, 
 
 Review the `package-lock.json` diff: it should add `@radix-ui/react-dialog` plus transitive packages (`react-remove-scroll`, `react-remove-scroll-bar`, `aria-hidden`, `@radix-ui/react-focus-scope`, `@radix-ui/react-focus-guards`, `@radix-ui/react-dismissable-layer`, `@radix-ui/react-portal`, `get-nonce`, `use-sidecar`, `tslib`, …) and change nothing else. If it churns unrelated versions, revert and re-run with `npm install --workspace apps/web @radix-ui/react-dialog@^1.1.0 --no-save` diagnostics before proceeding.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `apps/web/src/components/ui/dialog.test.tsx`:
 
@@ -305,7 +305,7 @@ describe('Dialog — content lifecycle', () => {
 });
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -314,7 +314,7 @@ cd apps/web && npx vitest run src/components/ui/dialog.test.tsx
 
 Expected: FAIL — `Failed to resolve import "./dialog"`.
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 Create `apps/web/src/components/ui/dialog.tsx`:
 
@@ -487,7 +487,7 @@ Two things that are load-bearing and easy to break:
 - The four handler props (`onOpenAutoFocus`, `onCloseAutoFocus`, `onEscapeKeyDown`, `onInteractOutside`) are **destructured out** of `props`, so the trailing `{...props}` cannot overwrite the wrappers. Leave them destructured.
 - `DialogHeader` / `DialogFooter` get literal `displayName` strings because they have no Radix counterpart. Every other wrapper takes its `displayName` from the primitive it wraps.
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -496,7 +496,7 @@ cd apps/web && npx vitest run src/components/ui/dialog.test.tsx
 
 Expected: PASS — 13 tests.
 
-- [ ] **Step 6: Lint and format**
+- [x] **Step 6: Lint and format**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -507,7 +507,7 @@ npm run lint --workspace apps/web
 
 Expected: format rewrites nothing of substance; lint exits 0 with no warnings (`--max-warnings 0`).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/package.json package-lock.json apps/web/src/components/ui/dialog.tsx apps/web/src/components/ui/dialog.test.tsx
@@ -534,7 +534,7 @@ restores only to a registered DialogTrigger, so focus would land on body)."
   `emptyAction?: ReactNode`. The empty-state copy branches on that prop's
   presence alone — `VehiclesPage` (Task 3) passes the already-role-gated node.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/features/vehicles/VehicleList.test.tsx`:
 
@@ -616,7 +616,7 @@ describe('VehicleList — loading', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -625,7 +625,7 @@ cd apps/web && npx vitest run src/components/features/vehicles/VehicleList.test.
 
 Expected: FAIL. The `emptyAction` prop does not exist, so TypeScript rejects it and the viewer-copy test fails on the text (`No vehicles yet.` vs the current combined string).
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Replace `apps/web/src/components/features/vehicles/VehicleList.tsx` in full:
 
@@ -682,7 +682,7 @@ export function VehicleList({ vehicles, isLoading, emptyAction }: VehicleListPro
 
 The copy moves into a `<p>` so it is an element with its own `textContent`. Left as a bare text node beside the action `div`, `getByText('No vehicles yet. Add your first one to get started.')` would not match anything — the parent `div`'s text content also includes the button's label.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -691,7 +691,7 @@ cd apps/web && npx vitest run src/components/features/vehicles/VehicleList.test.
 
 Expected: PASS — 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/features/vehicles/VehicleList.tsx apps/web/src/components/features/vehicles/VehicleList.test.tsx
@@ -713,7 +713,7 @@ stays presentational and cannot promise an action it does not render."
 - Consumes: `Dialog`, `DialogContent`, `DialogHeader`, `DialogTitle`, `DialogDescription` from `../components/ui/dialog` (Task 1); `emptyAction` on `VehicleList` (Task 2).
 - Produces: nothing consumed by later tasks — Tasks 4 and 5 modify this same file.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/pages/VehiclesPage.test.tsx`:
 
@@ -956,7 +956,7 @@ describe('VehiclesPage — dismissing', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -965,7 +965,7 @@ cd apps/web && npx vitest run src/pages/VehiclesPage.test.tsx
 
 Expected: FAIL — no `role="dialog"` is ever found, because the page still renders the inline `Card` form.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Replace `apps/web/src/pages/VehiclesPage.tsx` in full:
 
@@ -1073,7 +1073,7 @@ export function VehiclesPage() {
 
 `Card`, `CardContent`, `CardHeader`, `CardTitle` are no longer used — remove that import line entirely. ESLint's unused-import rule will catch it if you forget.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -1082,7 +1082,7 @@ cd apps/web && npx vitest run src/pages/VehiclesPage.test.tsx
 
 Expected: PASS — 15 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/VehiclesPage.tsx apps/web/src/pages/VehiclesPage.test.tsx
@@ -1108,7 +1108,7 @@ payload mapping, toasts and role gating are unchanged."
 
 > **Note on design §7 of the PRD.** The PRD expected `VehicleForm.tsx` to need no changes, while FR-2.5 requires Cancel to be unavailable during submit; today it is never disabled. Design §5.3 resolves this in favour of the one-line change, which is what this task implements. It touches no rendering branch: `edit` mode renders the identical element tree and only behaves differently while a save is genuinely in flight, where an inert Cancel is correct anyway.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `apps/web/src/pages/VehiclesPage.test.tsx`:
 
@@ -1160,7 +1160,7 @@ describe('VehiclesPage — locked while the create request is in flight', () => 
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -1169,7 +1169,7 @@ cd apps/web && npx vitest run src/pages/VehiclesPage.test.tsx
 
 Expected: FAIL — all four cases. `submitAndHang`'s `waitFor` times out because the close button is never disabled.
 
-- [ ] **Step 3: Disable Cancel while submitting**
+- [x] **Step 3: Disable Cancel while submitting**
 
 In `apps/web/src/components/features/vehicles/VehicleForm.tsx`, change the Cancel button (currently lines 180-184):
 
@@ -1183,7 +1183,7 @@ In `apps/web/src/components/features/vehicles/VehicleForm.tsx`, change the Cance
 
 That is the entire change to this file — symmetric with the submit button on the next line.
 
-- [ ] **Step 4: Lock the dialog while pending**
+- [x] **Step 4: Lock the dialog while pending**
 
 In `apps/web/src/pages/VehiclesPage.tsx`, replace the `Dialog` opening tag and `DialogContent` opening tag:
 
@@ -1203,7 +1203,7 @@ In `apps/web/src/pages/VehiclesPage.tsx`, replace the `Dialog` opening tag and `
 
 The success path calls `setOpen(false)` directly rather than going through `onOpenChange`, so this guard does not interfere with closing on a completed create.
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -1212,7 +1212,7 @@ cd apps/web && npx vitest run src/pages/VehiclesPage.test.tsx
 
 Expected: PASS — 19 tests (15 from Task 3 plus 4).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/features/vehicles/VehicleForm.tsx apps/web/src/pages/VehiclesPage.tsx apps/web/src/pages/VehiclesPage.test.tsx
@@ -1239,7 +1239,7 @@ Creating the first vehicle from the empty-state button unmounts that button alon
 
 The condition is `opener === 'empty' && created`, **not** a DOM liveness check such as `emptyButtonRef.current?.isConnected`. Liveness is the wrong signal: on success the dialog closes as soon as `mutateAsync` resolves, while the list is still refetching, so the empty-state button is usually *still* attached when `onCloseAutoFocus` fires. The outcome is deterministic; the DOM timing is not.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `apps/web/src/pages/VehiclesPage.test.tsx`:
 
@@ -1279,7 +1279,7 @@ describe('VehiclesPage — focus after the empty state unmounts', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -1288,7 +1288,7 @@ cd apps/web && npx vitest run src/pages/VehiclesPage.test.tsx -t "focus after th
 
 Expected: the first case FAILS — `document.activeElement` is `document.body`, because the captured opener has been detached. The second case passes already (the primitive's default restoration handles it) and must keep passing.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 In `apps/web/src/pages/VehiclesPage.tsx`:
 
@@ -1360,7 +1360,7 @@ Add the redirect to `DialogContent`:
 
 Every other close path falls through to the primitive's own restoration, which puts focus back on whichever trigger was used.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -1369,7 +1369,7 @@ cd apps/web && npx vitest run src/pages/VehiclesPage.test.tsx
 
 Expected: PASS — 21 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/pages/VehiclesPage.tsx apps/web/src/pages/VehiclesPage.test.tsx
@@ -1388,7 +1388,7 @@ document.body."
 
 **Interfaces:** none.
 
-- [ ] **Step 1: Format and lint**
+- [x] **Step 1: Format and lint**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -1400,7 +1400,7 @@ npm run lint
 
 Expected: `format:check` reports all files formatted; `lint` exits 0 across all three workspaces with no warnings.
 
-- [ ] **Step 2: Type-check and build**
+- [x] **Step 2: Type-check and build**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -1409,7 +1409,7 @@ npm run build
 
 Expected: `tsc -b` clean, Vite build succeeds for `apps/web`, and both packages build.
 
-- [ ] **Step 3: Run the full test suite**
+- [x] **Step 3: Run the full test suite**
 
 ```sh
 export PATH="$HOME/.nvm/versions/node/v24.12.0/bin:$PATH"
@@ -1426,7 +1426,7 @@ Expected, against the recorded baseline of 293 / 7 / 10:
 
 Nothing pre-existing may fail. If the `apps/web` count differs from 331, reconcile it against the per-task counts (13 / 4 / 21) before moving on — a silently skipped `it.each` row is the usual cause.
 
-- [ ] **Step 4: Confirm the blast radius**
+- [x] **Step 4: Confirm the blast radius**
 
 ```sh
 cd /home/tumidanski/source/MyFleet/.worktrees/task-016-add-vehicle-dialog
@@ -1470,7 +1470,7 @@ Check:
 4. Toggle dark mode: the dialog surface, border, text and close button all read correctly in both themes.
 5. Tab through the open dialog: focus cycles within it and never reaches the page behind. The close button shows a visible focus ring.
 
-- [ ] **Step 6: Commit anything the format pass rewrote**
+- [x] **Step 6: Commit anything the format pass rewrote**
 
 ```bash
 git add -A
