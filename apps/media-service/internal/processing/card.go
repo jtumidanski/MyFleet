@@ -108,6 +108,20 @@ func (g *CardGenerator) Generate(src Source) {
 	}
 
 	go func() {
+		// Registered first so it runs LAST (defers are LIFO): by the time a
+		// recovered panic is swallowed, the semaphore token and the in-flight
+		// key have already been released by the defers below. image.Decode runs
+		// on arbitrary stored bytes, and on the upload path a decoder panic
+		// crashes the pod once; on this lazy path the trigger is read traffic —
+		// every render of a grid containing the bad object re-invokes Generate —
+		// so an unrecovered panic here would turn a one-off decoder bug into a
+		// crash loop instead. A panic is not a classified permanent failure, so
+		// it is logged and dropped, never recorded in the failure ledger.
+		defer func() {
+			if r := recover(); r != nil {
+				l.WithField("panic", r).Warn("card generation panicked; recovered without recording a failure")
+			}
+		}()
 		defer func() { <-g.sem }()
 		defer g.release(src.MediaObjectID)
 

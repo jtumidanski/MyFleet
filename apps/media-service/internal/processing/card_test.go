@@ -59,6 +59,24 @@ func (b *blockingStore) calls() int {
 	return b.getCalls
 }
 
+// panicStore's GetObject succeeds but returns a reader that panics on Read —
+// standing in for a decoder that panics deep inside image.Decode on malformed
+// bytes, which is real: it runs on arbitrary stored bytes it does not control.
+type panicStore struct{}
+
+func (panicStore) GetObject(_ context.Context, _ string) (io.ReadCloser, error) {
+	return panicReader{}, nil
+}
+
+func (panicStore) PutObject(_ context.Context, _ string, _ io.Reader, _ int64, _ string) error {
+	return nil
+}
+
+type panicReader struct{}
+
+func (panicReader) Read(_ []byte) (int, error) { panic("simulated decoder panic on corrupt bytes") }
+func (panicReader) Close() error               { return nil }
+
 // newCardTestDB gives the generator a real mediavariant table and a real
 // failure ledger. The variants table is created with raw SQL because GORM
 // AutoMigrate mishandles schema-qualified names on SQLite for an entity with
@@ -298,6 +316,13 @@ func TestCardGenerator_capDropsRatherThanQueues(t *testing.T) {
 		return err == nil
 	})
 
+	// The row becomes visible at Upsert, but the cap token is only surrendered
+	// by the goroutine's deferred <-g.sem, which runs after Upsert, after the
+	// Info log, and after the other defers. Without waiting for that release
+	// too, a Generate landing in that window is dropped with no reschedule of
+	// its own, and the assertion below hangs for the full waitFor deadline.
+	waitFor(t, "the cap slot to be released", func() bool { return len(g.sem) == 0 })
+
 	// Dropped, not lost: the next request reschedules.
 	g.Generate(cardSource("m2"))
 	waitFor(t, "the rescheduled second card row", func() bool {
@@ -410,18 +435,16 @@ func TestCardGenerator_transientFailureIsNotRecorded(t *testing.T) {
 
 // FR-4.4: the work is detached from the request that triggered it. A client
 // disconnecting immediately after receiving its downgraded thumbnail must not
-// cancel the generation it caused.
+// cancel the generation it caused. The real guarantee here is enforced by
+// Generate's signature carrying no context parameter at all — the compiler
+// checks it, since there is nothing a caller could pass in even if it wanted
+// to. This test is the end-to-end confirmation that generation still runs to
+// completion and the card row lands.
 func TestCardGenerator_ignoresACancelledCallerContext(t *testing.T) {
 	db := newCardTestDB(t)
 	store := &blockingStore{data: pngBytes(t, 2000, 1000)}
 	g := NewCardGenerator(context.Background(), logrus.New(), store,
 		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), 4)
-
-	// Stand in for the request context: cancelled the instant the response is
-	// written. Generate takes no context at all, which is the point.
-	reqCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_ = reqCtx
 
 	g.Generate(cardSource("m1"))
 
@@ -430,4 +453,20 @@ func TestCardGenerator_ignoresACancelledCallerContext(t *testing.T) {
 		_, err := provider.GetByMediaObjectAndVariant(context.Background(), "m1", mediavariant.VariantCard)
 		return err == nil
 	})
+}
+
+// A panic inside the goroutine — a decoder choking on malformed bytes deep
+// inside image.Decode, say — must not crash the process, and must not leak
+// the semaphore token or the in-flight key. On the lazy path the trigger is
+// read traffic, so an unrecovered panic here would not be a one-off crash: it
+// would re-fire on every render of a grid containing the bad object.
+func TestCardGenerator_recoversFromDecodePanic(t *testing.T) {
+	db := newCardTestDB(t)
+	g := NewCardGenerator(context.Background(), logrus.New(), panicStore{},
+		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), 4)
+
+	g.Generate(cardSource("m1"))
+
+	waitFor(t, "the panicking attempt to finish", func() bool { return !g.inFlightFor("m1") })
+	waitFor(t, "the cap slot to be released", func() bool { return len(g.sem) == 0 })
 }
