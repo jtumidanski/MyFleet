@@ -328,3 +328,41 @@ func TestCallback_failureHonoursLoginPath(t *testing.T) {
 		t.Fatalf("Location = %q, want %q", got, want)
 	}
 }
+
+// FR-ERR-6 as refined by design §3.3: declining consent is a normal outcome and
+// gets its own code, so the SPA can present it neutrally.
+func TestCallback_providerAccessDeniedIsCancelled(t *testing.T) {
+	rec, hook := callback(t, okDeps(), "/auth/callback?error=access_denied&state=s-1")
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	if got, want := rec.Header().Get("Location"), "http://app.test/login#error=cancelled"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if !clearsStateCookie(rec) {
+		t.Errorf("expected a Set-Cookie deleting %s", stateCookieName)
+	}
+	// Info, not Error: a cancel must not inflate the error rate, but a spike in
+	// access_denied is still a signal worth having.
+	if !loggedAt(hook, logrus.InfoLevel, "oidc callback returned provider error") {
+		t.Errorf("expected an info log, got %+v", hook.AllEntries())
+	}
+}
+
+// Design §3.3 / §9: every other provider error is a misconfiguration, not a
+// user choice. Reporting invalid_scope as "cancelled" would hide a real fault.
+func TestCallback_otherProviderErrorIsAuthFailed(t *testing.T) {
+	rec, hook := callback(t, okDeps(), "/auth/callback?error=invalid_scope&state=s-1")
+
+	if got, want := rec.Header().Get("Location"), "http://app.test/login#error=auth_failed"; got != want {
+		t.Errorf("Location = %q, want %q", got, want)
+	}
+	if !clearsStateCookie(rec) {
+		t.Errorf("expected a Set-Cookie deleting %s", stateCookieName)
+	}
+	entries := hook.AllEntries()
+	if len(entries) != 1 || entries[0].Data["oauth_error"] != "invalid_scope" {
+		t.Errorf("expected one entry carrying oauth_error=invalid_scope, got %+v", entries)
+	}
+}

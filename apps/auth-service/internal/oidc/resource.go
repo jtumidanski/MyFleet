@@ -117,6 +117,23 @@ func loginHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 
 func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
+		// Google reports a declined consent screen — and its own
+		// misconfigurations — on `error`, with no `code`. Checked first so a
+		// cancel is not misreported as a missing-code fault.
+		if oauthErr := req.URL.Query().Get("error"); oauthErr != "" {
+			// Info, not Error: declining consent is a normal outcome and must
+			// not inflate the error rate. Logged all the same, because a spike
+			// in access_denied is a UX signal.
+			log.WithField("oauth_error", oauthErr).Info("oidc callback returned provider error")
+			if oauthErr == "access_denied" {
+				failLogin(w, req, d, errCancelled)
+				return
+			}
+			// invalid_scope / invalid_request / server_error are our
+			// misconfigurations, not the user's choice (design §3.3).
+			failLogin(w, req, d, errAuthFailed)
+			return
+		}
 		code := req.URL.Query().Get("code")
 		state := req.URL.Query().Get("state")
 		if code == "" || state == "" {
