@@ -16,6 +16,9 @@ type stubProvider struct {
 	byID    map[string]Model
 	byToken map[string]Model
 	byFleet map[string][]Model
+	byEmail map[string][]Model
+
+	redeemableCalls []string
 }
 
 func (s *stubProvider) GetByID(id string) (Model, error) {
@@ -34,6 +37,14 @@ func (s *stubProvider) GetByToken(token string) (Model, error) {
 
 func (s *stubProvider) ListByFleetID(fleetID string) ([]Model, error) {
 	return s.byFleet[fleetID], nil
+}
+
+// Records what the processor asked for, so a test can prove the blank-email
+// guard short-circuits BEFORE the query rather than relying on the stub to
+// return nothing.
+func (s *stubProvider) ListRedeemableByEmail(email string, _ time.Time) ([]Model, error) {
+	s.redeemableCalls = append(s.redeemableCalls, email)
+	return s.byEmail[strings.ToLower(email)], nil
 }
 
 func mk(email string, expires time.Time, accepted *time.Time) Model {
@@ -200,5 +211,46 @@ func TestInviteSentinelDetails_discloseNoAddress(t *testing.T) {
 		if strings.ContainsAny(d.Detail(), "@%") {
 			t.Fatalf("detail %q may carry an address or a format verb", d.Detail())
 		}
+	}
+}
+
+// The blank-email guard must short-circuit BEFORE the query, not merely return
+// an empty result. A blank address folded through LOWER() matches every
+// blank-address row, so a token that validates with no `email` claim — a documented
+// failure mode, see packages/shared-go/auth/middleware.go — would otherwise be
+// handed a listing of corrupt invites belonging to nobody.
+func TestListRedeemableForEmail_neverQueriesForABlankEmail(t *testing.T) {
+	stub := &stubProvider{byEmail: map[string][]Model{
+		"": {mk("", time.Now().Add(time.Hour), nil)},
+	}}
+	p := NewProcessor(logrus.New(), stub)
+
+	got, err := p.ListRedeemableForEmail("")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got %d invites for a blank email, want 0", len(got))
+	}
+	if len(stub.redeemableCalls) != 0 {
+		t.Fatalf("the provider was queried with %q; the guard must run first", stub.redeemableCalls)
+	}
+}
+
+func TestListRedeemableForEmail_queriesWithTheAuthenticatedAddress(t *testing.T) {
+	stub := &stubProvider{byEmail: map[string][]Model{
+		"jane@example.com": {mk("jane@example.com", time.Now().Add(time.Hour), nil)},
+	}}
+	p := NewProcessor(logrus.New(), stub)
+
+	got, err := p.ListRedeemableForEmail("jane@example.com")
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d invites, want 1", len(got))
+	}
+	if len(stub.redeemableCalls) != 1 || stub.redeemableCalls[0] != "jane@example.com" {
+		t.Fatalf("provider queried with %q, want the authenticated address", stub.redeemableCalls)
 	}
 }

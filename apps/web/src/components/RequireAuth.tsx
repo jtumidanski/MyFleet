@@ -43,7 +43,11 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   }
 
-  if (activeFleetId === null && !allowsFleetlessAccess(location.pathname)) {
+  // Falsy, not `=== null`. The pages downstream all gate on `!activeFleetId`,
+  // and a guard that recognised only `null` disagreed with them the moment the
+  // wire carried `""` — the user passed the guard and then found every page
+  // saying "No fleet selected".
+  if (!activeFleetId && !allowsFleetlessAccess(location.pathname)) {
     return <Navigate to="/onboarding" replace />;
   }
 

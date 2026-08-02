@@ -28,7 +28,10 @@ export function InviteForm({ fleetId }: InviteFormProps) {
   const onSubmit = async (values: CreateInviteInput) => {
     try {
       await createInvite.mutateAsync(values);
-      toast.success(`Invite sent to ${values.email}`);
+      // Not "sent": nothing delivers invites yet, and saying so left owners
+      // waiting on an email that was never going to arrive. The invite is a row
+      // until someone copies its link out of the list below.
+      toast.success(`Invite created for ${values.email} — copy its link below to send it`);
       form.reset({ email: '', role: 'member' });
     } catch (err) {
       const apiError = createErrorFromUnknown(err);

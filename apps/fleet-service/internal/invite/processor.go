@@ -25,6 +25,26 @@ func (pr *Processor) ListByFleet(fleetID string) ([]Model, error) {
 	return pr.p.ListByFleetID(fleetID)
 }
 
+// ListRedeemableForEmail returns the invites waiting for authedEmail — the
+// discovery path for a user who was invited before they had an account and so
+// has no fleet, no link, and nothing to click.
+//
+// authedEmail must come from the validated token, never from the request: this
+// is the only thing scoping the result set, so a caller-supplied address would
+// let anyone enumerate anyone else's invites.
+//
+// A blank email returns nothing rather than querying. A token that validates
+// but carries no `email` claim is a real failure mode (see the warning in
+// packages/shared-go/auth/middleware.go); folding a blank address through the
+// LOWER() comparison would match every blank-address row in the table and hand
+// them all to that caller.
+func (pr *Processor) ListRedeemableForEmail(authedEmail string) ([]Model, error) {
+	if authedEmail == "" {
+		return []Model{}, nil
+	}
+	return pr.p.ListRedeemableByEmail(authedEmail, time.Now())
+}
+
 // GetByID fetches an invite by ID.
 func (pr *Processor) GetByID(id string) (Model, error) {
 	m, err := pr.p.GetByID(id)
