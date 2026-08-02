@@ -23,11 +23,15 @@ func ParseBootstrapEmails(raw string) map[string]bool {
 }
 
 // SeedFromEmails grants the privilege to every EXISTING user whose email is in
-// the set, and returns how many grants it made.
+// the set and who has not been explicitly revoked, and returns how many grants
+// it made.
 //
 // A bootstrap email with no user row is silently skipped — that is the normal
 // case on a fresh database, and user.Processor's provision-time hook is what
-// covers it at first login (FR-ADMIN-AUTH-2).
+// covers it at first login (FR-ADMIN-AUTH-2). A bootstrap email that HAS a
+// revoked_at tombstone is also skipped — that is what makes revocation durable
+// across restarts: without this check, every boot would re-grant the very
+// admin an operator just revoked.
 //
 // The users read is raw SQL rather than a user.Provider call so this package
 // does not import user; both live in the same service and schema, so this is
@@ -46,9 +50,15 @@ func SeedFromEmails(db *gorm.DB, emails map[string]bool) (int, error) {
 		return 0, err
 	}
 
+	prov := NewProvider(db)
 	adm := NewAdministrator(db)
 	granted := 0
 	for _, id := range ids {
+		if revoked, err := prov.IsRevoked(id); err != nil {
+			return granted, err
+		} else if revoked {
+			continue
+		}
 		if err := adm.Grant(id, BootstrapGrantedBy); err != nil {
 			return granted, err
 		}

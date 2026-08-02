@@ -50,4 +50,12 @@ type GoogleProfile struct {
 	Email  string
 	Name   string
 	Avatar string
+	// EmailVerified carries Google's id_token email_verified claim. Ordinary
+	// login does not consult it — a stale or unverified corporate address can
+	// still sign in. It exists solely to gate the bootstrap platform-admin
+	// grant (see Processor.maybeGrantAdmin): Google issues email_verified:
+	// false for some Cloud Identity / Workspace accounts, and an admin grant
+	// keyed on an unproven address would be a live escalation path the moment
+	// a corporate-domain email lands in PLATFORM_ADMIN_BOOTSTRAP_EMAILS.
+	EmailVerified bool
 }

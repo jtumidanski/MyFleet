@@ -59,7 +59,7 @@ func (pr *Processor) ProvisionFromGoogle(gp GoogleProfile) (Model, error) {
 		if ierr != nil {
 			return Model{}, ierr
 		}
-		pr.maybeGrantAdmin(created)
+		pr.maybeGrantAdmin(created, gp.EmailVerified)
 		return created, nil
 	}
 	if err != nil {
@@ -69,18 +69,26 @@ func (pr *Processor) ProvisionFromGoogle(gp GoogleProfile) (Model, error) {
 	if uerr != nil {
 		return Model{}, uerr
 	}
-	pr.maybeGrantAdmin(updated)
+	pr.maybeGrantAdmin(updated, gp.EmailVerified)
 	return updated, nil
 }
 
 // maybeGrantAdmin grants the platform-admin privilege when the provisioned user
-// is on the bootstrap list.
+// is on the bootstrap list AND Google's id_token asserted the email is
+// verified. The unverified case is not an error — it is simply not a grant:
+// ordinary login for that user proceeds unaffected, only the admin escalation
+// is withheld.
 //
-// A failure is logged, not returned. Refusing the login because a grant failed
-// would be a worse outcome than a delayed grant, and the startup seed re-runs on
-// every boot — so the failure is transient by construction.
-func (pr *Processor) maybeGrantAdmin(m Model) {
+// A grant failure is logged, not returned. Refusing the login because a grant
+// failed would be a worse outcome than a delayed grant, and the startup seed
+// re-runs on every boot — so the failure is transient by construction.
+func (pr *Processor) maybeGrantAdmin(m Model, emailVerified bool) {
 	if pr.grantAdmin == nil || !pr.bootstrapEmails[strings.ToLower(m.Email())] {
+		return
+	}
+	if !emailVerified {
+		pr.log.WithField("user_id", m.ID()).
+			Warn("bootstrap platform-admin email is on the list but Google has not verified it; refusing the grant")
 		return
 	}
 	if err := pr.grantAdmin(m.ID()); err != nil {

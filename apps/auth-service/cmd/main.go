@@ -35,9 +35,17 @@ func main() {
 
 	// PLATFORM_ADMIN_BOOTSTRAP_EMAILS seeds auth.platform_admins and is never
 	// consulted per request (FR-ADMIN-AUTH-3): the TABLE is the runtime source
-	// of truth, so an admin can be revoked with a DELETE and no redeploy.
-	bootstrapAdmins := platformadmin.ParseBootstrapEmails(
-		config.Get("PLATFORM_ADMIN_BOOTSTRAP_EMAILS", "jtumidanski@gmail.com"))
+	// of truth, so an admin can be revoked with a revoked_at tombstone and no
+	// redeploy. No default: an operator who forgets to set this must get zero
+	// seeded admins, not a specific address holding purge-every-fleet
+	// authority. Boot continues regardless — an empty bootstrap list is a
+	// valid, if unusual, deployment.
+	rawBootstrapEmails := config.Get("PLATFORM_ADMIN_BOOTSTRAP_EMAILS", "")
+	if rawBootstrapEmails == "" {
+		log.Warn("no PLATFORM_ADMIN_BOOTSTRAP_EMAILS set; no platform admin will be seeded")
+	}
+	bootstrapAdmins := platformadmin.ParseBootstrapEmails(rawBootstrapEmails)
+	adminProv := platformadmin.NewProvider(db)
 	adminAdm := platformadmin.NewAdministrator(db)
 
 	// Hook 1 of 2: grant to bootstrap users that already exist. Idempotent
@@ -76,9 +84,17 @@ func main() {
 	}
 
 	// Hook 2 of 2: grant at provisioning time, for a bootstrap user who did not
-	// exist when the seed ran (FR-ADMIN-AUTH-2).
+	// exist when the seed ran (FR-ADMIN-AUTH-2). Checked against IsRevoked
+	// first: without this, a user an operator just revoked would be re-granted
+	// on their very next login, reopening the same hole the revoked_at
+	// tombstone closes for the startup seed.
 	users := user.NewProcessor(log, userProv, user.NewAdministrator(db)).
 		WithBootstrapAdmins(bootstrapAdmins, func(userID string) error {
+			if revoked, rerr := adminProv.IsRevoked(userID); rerr != nil {
+				return rerr
+			} else if revoked {
+				return nil
+			}
 			return adminAdm.Grant(userID, platformadmin.BootstrapGrantedBy)
 		})
 

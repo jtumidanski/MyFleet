@@ -22,7 +22,7 @@ func newSeedDB(t *testing.T) *gorm.DB {
 			avatar_url TEXT, theme_preference TEXT, last_login_at DATETIME,
 			created_at DATETIME, updated_at DATETIME)`,
 		`CREATE TABLE auth.platform_admins (
-			user_id TEXT PRIMARY KEY, granted_by TEXT, granted_at DATETIME)`,
+			user_id TEXT PRIMARY KEY, granted_by TEXT, granted_at DATETIME, revoked_at DATETIME)`,
 	}
 	for _, stmt := range ddl {
 		if err := db.Exec(stmt).Error; err != nil {
@@ -99,17 +99,47 @@ func TestSeedFromEmails_isCaseInsensitive(t *testing.T) {
 	}
 }
 
-// Revocation is an out-of-band DELETE (PRD non-goal: no UI). The provider is
-// the runtime source of truth, so it must see the deletion immediately.
+// Revocation is an out-of-band UPDATE setting revoked_at (PRD non-goal: no
+// UI). The provider is the runtime source of truth, so it must see the
+// tombstone immediately. A DELETE is deliberately NOT the revocation
+// mechanism — see TestSeedFromEmails_doesNotRegrantARevokedAdmin for why.
 func TestProvider_reflectsRevocation(t *testing.T) {
 	db := newSeedDB(t)
 	if err := NewAdministrator(db).Grant("u1", BootstrapGrantedBy); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
-	if err := db.Exec(`DELETE FROM auth.platform_admins WHERE user_id = 'u1'`).Error; err != nil {
+	if err := db.Exec(`UPDATE auth.platform_admins SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = 'u1'`).Error; err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if ok, err := NewProvider(db).IsAdmin("u1"); err != nil || ok {
 		t.Errorf("a revoked admin must read as false, got %v err %v", ok, err)
+	}
+}
+
+// Revocation must be DURABLE across a restart. A plain DELETE is NOT durable:
+// the row is simply gone, so the next startup seed re-reads the bootstrap
+// list, finds no row keyed on this user, and grants it right back — which is
+// exactly the bug this test guards against. revoked_at is a tombstone: the
+// row stays present so the seed can see "this user was explicitly revoked"
+// and skip it.
+func TestSeedFromEmails_doesNotRegrantARevokedAdmin(t *testing.T) {
+	db := newSeedDB(t)
+	if err := db.Exec(`INSERT INTO auth.users (id, google_sub, email)
+	                   VALUES ('u1', 'sub-1', 'jtumidanski@gmail.com')`).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := NewAdministrator(db).Grant("u1", BootstrapGrantedBy); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	if err := db.Exec(`UPDATE auth.platform_admins SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = 'u1'`).Error; err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	if _, err := SeedFromEmails(db, ParseBootstrapEmails("jtumidanski@gmail.com")); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+
+	if ok, err := NewProvider(db).IsAdmin("u1"); err != nil || ok {
+		t.Errorf("a revoked admin must stay revoked across a re-seed, got %v err %v", ok, err)
 	}
 }

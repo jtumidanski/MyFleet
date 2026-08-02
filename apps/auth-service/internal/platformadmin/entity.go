@@ -3,7 +3,15 @@
 //
 // The bootstrap email list SEEDS this table and is never consulted per request
 // (FR-ADMIN-AUTH-3). That distinction is the whole point: an admin can be
-// revoked by deleting a row, with no redeploy and no config change.
+// revoked — durably, across restarts and re-logins — by setting revoked_at on
+// their row.
+//
+// Revocation is deliberately NOT a DELETE. A deleted row leaves nothing behind
+// for the next startup seed or provisioning login to see, so both would
+// re-read the bootstrap list, find no row keyed on that user, and grant the
+// privilege right back. revoked_at is a tombstone, not a soft delete: the row
+// stays present and visible to every query so both seeding hooks can check it
+// and refuse to recreate the grant.
 package platformadmin
 
 import (
@@ -22,6 +30,13 @@ type Entity struct {
 	UserID    string    `gorm:"type:uuid;primaryKey"`
 	GrantedBy string    `gorm:"not null"`
 	GrantedAt time.Time `gorm:"not null"`
+	// RevokedAt is the durable-revocation tombstone (see package doc). It is
+	// deliberately a plain nullable timestamp, NOT gorm.DeletedAt: this must
+	// never make GORM auto-filter queries by it. Every read that needs to tell
+	// an active admin apart from a revoked one does so explicitly — IsAdmin
+	// and IsRevoked below — so a bare Model/Find call never silently hides a
+	// revoked row from code that isn't expecting that.
+	RevokedAt *time.Time
 }
 
 func (Entity) TableName() string { return "auth.platform_admins" }

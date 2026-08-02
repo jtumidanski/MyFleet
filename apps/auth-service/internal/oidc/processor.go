@@ -69,12 +69,19 @@ func (p *Processor) Verify(ctx context.Context, rawIDToken string) (user.GoogleP
 }
 
 // profileFromClaims maps verified id_token claims to a user.GoogleProfile.
+//
+// email_verified is carried through unconditionally — including when Google
+// omits or falsifies it, which boolClaim maps to false — so
+// user.Processor.maybeGrantAdmin can refuse a bootstrap admin grant on an
+// unproven address. It does not gate anything else here: ordinary login does
+// not care whether the address is verified.
 func profileFromClaims(claims map[string]any) user.GoogleProfile {
 	return user.GoogleProfile{
-		Sub:    str(claims["sub"]),
-		Email:  str(claims["email"]),
-		Name:   str(claims["name"]),
-		Avatar: str(claims["picture"]),
+		Sub:           str(claims["sub"]),
+		Email:         str(claims["email"]),
+		Name:          str(claims["name"]),
+		Avatar:        str(claims["picture"]),
+		EmailVerified: boolClaim(claims["email_verified"]),
 	}
 }
 
@@ -83,4 +90,9 @@ func str(v any) string {
 		return s
 	}
 	return ""
+}
+
+func boolClaim(v any) bool {
+	b, _ := v.(bool)
+	return b
 }
