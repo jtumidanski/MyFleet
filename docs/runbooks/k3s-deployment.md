@@ -330,15 +330,33 @@ CI publishes, same shape as the schema-missing `CrashLoopBackOff` above.
 
 ### How images get pinned after the first sync
 
-`.github/workflows/main.yml`'s `main` push pipeline runs `build-test` →
-`publish` (image build/push, matrix of 5: the four Go services plus `web`),
-then fans out into two jobs that both depend only on `publish` and run in
-parallel: `trivy` (a CRITICAL/HIGH vulnerability gate, same matrix,
-`fail-fast: false` so one service's findings don't hide another's) and `tag`
-(pushes the next semver tag). Trivy does **not** gate `tag` — a failing scan
-still lets the version tag land. The only job downstream of both is
-`bump-overlay`, which declares `needs: [publish, trivy]` (not `tag`). A
-failing Trivy scan on any image blocks `bump-overlay`, so
+`.github/workflows/main.yml`'s `main` push pipeline starts four jobs at once:
+the three verification-gate jobs — `backend` (vet/build/test), `frontend`
+(test/build) and `manifests` (overlay render + invariants) — plus `publish`
+(image build/push, matrix of 5: the four Go services plus `web`). `publish`
+deliberately declares no `needs`: it pushes the SHA tag only, and a SHA-tagged
+image is inert — nothing resolves it until `bump-overlay` writes that SHA into
+the overlay — so there is no reason to hold image builds behind ~3 minutes of
+test time.
+
+`:latest` is a different matter and is **not** pushed by `publish`. Because
+`deploy/k8s/base/*/deployment.yaml` reference it (see the bootstrap note
+above), it is a real deploy input for a fresh cluster's first sync. A separate
+`retag-latest` job moves it, gated exactly like `bump-overlay` —
+`needs: [backend, frontend, manifests, publish, trivy]` — using `docker buildx
+imagetools create` to re-point the existing manifest list without rebuilding or
+re-uploading any layer.
+
+`trivy` (a CRITICAL/HIGH vulnerability gate, same matrix, `fail-fast: false` so
+one service's findings don't hide another's) depends only on `publish`, since
+it needs the image and nothing else.
+
+The two jobs with an effect outside the workflow both wait on the full gate:
+`tag` (pushes the next semver tag) declares `needs: [backend, frontend,
+manifests, publish]`, and `bump-overlay` declares `needs: [backend, frontend,
+manifests, publish, trivy]`. So an untested commit can be neither tagged nor
+deployed. Trivy does **not** gate `tag` — a failing scan still lets the version
+tag land. A failing Trivy scan on any image does block `bump-overlay`, so
 `deploy/k8s/overlays/main/kustomization.yaml` keeps its previous `newTag` and
 the cluster keeps running the last good SHA — the gate fails closed, even
 though the SHA already got a version tag.
@@ -348,7 +366,7 @@ cancel-in-progress: false}` so overlapping runs (two merges to `main` in quick
 succession) queue rather than race, and a stale-run guard: before rewriting
 `newTag`, it checks that `main`'s current tip still matches the SHA this run
 built; if a later merge's `bump-overlay` already landed while this run was
-still going through `build-test`/`publish`/`trivy`, it exits cleanly instead of
+still going through the gate/`publish`/`trivy`, it exits cleanly instead of
 pinning the overlay backwards to a stale commit.
 
 ## 7. Post-deploy verification

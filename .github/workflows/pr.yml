@@ -13,6 +13,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+          # This is a go.work workspace with no go.sum at the repo root, so
+          # setup-go's default lookup finds no dependency file, silently skips
+          # both cache restore and save, and every run recompiles the whole
+          # dependency graph from cold. Point it at the per-module sums.
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
 
       - name: Vet
         run: make vet
@@ -35,6 +42,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+          # golangci-lint type-checks every package, so it benefits from the
+          # same build cache the `backend` job needs. See the note there for why
+          # the default lookup misses in a go.work workspace.
+          cache-dependency-path: |
+            **/go.sum
+            go.work.sum
 
       - name: Cache lint tooling
         uses: actions/cache@v4
@@ -71,6 +84,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
