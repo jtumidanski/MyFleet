@@ -7,7 +7,17 @@ export interface VehicleRecordRow {
   id: string;
   sourceId: string;
   kind: VehicleRecordKind;
-  /** ISO 8601. The sort key. */
+  /**
+   * ISO 8601. The sort key, compared as a string (see `compareRows`) rather
+   * than parsed into a `Date`. That is only safe while every source is
+   * consistent: a non-UTC offset would invert ordering and corrupt the
+   * watermark (the same comparison drives `oldestDate`), and mixing
+   * fractional-second precision (`T00:00:00Z` vs `T00:00:00.000Z`) would make
+   * identical instants compare unequal, silently bypassing the id tiebreak in
+   * `compareRows`. A date-only string (`'2026-03-01'`) also sorts older than
+   * any same-day timestamp — adapters must pick one shape per source and use
+   * it consistently.
+   */
   date: string;
   title: string;
   mileage?: number;
@@ -27,7 +37,13 @@ export interface RecordSource {
 export interface MergeResult {
   /** Safe rows, newest first. */
   rows: VehicleRecordRow[];
-  /** Loaded rows suppressed because they fall below the watermark. */
+  /**
+   * Loaded rows suppressed because they fall below the watermark, counted
+   * across all kinds. Not kind-aware: a caller that narrows the visible rows
+   * with `filterVehicleRecords` still holds this cross-kind count, so a "N
+   * more hidden" footer built from it will over-report while filtered to one
+   * kind. (Task 14 renders that footer; fix it there, not here.)
+   */
   withheldCount: number;
 }
 
@@ -40,20 +56,34 @@ export interface MergeResult {
  * belong between the ones already shown.
  *
  * The watermark is the NEWEST "oldest loaded row" among sources that still
- * have unloaded pages — the most constraining source. Rows at or above it are
- * provably ordered; rows below it are withheld until more pages load.
+ * have unloaded pages — the most constraining source. Rows above it are
+ * provably ordered. Rows exactly at it are not fully provable: none of the
+ * three backend list queries carries an ORDER BY tiebreaker, so an unfetched
+ * row can share the watermark's timestamp and later insert above a row at
+ * that same timestamp already shown. `>=` is kept anyway — `>` would blank
+ * the feed whenever an incomplete source's loaded page sits entirely on one
+ * timestamp (plausible for fuel's day-granularity `date` column). The
+ * residual risk is confined to reordering among rows sharing one exact
+ * timestamp; it never crosses dates. Rows below the watermark are withheld
+ * until more pages load.
  *
- * Rows are deduped by id before anything else runs. None of the three backend
- * list queries carries an ORDER BY tiebreaker, so a row sharing a timestamp
- * with a page boundary can be re-fetched on a later page as pages accumulate.
+ * The watermark is computed from each source's own original rows, before any
+ * dedupe — a source's true oldest-loaded date must count every row it
+ * actually loaded, even one that another source also reported and therefore
+ * loses the dedupe pass below. Deduping the *output* first and reusing the
+ * deduped rows for the watermark would let a source's rows be silently
+ * emptied by another source's earlier duplicate, tripping the zero-loaded
+ * guard and blanking the whole feed even though the source did load a row.
+ * Dedupe by id only ever touches the flattened list that becomes `rows`.
+ * None of the three backend list queries carries an ORDER BY tiebreaker, so
+ * a row sharing a timestamp with a page boundary can be re-fetched on a
+ * later page (or reported by a second source) as pages accumulate.
  */
 export function mergeVehicleRecords(sources: RecordSource[]): MergeResult {
-  const dedupedSources = dedupeAcrossSources(sources);
-
-  const all = dedupedSources.flatMap((s) => s.rows);
+  const all = dedupeById(sources.flatMap((s) => s.rows));
   const sorted = [...all].sort(compareRows);
 
-  const incomplete = dedupedSources.filter((s) => s.hasMore);
+  const incomplete = sources.filter((s) => s.hasMore);
 
   // A source that has more to load but has loaded nothing tells us nothing
   // about where its rows belong, so no row can be trusted yet.
@@ -73,22 +103,19 @@ export function mergeVehicleRecords(sources: RecordSource[]): MergeResult {
 }
 
 /**
- * Collapses rows sharing an id, keeping the first occurrence and preserving
- * each source's shape (so per-source watermark logic still applies to the
- * deduped rows). A shared id can arise within one source's own accumulated
- * pages, or — if a caller passes overlapping data — across two sources.
+ * Collapses rows sharing an id, keeping the first occurrence. A shared id can
+ * arise within one source's own accumulated pages, or — if a caller passes
+ * overlapping data — across two sources.
  */
-function dedupeAcrossSources(sources: RecordSource[]): RecordSource[] {
+function dedupeById(rows: VehicleRecordRow[]): VehicleRecordRow[] {
   const seen = new Set<string>();
-  return sources.map((s) => {
-    const rows: VehicleRecordRow[] = [];
-    for (const r of s.rows) {
-      if (seen.has(r.id)) continue;
-      seen.add(r.id);
-      rows.push(r);
-    }
-    return { rows, hasMore: s.hasMore };
-  });
+  const result: VehicleRecordRow[] = [];
+  for (const r of rows) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    result.push(r);
+  }
+  return result;
 }
 
 /**
@@ -100,7 +127,12 @@ function oldestDate(rows: VehicleRecordRow[]): string {
   return rows.map((r) => r.date).reduce((oldest, d) => (d < oldest ? d : oldest));
 }
 
-/** Newest first, with a stable id tiebreak so equal dates never reorder. */
+/**
+ * Newest first, with a stable id tiebreak so equal dates never reorder.
+ * Dates compare as strings — see the caveat on `VehicleRecordRow.date`: this
+ * only produces correct results (and, via `oldestDate`, a correct watermark)
+ * when every row's `date` shares an offset and precision.
+ */
 function compareRows(a: VehicleRecordRow, b: VehicleRecordRow): number {
   if (a.date !== b.date) return a.date < b.date ? 1 : -1;
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;

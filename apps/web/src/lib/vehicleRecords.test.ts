@@ -117,6 +117,30 @@ describe('mergeVehicleRecords', () => {
 
     expect(rows.map((r) => r.id)).toEqual(['mileage:2026-03-01', 'mileage:2026-01-01']);
   });
+
+  // Regression: dedupe must not run before the watermark is computed. An
+  // incomplete source's true oldest-loaded date has to count every row it
+  // actually loaded, even one that an earlier source also reported (and that
+  // therefore loses the cross-source dedupe pass). If dedupe runs first and
+  // the watermark is read off the already-deduped rows, a source that loaded
+  // only rows duplicated elsewhere is left looking like it loaded nothing —
+  // tripping the zero-loaded guard and blanking the entire feed, even though
+  // the source did load a row and its oldest-loaded date (03-01) is known.
+  it('computes an incomplete source watermark from its own rows, even when every one is a duplicate', () => {
+    const shared = row('mileage', '2026-03-01');
+    const sources: RecordSource[] = [
+      { rows: [shared, row('mileage', '2026-02-01')], hasMore: false },
+      // Everything this source loaded duplicates a row from the source
+      // above. It still genuinely loaded that row, and 2026-03-01 is its
+      // real oldest-loaded date.
+      { rows: [{ ...shared }], hasMore: true },
+    ];
+
+    const { rows, withheldCount } = mergeVehicleRecords(sources);
+
+    expect(rows.map((r) => r.date)).toEqual(['2026-03-01']);
+    expect(withheldCount).toBe(1); // mileage 2026-02-01 is below the 03-01 watermark
+  });
 });
 
 describe('filterVehicleRecords', () => {
