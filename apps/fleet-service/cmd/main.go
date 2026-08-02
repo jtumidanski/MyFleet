@@ -56,6 +56,7 @@ func main() {
 		activity.Migration,
 		events.MigrateOutbox,
 		dashboard.Migration,
+		admin.Migration,
 	))
 	if err != nil {
 		log.WithError(err).Fatal("db connect")
