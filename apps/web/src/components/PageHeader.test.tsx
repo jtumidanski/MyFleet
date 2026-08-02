@@ -71,6 +71,20 @@ describe('PageHeader', () => {
     expect(container.firstElementChild?.children).toHaveLength(1);
   });
 
+  // The header row must be the same height with actions as without, or the
+  // title sits lower and the gap to the content below grows on exactly the
+  // pages that have a button (Dashboard, Vehicles) — which is what shipped.
+  // jsdom has no layout, so this pins the class that neutralises the taller
+  // control rather than the resulting pixel height.
+  it('keeps the actions from setting the header row height', () => {
+    const { container } = render(
+      <PageHeader title="Vehicles" actions={<button type="button">Add Vehicle</button>} />,
+    );
+
+    const actionsSlot = container.firstElementChild?.lastElementChild;
+    expect(actionsSlot).toHaveClass('-my-1', 'shrink-0');
+  });
+
   // FR-6: className merges via cn() rather than replacing the base classes.
   it('merges className with the base classes', () => {
     const { container } = render(<PageHeader title="Activity" className="max-w-md" />);
