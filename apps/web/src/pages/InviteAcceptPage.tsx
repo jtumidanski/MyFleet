@@ -29,7 +29,12 @@ export function InviteAcceptPage() {
       },
       onError: (err) => {
         const apiError = createErrorFromUnknown(err);
-        setErrorMessage(apiError.message || 'Could not accept invite');
+        // Prefer `detail` over `message`. `message` comes from the envelope's
+        // `title`, which for every invite conflict is the literal "conflict" —
+        // the same string for already-accepted, expired, and wrong-account. The
+        // `detail` is the only field that distinguishes them, and fleet-service
+        // now sets it per cause. It never contains an email address.
+        setErrorMessage(apiError.detail || apiError.message || 'Could not accept invite');
         setStatus('error');
       },
     });
