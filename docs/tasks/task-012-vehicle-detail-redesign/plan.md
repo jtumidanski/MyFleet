@@ -2603,7 +2603,13 @@ git commit -m "feat(web): add the vehicle trends block and photo gallery dialog"
 
 - one `useState` for which dialog is open (`type OpenDialog = QuickAction | 'edit' | 'gallery' | 'complete' | null`),
 - one `useState<VehicleRecordRow | null>` for the drawer,
-- `useVehicleRecords(vehicle.id, categories)`, `useMaintenanceSchedules(vehicle.id)`, and `useMaintenanceCategories()`.
+- `useMaintenanceSchedules(vehicle.id)` and `useMaintenanceCategories()`, then
+  `useVehicleRecords(vehicle.id, categoriesQuery)` — **pass the whole query result**,
+  not `categoriesQuery.data`. Task 8 takes the query state so it can distinguish "not
+  loaded yet" from "no categories", which is what keeps modification records from
+  rendering as maintenance during the cold-mount window.
+- Render `categoriesError` from that hook. Without it, a failed categories request
+  silently misfiles every modification record with no user-visible signal.
 
 The container becomes:
 
