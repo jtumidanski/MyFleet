@@ -8,6 +8,12 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
+// ErrInvalidRole is the DOMAIN error for a role outside the vocabulary
+// IsValidRole owns. The resource layer renders it as the 422 transport
+// envelope; the processor knows nothing about HTTP. Same pairing as
+// auth-service's user.ErrInvalidTheme / errThemeValidation.
+var ErrInvalidRole = errors.New("invalid membership role")
+
 // OwnerCounter is satisfied by both Provider (real) and stubProvider (test).
 type OwnerCounter interface {
 	CountOwners(fleetID string) (int, error)
@@ -74,4 +80,41 @@ func (pr *Processor) ValidateRemoval(fleetID, actorUserID, targetUserID, targetR
 		}
 	}
 	return nil
+}
+
+// ValidateRoleChange enforces FR-2.3 (role vocabulary), FR-2.4 (target must be
+// an active member of this fleet) and FR-2.6 (a fleet is never left with zero
+// owners). It returns the target membership AS IT IS TODAY so the caller does
+// not re-read it and can record from_role in the activity payload.
+//
+// The vocabulary check runs before the lookup on purpose: an out-of-range role
+// then costs no database round trip. Same ordering as user.Processor.UpdateTheme.
+func (pr *Processor) ValidateRoleChange(fleetID, targetUserID, role string) (Model, error) {
+	if !IsValidRole(role) {
+		return Model{}, ErrInvalidRole
+	}
+	m, err := pr.p.GetByFleetAndUser(fleetID, targetUserID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Model{}, server.ErrNotFound
+		}
+		return Model{}, err
+	}
+	// Status is vestigial today — every row is written "active" and never
+	// changed — so this is a statement of intent, not a live branch. It costs
+	// one comparison and keeps the guard correct if a second value appears.
+	if m.Status() != "active" {
+		return Model{}, server.ErrNotFound
+	}
+	// Only a demotion can orphan a fleet. Promotions never count owners.
+	if m.Role() == "owner" && role != "owner" {
+		n, err := pr.p.CountOwners(fleetID)
+		if err != nil {
+			return Model{}, err
+		}
+		if n <= 1 {
+			return Model{}, server.ErrConflict
+		}
+	}
+	return m, nil
 }
