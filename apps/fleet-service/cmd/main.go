@@ -116,11 +116,12 @@ func main() {
 		WithActivityRecorder(activity.Record).
 		WithEmitter(emitMaintenanceCompleted)
 
-	// Read-only accessors for deriving vehicle status on read (design §10.2).
-	// Schedule states come from the schedule processor (live DueState); last
-	// activity comes from the activity domain (falls back to vehicle created_at).
+	// Read-only accessors for deriving a vehicle's status, last activity, and
+	// governing due detail on read (design §10.2). Schedule detail comes from the
+	// schedule processor through an adapter; last activity comes from the
+	// activity domain (falls back to vehicle created_at).
 	vehicleStatusDeps := vehicle.StatusDeps{
-		Schedules: scheduleProc,
+		Schedules: scheduleDueAdapter{p: scheduleProc},
 		Activity:  activityProc,
 	}
 
@@ -225,4 +226,41 @@ func mustJWKSKeyfunc(log *logrus.Logger, jwksURL string, maxAttempts int, delay 
 	}
 	log.WithError(err).Fatal("JWKS keyfunc init failed after all attempts")
 	return nil // unreachable
+}
+
+// scheduleDueAdapter maps maintenanceschedule's due detail onto the vehicle
+// domain's port type. The mapping lives here, in the composition root, so
+// neither domain imports the other; a field added on one side becomes a compile
+// error here rather than a silently dropped value.
+//
+// The previous binding worked by structural typing because the gatherer returned
+// a []string. With named struct types on both sides it cannot, which is the
+// point: the boundary is now explicit.
+type scheduleDueAdapter struct {
+	p *maintenanceschedule.Processor
+}
+
+func (a scheduleDueAdapter) ScheduleDueByVehicle(vehicleID string) ([]vehicle.ScheduleDue, error) {
+	dues, err := a.p.ScheduleDueByVehicle(vehicleID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]vehicle.ScheduleDue, 0, len(dues))
+	for _, d := range dues {
+		breaches := make([]vehicle.Breach, 0, len(d.Breaches))
+		for _, b := range d.Breaches {
+			breaches = append(breaches, vehicle.Breach{
+				Axis:    b.Axis,
+				Days:    b.Days,
+				Miles:   b.Miles,
+				Urgency: b.Urgency,
+			})
+		}
+		out = append(out, vehicle.ScheduleDue{
+			ScheduleID: d.ScheduleID,
+			State:      d.State,
+			Breaches:   breaches,
+		})
+	}
+	return out, nil
 }

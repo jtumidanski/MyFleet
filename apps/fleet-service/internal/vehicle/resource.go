@@ -49,7 +49,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			now := time.Now().UTC()
 			resources := make([]server.Resource, 0, len(ms))
 			for _, m := range ms {
-				resources = append(resources, TransformWithStatus(m, statusDeps.DeriveStatus(m, now)))
+				resources = append(resources, TransformWithStatus(m, statusDeps.Derive(m, now).Status))
 			}
 			server.WriteJSON(w, http.StatusOK, server.Document{
 				Data: resources,
@@ -117,7 +117,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 			// Status is derived on read (design §10.2), never stored.
-			st := statusDeps.DeriveStatus(m, time.Now().UTC())
+			st := statusDeps.Derive(m, time.Now().UTC()).Status
 			server.WriteJSON(w, http.StatusOK, server.Document{Data: TransformWithStatus(m, st)})
 		})
 
