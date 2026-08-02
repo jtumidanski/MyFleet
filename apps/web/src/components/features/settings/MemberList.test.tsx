@@ -137,7 +137,10 @@ describe('MemberList — names', () => {
   it('marks the authenticated user with (you)', async () => {
     seed(
       [membership('me', 'owner'), membership('other', 'member')],
-      [userRow('me', 'Jane Doe', 'jane@example.com'), userRow('other', 'Sam Ito', 'sam@example.com')],
+      [
+        userRow('me', 'Jane Doe', 'jane@example.com'),
+        userRow('other', 'Sam Ito', 'sam@example.com'),
+      ],
     );
 
     renderWithProviders(<MemberList fleetId="f1" isOwner />);
@@ -202,7 +205,9 @@ describe('MemberList — Make owner', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /^make owner$/i }));
 
-    await waitFor(() => expect(memberService.updateRole).toHaveBeenCalledWith('f1', 'other', 'owner'));
+    await waitFor(() =>
+      expect(memberService.updateRole).toHaveBeenCalledWith('f1', 'other', 'owner'),
+    );
   });
 
   it('is hidden from non-owners and never offered on an owner row', async () => {

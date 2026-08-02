@@ -23,13 +23,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../../ui/alert-dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '../../ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
 import { useMembers, useRemoveMember, useUpdateMemberRole } from '../../../lib/hooks/api/members';
 import { useUsers } from '../../../lib/hooks/api/users';
 import { useAuth } from '../../../context/AuthContext';
@@ -53,10 +47,7 @@ type PendingAction =
 export function MemberList({ fleetId, isOwner }: MemberListProps) {
   const { user } = useAuth();
   const { data: members, isLoading } = useMembers(fleetId);
-  const memberIds = useMemo(
-    () => (members ?? []).map((m) => m.attributes.userId),
-    [members],
-  );
+  const memberIds = useMemo(() => (members ?? []).map((m) => m.attributes.userId), [members]);
   // A SECOND, independent query — not a select over useMembers. That is what
   // makes "memberships loaded, names failed" renderable (FR-1.7).
   const { data: users } = useUsers(memberIds);
