@@ -1,6 +1,7 @@
 package oidc
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -23,13 +24,33 @@ const stateCookieName = "oidc_state"
 // stateTTL bounds how long a login attempt's state/nonce cookie is valid.
 const stateTTL = 10 * time.Minute
 
+// Authenticator is the OIDC surface the callback needs. Declared here, at the
+// consumer, so the handler can be exercised without a live Google endpoint
+// (design §3.2). *Processor satisfies it implicitly.
+type Authenticator interface {
+	AuthCodeURL(state, nonce string) string
+	Exchange(ctx context.Context, code string) (string, error)
+	Verify(ctx context.Context, rawIDToken string) (user.GoogleProfile, string, error)
+}
+
+// UserProvisioner is the single user-store operation the callback performs.
+type UserProvisioner interface {
+	ProvisionFromGoogle(gp user.GoogleProfile) (user.Model, error)
+}
+
+// TokenIssuer mints the pair the browser leaves with.
+type TokenIssuer interface {
+	MintAccess(pr session.Principal) (string, error)
+	IssueRefresh(userID string) (string, error)
+}
+
 // Dependencies bundles everything the callback orchestration needs. The
 // membership resolver is injected (Decision 1) so this package never imports
 // the concrete membership client.
 type Dependencies struct {
-	OIDC        *Processor
-	Users       *user.Processor
-	Sessions    *session.Processor
+	OIDC        Authenticator
+	Users       UserProvisioner
+	Sessions    TokenIssuer
 	Resolve     session.MembershipResolver
 	StateSecret []byte
 	// AppBaseURL is the SPA origin the browser is redirected back to.
