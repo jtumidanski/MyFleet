@@ -49,11 +49,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 
 	return func(r chi.Router) {
 		// POST /fleets/{id}/invites — owner-only; creates an invite with a unique token
-		r.Post("/fleets/{id}/invites", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
-			Email string `json:"email"`
-			Role  string `json:"role"`
-		},
-		) {
+		r.Post("/fleets/{id}/invites", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs CreateRequest) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
 			traceID := telemetry.CorrelationIDFromContext(req.Context())

@@ -24,6 +24,18 @@ type Attributes struct {
 	InvitedByUserID string  `json:"invitedByUserId"`
 }
 
+// CreateRequest is the flat JSON:API attributes payload of
+// POST /fleets/{id}/invites.
+//
+// It lives here, next to the other transport types, rather than as an anonymous
+// struct inline in the handler: rest.go owns "serialization and transformation
+// between domain models and JSON:API" for this package, and a named type is
+// what makes the request shape referenceable from a test or a second caller.
+type CreateRequest struct {
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
 // Transform converts a Model to a JSON:API Resource.
 func Transform(m Model) server.Resource {
 	attrs := Attributes{
