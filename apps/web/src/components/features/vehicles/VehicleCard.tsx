@@ -86,6 +86,11 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
         'has-[a[data-card-link]:focus-visible]:ring-2',
         'has-[a[data-card-link]:focus-visible]:ring-ring',
         'has-[a[data-card-link]:focus-visible]:ring-offset-2',
+        // Unprefixed and inert until a ring is actually drawn: without it,
+        // Tailwind preflight's default #fff ring-offset-color wins, so a
+        // keyboard-focused card in dark mode shows a white band between the
+        // card and its ring instead of the card's own background.
+        'ring-offset-background',
       )}
     >
       {/* Clips the hero's top corners to the card's radius. */}

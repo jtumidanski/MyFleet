@@ -289,6 +289,21 @@ describe('VehicleCard — navigation', () => {
     expect(links[0]).toHaveAttribute('href', '/vehicles/v1');
     expect(links[1]).toHaveAttribute('href', expect.stringContaining('carfax.com'));
   });
+
+  it('anchors the overlay to the card root and does not clip its focus ring', () => {
+    // The overlay's after:inset-0 resolves against the nearest positioned
+    // ancestor, so `relative` on the root is load-bearing: without it the
+    // overlay silently re-anchors further up the page and the card stops being
+    // clickable where it looks clickable. `isolate` keeps the z-indices inside
+    // from leaking. `overflow-hidden` must NOT be here — on the root it clips
+    // the card link's focus ring; it belongs on the photo wrapper only.
+    renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
+    const root = screen.getByRole('link', { name: '2019 Honda Civic' }).closest('div.relative');
+
+    expect(root).not.toBeNull();
+    expect(root).toHaveClass('relative', 'isolate');
+    expect(root!.className).not.toContain('overflow-hidden');
+  });
 });
 
 describe('VehicleCard — Carfax', () => {
