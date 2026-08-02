@@ -39,6 +39,20 @@ class VehicleMediaService {
   }
 
   /**
+   * DELETE /api/fleet/vehicles/{vehicleId}/media/{mediaId} — detach a media
+   * object from a vehicle.
+   *
+   * Distinct from `DELETE /api/media/{id}`, which removes the media object
+   * itself in media-service. Removing a photo from a gallery needs BOTH: this
+   * call drops the reference the gallery lists, the other releases the bytes.
+   */
+  async removeMedia(vehicleId: string, mediaId: string): Promise<void> {
+    await apiClient.request<void>(`${this.basePath}/${vehicleId}/media/${mediaId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
    * PUT /api/fleet/vehicles/{vehicleId}/primary-image — set the primary image.
    * Clears all is_primary rows and mirrors to vehicles.primary_image_media_id.
    * Returns the updated Vehicle resource (re-fetched by the server).

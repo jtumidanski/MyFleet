@@ -80,6 +80,36 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleProc VehicleGe
 			server.WriteJSON(w, http.StatusCreated, server.Document{Data: Transform(created)})
 		}))
 
+		// DELETE /vehicles/{id}/media/{mediaId} — detach a media reference.
+		//
+		// This is the fleet-side half of removing a photo. Deleting the media
+		// object in media-service does NOT remove this row, so without this
+		// route the gallery keeps listing a reference whose bytes are gone.
+		r.Delete("/vehicles/{id}/media/{mediaId}", func(w http.ResponseWriter, req *http.Request) {
+			identity := auth.IdentityFromContext(req.Context())
+			vehicleID := chi.URLParam(req, "id")
+			mediaID := chi.URLParam(req, "mediaId")
+
+			v, err := vehicleProc.GetByID(vehicleID)
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			if err := authz.RequireSameFleet(identity, v.FleetID()); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			if err := authz.RequireWrite(identity); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			if err := proc.RemoveMedia(vehicleID, mediaID); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+
 		// PUT /vehicles/{id}/primary-image — handled by vehicle resource; this domain
 		// owns the vehiclemedia side (SetPrimary across rows + mirror).
 		// Route is registered here as an alternative entry point when vehiclemedia

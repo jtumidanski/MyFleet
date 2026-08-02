@@ -64,6 +64,27 @@ func (pr *Processor) SetPrimary(vehicleID, mediaID string) error {
 	return pr.a.SetPrimaryAtomic(vehicleID, target.ID(), mediaID, clearIDs)
 }
 
+// RemoveMedia detaches one media object from a vehicle.
+//
+// Scoped by (vehicleID, mediaID) rather than by row id so a caller cannot
+// remove a reference belonging to a different vehicle by guessing an id — the
+// route has already authorized the vehicle, not the row.
+func (pr *Processor) RemoveMedia(vehicleID, mediaID string) error {
+	m, err := pr.p.GetByVehicleAndMedia(vehicleID, mediaID)
+	if errors.Is(err, ErrNotFound) {
+		return server.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := pr.a.SoftDelete(vehicleID, m.ID(), m.IsPrimary()); errors.Is(err, ErrNotFound) {
+		return server.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	return nil
+}
+
 // GetByVehicleAndMedia fetches a specific media ref.
 func (pr *Processor) GetByVehicleAndMedia(vehicleID, mediaID string) (Model, error) {
 	m, err := pr.p.GetByVehicleAndMedia(vehicleID, mediaID)

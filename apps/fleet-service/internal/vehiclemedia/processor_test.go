@@ -1,9 +1,12 @@
 package vehiclemedia
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // fakeProvider satisfies Provider for unit tests.
@@ -32,6 +35,14 @@ type fakeAdministrator struct {
 	lastTargetID  string
 	lastMediaID   string
 	lastClearIDs  []string
+
+	// SoftDelete arguments, captured for assertion. deleteErr forces the
+	// already-removed branch.
+	deletedVehicleID string
+	deletedID        string
+	deletedPrimary   bool
+	deleteCalls      int
+	deleteErr        error
 }
 
 func (f *fakeAdministrator) Insert(m Model) (Model, error) { return m, nil }
@@ -59,6 +70,79 @@ func (f *fakeAdministrator) SetPrimaryAtomic(vehicleID, targetID, targetMediaID 
 		}
 	}
 	return nil
+}
+
+func (f *fakeAdministrator) SoftDelete(vehicleID, id string, wasPrimary bool) error {
+	f.deleteCalls++
+	f.deletedVehicleID = vehicleID
+	f.deletedID = id
+	f.deletedPrimary = wasPrimary
+	return f.deleteErr
+}
+
+func TestRemoveMedia_softDeletesTheMatchingRow(t *testing.T) {
+	row := NewBuilder().SetVehicleID("v1").SetMediaID("m1").SetIsPrimary(true).Build()
+	other := NewBuilder().SetVehicleID("v1").SetMediaID("m2").Build()
+
+	rows := []Model{row, other}
+	fa := &fakeAdministrator{rows: rows}
+	proc := NewProcessor(logrus.New(), &fakeProvider{rows: rows}, fa)
+
+	if err := proc.RemoveMedia("v1", "m1"); err != nil {
+		t.Fatalf("RemoveMedia failed: %v", err)
+	}
+
+	if fa.deletedID != row.ID() {
+		t.Errorf("SoftDelete id = %q, want %q", fa.deletedID, row.ID())
+	}
+	if fa.deletedVehicleID != "v1" {
+		t.Errorf("SoftDelete vehicleID = %q, want %q", fa.deletedVehicleID, "v1")
+	}
+	// The flag is what drives promotion of a successor; passing it wrong would
+	// silently leave the vehicle pointing at the photo just removed.
+	if !fa.deletedPrimary {
+		t.Error("SoftDelete wasPrimary = false, want true for the primary row")
+	}
+}
+
+func TestRemoveMedia_unknownMediaIsNotFound(t *testing.T) {
+	rows := []Model{NewBuilder().SetVehicleID("v1").SetMediaID("m1").Build()}
+	fa := &fakeAdministrator{rows: rows}
+	proc := NewProcessor(logrus.New(), &fakeProvider{rows: rows}, fa)
+
+	if err := proc.RemoveMedia("v1", "nope"); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("RemoveMedia error = %v, want server.ErrNotFound", err)
+	}
+	if fa.deleteCalls != 0 {
+		t.Errorf("SoftDelete called %d times for an unknown media id, want 0", fa.deleteCalls)
+	}
+}
+
+// A media id that belongs to a DIFFERENT vehicle must not be removable through
+// this vehicle's route — the caller was authorized against the vehicle only.
+func TestRemoveMedia_refusesAnotherVehiclesMedia(t *testing.T) {
+	rows := []Model{NewBuilder().SetVehicleID("v2").SetMediaID("m1").Build()}
+	fa := &fakeAdministrator{rows: rows}
+	proc := NewProcessor(logrus.New(), &fakeProvider{rows: rows}, fa)
+
+	if err := proc.RemoveMedia("v1", "m1"); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("RemoveMedia error = %v, want server.ErrNotFound", err)
+	}
+	if fa.deleteCalls != 0 {
+		t.Errorf("SoftDelete called %d times across vehicles, want 0", fa.deleteCalls)
+	}
+}
+
+// A row deleted between the read and the write surfaces as 404 rather than as
+// a 500 leaking the package-private sentinel.
+func TestRemoveMedia_concurrentRemovalIsNotFound(t *testing.T) {
+	rows := []Model{NewBuilder().SetVehicleID("v1").SetMediaID("m1").Build()}
+	fa := &fakeAdministrator{rows: rows, deleteErr: ErrNotFound}
+	proc := NewProcessor(logrus.New(), &fakeProvider{rows: rows}, fa)
+
+	if err := proc.RemoveMedia("v1", "m1"); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("RemoveMedia error = %v, want server.ErrNotFound", err)
+	}
 }
 
 func TestSetPrimary_unsetsPrevious(t *testing.T) {
