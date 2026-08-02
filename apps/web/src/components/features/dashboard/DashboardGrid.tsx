@@ -5,14 +5,12 @@
  * No drag-and-drop library added — uses simple buttons per guidelines.
  * Layout persisted via PUT /fleets/{id}/dashboard.
  */
-import { useState } from 'react';
-import { Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
+import { Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../ui/button';
-import { cn } from '../../../lib/utils';
 import { widgetRegistry } from './widgetRegistry';
-import { WIDGET_CATALOG, type WidgetType } from './widgetCatalog';
 import { useDashboardWidgets } from './useDashboardWidgets';
+import { AddWidgetMenu } from './AddWidgetMenu';
 
 interface DashboardGridProps {
   fleetId: string;
@@ -22,12 +20,6 @@ interface DashboardGridProps {
 export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
   const { widgets, isLoading, addWidget, removeWidget, moveUp, moveDown } =
     useDashboardWidgets(fleetId);
-  const [showAddMenu, setShowAddMenu] = useState(false);
-
-  const handleAdd = (type: WidgetType) => {
-    addWidget(type);
-    setShowAddMenu(false);
-  };
 
   if (isLoading) {
     return (
@@ -45,33 +37,7 @@ export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
       {isOwner && (
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Dashboard</h2>
-          <div className="relative">
-            <Button variant="outline" size="sm" onClick={() => setShowAddMenu((v) => !v)}>
-              <Plus className="mr-1 h-4 w-4" />
-              Add Widget
-            </Button>
-            {showAddMenu && (
-              <div className="absolute right-0 z-10 mt-1 w-52 rounded-md border bg-popover shadow-lg">
-                <ul className="py-1">
-                  {WIDGET_CATALOG.map((type) => (
-                    <li key={type}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={cn(
-                          'w-full justify-start px-4 py-2 text-sm font-normal',
-                          widgets.some((w) => w.type === type) && 'text-muted-foreground',
-                        )}
-                        onClick={() => handleAdd(type)}
-                      >
-                        {widgetRegistry[type].label}
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
+          <AddWidgetMenu placedTypes={widgets.map((w) => w.type)} onAdd={addWidget} />
         </div>
       )}
 
