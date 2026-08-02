@@ -1,6 +1,7 @@
 package oidc
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -28,21 +29,42 @@ const stateTTL = 10 * time.Minute
 // dance, so a hostile link cannot stuff an unbounded value into the cookie.
 const maxReturnPathLen = 512
 
+// Authenticator is the OIDC surface the callback needs. Declared here, at the
+// consumer, so the handler can be exercised without a live Google endpoint
+// (design §3.2). *Processor satisfies it implicitly.
+type Authenticator interface {
+	AuthCodeURL(state, nonce string) string
+	Exchange(ctx context.Context, code string) (string, error)
+	Verify(ctx context.Context, rawIDToken string) (user.GoogleProfile, string, error)
+}
+
+// UserProvisioner is the single user-store operation the callback performs.
+type UserProvisioner interface {
+	ProvisionFromGoogle(gp user.GoogleProfile) (user.Model, error)
+}
+
+// TokenIssuer mints the pair the browser leaves with.
+type TokenIssuer interface {
+	MintAccess(pr session.Principal) (string, error)
+	IssueRefresh(userID string) (string, error)
+}
+
 // Dependencies bundles everything the callback orchestration needs. The
 // principal resolver is injected (Decision 1) so this package never imports the
 // concrete membership client, and so this handler never constructs a Principal
 // of its own.
 type Dependencies struct {
-	OIDC        *Processor
-	Users       *user.Processor
-	Sessions    *session.Processor
+	OIDC        Authenticator
+	Users       UserProvisioner
+	Sessions    TokenIssuer
 	Resolve     session.PrincipalResolver
 	StateSecret []byte
 	// AppBaseURL is the SPA origin the browser is redirected back to.
 	AppBaseURL string
-	// HomePath / OnboardingPath are relative paths under AppBaseURL.
+	// HomePath / OnboardingPath / LoginPath are relative paths under AppBaseURL.
 	HomePath       string
 	OnboardingPath string
+	LoginPath      string
 	// CookieSecure controls the Secure flag on cookies this package sets. It is
 	// false for local plaintext HTTP (Traefik :80) and true in production.
 	CookieSecure bool
@@ -55,6 +77,49 @@ func InitializeRoutes(log logrus.FieldLogger, d Dependencies) func(chi.Router) {
 		r.Get("/auth/login/google", loginHandler(log, d))
 		r.Get("/auth/callback", callbackHandler(log, d))
 	}
+}
+
+// loginErrorCode is the coarse, browser-visible outcome of a failed callback.
+// Deliberately not derived from the underlying error: nothing about the
+// failure's internals reaches the SPA (FR-ERR-4). A typed constant set means
+// the compiler, not review, enforces the closed vocabulary.
+type loginErrorCode string
+
+const (
+	errCancelled    loginErrorCode = "cancelled"
+	errInvalidState loginErrorCode = "invalid_state"
+	errAuthFailed   loginErrorCode = "auth_failed"
+	errServerError  loginErrorCode = "server_error"
+)
+
+// failLogin returns the browser to the SPA's login page carrying a coarse
+// reason, instead of dead-ending on a plaintext error body.
+//
+// It deliberately does NOT clear the state cookie. GET /auth/callback is public
+// and carries no CSRF token, so any third party who can make a victim's browser
+// hit /auth/callback?error=access_denied reaches the exits ABOVE the state
+// check. Clearing there would let them destroy that browser's in-flight
+// oidc_state and break a login attempt they never touched. Instead the handler
+// clears the cookie exactly once, unconditionally, the moment verifyStateCookie
+// succeeds — so every exit at or after that point still leaves the abandoned
+// attempt's signed state cleared, and only the exits before it leave it intact.
+//
+// This is a knowing departure from plan Global Constraint FR-ERR-8 ("the state
+// cookie is cleared on every failure path"), adjudicated during review. The
+// constraint was written without the unauthenticated-attacker case in mind, and
+// the pre-diff code — which dead-ended on a plaintext error body — left the
+// cookie intact on these early exits too, so clearing here was a regression.
+// Do not "restore" a clear to this function.
+//
+// (Phrased without the literal name of that stdlib helper on purpose: Task 2
+// Step 5's invariant is a grep for it over this file, and it must stay at 0.)
+//
+// The location is composed entirely from server configuration plus a constant,
+// so there is no open-redirect surface (FR-ERR-9). It is deliberately NOT
+// query-escaped: escaping would turn the "#" into "%23" and put the code in the
+// path rather than the fragment.
+func failLogin(w http.ResponseWriter, req *http.Request, d Dependencies, code loginErrorCode) {
+	http.Redirect(w, req, d.AppBaseURL+d.LoginPath+"#error="+string(code), http.StatusFound)
 }
 
 func loginHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
@@ -128,44 +193,65 @@ func destination(d Dependencies, principal session.Principal, returnPath string)
 
 func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
+		// Google reports a declined consent screen — and its own
+		// misconfigurations — on `error`, with no `code`. Checked first so a
+		// cancel is not misreported as a missing-code fault.
+		if oauthErr := req.URL.Query().Get("error"); oauthErr != "" {
+			// Info, not Error: declining consent is a normal outcome and must
+			// not inflate the error rate. Logged all the same, because a spike
+			// in access_denied is a UX signal.
+			log.WithField("oauth_error", oauthErr).Info("oidc callback returned provider error")
+			if oauthErr == "access_denied" {
+				failLogin(w, req, d, errCancelled)
+				return
+			}
+			// invalid_scope / invalid_request / server_error are our
+			// misconfigurations, not the user's choice (design §3.3).
+			failLogin(w, req, d, errAuthFailed)
+			return
+		}
 		code := req.URL.Query().Get("code")
 		state := req.URL.Query().Get("state")
 		if code == "" || state == "" {
-			http.Error(w, "missing code or state", http.StatusBadRequest)
+			failLogin(w, req, d, errInvalidState)
 			return
 		}
 		wantNonce, returnPath, ok := verifyStateCookie(req, d.StateSecret, state)
 		if !ok {
-			http.Error(w, "invalid state", http.StatusBadRequest)
+			failLogin(w, req, d, errInvalidState)
 			return
 		}
+		// The one and only clearing site. Every exit above this line is
+		// reachable by a third party who cannot prove they own the in-flight
+		// attempt, so those leave the cookie alone; everything below has
+		// verified the signed state and may safely abandon it. See failLogin.
 		clearStateCookie(w, d.CookieSecure)
 
 		ctx := req.Context()
 		rawIDToken, err := d.OIDC.Exchange(ctx, code)
 		if err != nil {
 			log.WithError(err).Error("oidc code exchange")
-			http.Error(w, "authentication failed", http.StatusBadGateway)
+			failLogin(w, req, d, errAuthFailed)
 			return
 		}
 		profile, gotNonce, err := d.OIDC.Verify(ctx, rawIDToken)
 		if err != nil {
 			log.WithError(err).Error("oidc id_token verification")
-			http.Error(w, "authentication failed", http.StatusUnauthorized)
+			failLogin(w, req, d, errAuthFailed)
 			return
 		}
 		// idtoken.Validate does not check the nonce; bind the id_token to this
 		// login attempt by comparing its nonce to the one in the state cookie.
 		if gotNonce == "" || !hmac.Equal([]byte(gotNonce), []byte(wantNonce)) {
 			log.Error("oidc nonce mismatch")
-			http.Error(w, "authentication failed", http.StatusUnauthorized)
+			failLogin(w, req, d, errAuthFailed)
 			return
 		}
 
 		u, err := d.Users.ProvisionFromGoogle(profile)
 		if err != nil {
 			log.WithError(err).Error("provision user from google")
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			failLogin(w, req, d, errServerError)
 			return
 		}
 
@@ -176,20 +262,20 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		principal, err := d.Resolve(ctx, u.ID())
 		if err != nil {
 			log.WithError(err).Error("resolve principal on callback")
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			failLogin(w, req, d, errServerError)
 			return
 		}
 
 		access, err := d.Sessions.MintAccess(principal)
 		if err != nil {
 			log.WithError(err).Error("mint access on callback")
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			failLogin(w, req, d, errServerError)
 			return
 		}
 		refresh, err := d.Sessions.IssueRefresh(u.ID())
 		if err != nil {
 			log.WithError(err).Error("issue refresh on callback")
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			failLogin(w, req, d, errServerError)
 			return
 		}
 
