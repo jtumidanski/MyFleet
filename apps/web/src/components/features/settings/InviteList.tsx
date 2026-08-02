@@ -67,7 +67,7 @@ export function InviteList({ fleetId, isOwner }: InviteListProps) {
                 size="sm"
                 onClick={() => void handleCopy(inv.attributes.token)}
               >
-                Copy link
+                Copy Link
               </Button>
               <Button
                 variant="outline"
