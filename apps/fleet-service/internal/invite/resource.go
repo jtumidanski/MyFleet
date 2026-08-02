@@ -63,8 +63,14 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			// time, so an unrecognised value would mint a membership whose
 			// role no authz gate understands. Validate against the vocabulary
 			// membership owns.
-			if attrs.Email == "" || !membership.IsValidRole(attrs.Role) {
+			if !membership.IsValidRole(attrs.Role) {
 				server.WriteError(w, server.ErrValidation)
+				return
+			}
+			// A newline in an address must fail HERE, not be discovered by the
+			// SMTP layer hours later (PRD §8 Security).
+			if err := ValidateInviteEmail(attrs.Email); err != nil {
+				server.WriteError(w, err)
 				return
 			}
 

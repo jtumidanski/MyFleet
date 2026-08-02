@@ -75,3 +75,30 @@ func TestAccept_okWhenValid(t *testing.T) {
 		t.Fatalf("valid accept should pass, got %v", err)
 	}
 }
+
+func TestValidateInviteEmail(t *testing.T) {
+	valid := []string{"b@x.com", "first.last+tag@sub.example.co.uk"}
+	for _, s := range valid {
+		if err := ValidateInviteEmail(s); err != nil {
+			t.Fatalf("ValidateInviteEmail(%q) = %v, want nil", s, err)
+		}
+	}
+
+	// Every one of these is a header-injection or display-name vector, or is
+	// simply unsendable. mail.ParseAddress ACCEPTS "Bob <b@x.com>", which is
+	// exactly why the addr-spec equality check below it exists.
+	invalid := []string{
+		"",
+		"b@x.com\r\nBcc: victim@x.com",
+		"b@x.com\nBcc: victim@x.com",
+		"Bob <b@x.com>",
+		"not-an-address",
+		"@x.com",
+		"b@",
+	}
+	for _, s := range invalid {
+		if err := ValidateInviteEmail(s); !errors.Is(err, server.ErrValidation) {
+			t.Fatalf("ValidateInviteEmail(%q) = %v, want ErrValidation", s, err)
+		}
+	}
+}

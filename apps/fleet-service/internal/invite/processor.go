@@ -2,6 +2,7 @@ package invite
 
 import (
 	"errors"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -54,6 +55,25 @@ func (pr *Processor) ValidateAccept(inv Model, authedEmail string) error {
 	}
 	if !strings.EqualFold(inv.Email(), authedEmail) {
 		return server.ErrConflict
+	}
+	return nil
+}
+
+// ValidateInviteEmail enforces that an invite address is a bare addr-spec safe
+// to interpolate into a To: header (PRD §8 Security).
+//
+// CR/LF is checked first and separately so a header-injection attempt fails for
+// an unambiguous reason. The a.Address != s comparison is the important half:
+// mail.ParseAddress happily accepts "Bob <b@x.com>", whose display name would
+// then be attacker-influenced header content. Requiring the input to equal the
+// parsed addr-spec makes the header value a closed set of characters.
+func ValidateInviteEmail(s string) error {
+	if strings.ContainsAny(s, "\r\n") {
+		return server.ErrValidation
+	}
+	a, err := mail.ParseAddress(s)
+	if err != nil || a.Address != s {
+		return server.ErrValidation
 	}
 	return nil
 }
