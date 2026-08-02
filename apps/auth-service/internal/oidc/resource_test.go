@@ -196,9 +196,8 @@ func TestCallback_successHonoursReturnPathFromStateCookie(t *testing.T) {
 }
 
 // clearsStateCookie reports whether the response deletes the state cookie.
-// Late exits clear it twice — once by the existing call at the top of the
-// handler, once by failLogin — so this looks for *any* deleting Set-Cookie
-// rather than counting them (design §3.1).
+// It looks for *any* deleting Set-Cookie rather than counting them, so it
+// cannot be fooled by the number of clearing sites changing.
 func clearsStateCookie(rec *httptest.ResponseRecorder) bool {
 	for _, c := range rec.Result().Cookies() {
 		if c.Name == stateCookieName && c.MaxAge < 0 {
@@ -218,20 +217,31 @@ func loggedAt(hook *test.Hook, level logrus.Level, msg string) bool {
 }
 
 // TestCallback_failureRedirectsToLogin walks every failure exit in
-// callbackHandler. Each case asserts the 302, the exact Location, that the
-// abandoned attempt's state cookie is cleared (FR-ERR-8), and that the
-// operator-facing log line still fires unchanged (FR-ERR-7).
+// callbackHandler. Each case asserts the 302, the exact Location, whether the
+// abandoned attempt's state cookie is cleared, and that the operator-facing log
+// line still fires unchanged (FR-ERR-7).
+//
+// wantCookieCleared splits the table in two, and the split is the point.
+// /auth/callback is public and unauthenticated, so the exits BEFORE
+// verifyStateCookie are reachable by any third party who can make a victim's
+// browser issue the request; clearing there would let them kill an in-flight
+// login they never touched. Those cases assert the cookie is left ALONE.
+// Everything at or after successful state verification has proven ownership of
+// the attempt and still clears. This deliberately departs from plan Global
+// Constraint FR-ERR-8 — see failLogin's doc comment for the adjudication.
 func TestCallback_failureRedirectsToLogin(t *testing.T) {
 	boom := errors.New("boom")
 
 	cases := []struct {
-		name       string
-		target     string
-		withCookie bool
-		mutate     func(d *Dependencies)
-		code       string
-		logMsg     string
+		name              string
+		target            string
+		withCookie        bool
+		mutate            func(d *Dependencies)
+		code              string
+		logMsg            string
+		wantCookieCleared bool
 	}{
+		// --- pre-verification: the cookie must survive ---
 		{
 			name:   "missing code",
 			target: "/auth/callback?state=s-1",
@@ -247,6 +257,17 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 			target: "/auth/callback?code=abc&state=s-1",
 			code:   "invalid_state",
 		},
+		// A state cookie IS present, but it does not match the callback's state
+		// parameter, so verification fails. Still a pre-verification exit: an
+		// attacker who guesses nothing can replay /auth/callback?code=x&state=x
+		// against a victim mid-login, and must not be able to void the cookie.
+		{
+			name:       "state cookie does not match the state parameter",
+			target:     "/auth/callback?code=abc&state=s-other",
+			withCookie: true,
+			code:       "invalid_state",
+		},
+		// --- at or after verification: the cookie is cleared ---
 		{
 			name:       "code exchange fails",
 			target:     "/auth/callback?code=abc&state=s-1",
@@ -256,8 +277,9 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 				a.exchange = func(context.Context, string) (string, error) { return "", boom }
 				d.OIDC = a
 			},
-			code:   "auth_failed",
-			logMsg: "oidc code exchange",
+			code:              "auth_failed",
+			logMsg:            "oidc code exchange",
+			wantCookieCleared: true,
 		},
 		{
 			name:       "id_token verification fails",
@@ -270,8 +292,9 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 				}
 				d.OIDC = a
 			},
-			code:   "auth_failed",
-			logMsg: "oidc id_token verification",
+			code:              "auth_failed",
+			logMsg:            "oidc id_token verification",
+			wantCookieCleared: true,
 		},
 		{
 			name:       "nonce mismatch",
@@ -284,8 +307,9 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 				}
 				d.OIDC = a
 			},
-			code:   "auth_failed",
-			logMsg: "oidc nonce mismatch",
+			code:              "auth_failed",
+			logMsg:            "oidc nonce mismatch",
+			wantCookieCleared: true,
 		},
 		{
 			name:       "provisioning fails",
@@ -296,8 +320,9 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 					provision: func(user.GoogleProfile) (user.Model, error) { return user.Model{}, boom },
 				}
 			},
-			code:   "server_error",
-			logMsg: "provision user from google",
+			code:              "server_error",
+			logMsg:            "provision user from google",
+			wantCookieCleared: true,
 		},
 		{
 			name:       "principal resolution fails",
@@ -308,8 +333,9 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 					return session.Principal{}, boom
 				}
 			},
-			code:   "server_error",
-			logMsg: "resolve principal on callback",
+			code:              "server_error",
+			logMsg:            "resolve principal on callback",
+			wantCookieCleared: true,
 		},
 		{
 			name:       "access mint fails",
@@ -321,8 +347,9 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 					issue: func(string) (string, error) { return "refresh-raw", nil },
 				}
 			},
-			code:   "server_error",
-			logMsg: "mint access on callback",
+			code:              "server_error",
+			logMsg:            "mint access on callback",
+			wantCookieCleared: true,
 		},
 		{
 			name:       "refresh issue fails",
@@ -334,8 +361,9 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 					issue: func(string) (string, error) { return "", boom },
 				}
 			},
-			code:   "server_error",
-			logMsg: "issue refresh on callback",
+			code:              "server_error",
+			logMsg:            "issue refresh on callback",
+			wantCookieCleared: true,
 		},
 	}
 
@@ -359,8 +387,13 @@ func TestCallback_failureRedirectsToLogin(t *testing.T) {
 			if got := rec.Header().Get("Location"); got != want {
 				t.Errorf("Location = %q, want %q", got, want)
 			}
-			if !clearsStateCookie(rec) {
-				t.Errorf("expected a Set-Cookie deleting %s", stateCookieName)
+			if got := clearsStateCookie(rec); got != c.wantCookieCleared {
+				if c.wantCookieCleared {
+					t.Errorf("expected a Set-Cookie deleting %s", stateCookieName)
+				} else {
+					t.Errorf("expected NO Set-Cookie deleting %s: this exit runs before "+
+						"state verification, and any third party can reach it", stateCookieName)
+				}
 			}
 			if c.logMsg != "" && !loggedAt(hook, logrus.ErrorLevel, c.logMsg) {
 				t.Errorf("expected an error log %q, got %+v", c.logMsg, hook.AllEntries())
@@ -392,8 +425,12 @@ func TestCallback_providerAccessDeniedIsCancelled(t *testing.T) {
 	if got, want := rec.Header().Get("Location"), "http://app.test/login#error=cancelled"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
-	if !clearsStateCookie(rec) {
-		t.Errorf("expected a Set-Cookie deleting %s", stateCookieName)
+	// This is THE exit an attacker reaches for: /auth/callback?error=access_denied
+	// needs no code, no state and no secret, so if it cleared the cookie, any
+	// page that can navigate a victim's browser could void an in-flight login.
+	if clearsStateCookie(rec) {
+		t.Errorf("provider-error exit must NOT delete %s — it runs before state "+
+			"verification and is reachable by anyone", stateCookieName)
 	}
 	// Info, not Error: a cancel must not inflate the error rate, but a spike in
 	// access_denied is still a signal worth having.
@@ -410,8 +447,9 @@ func TestCallback_otherProviderErrorIsAuthFailed(t *testing.T) {
 	if got, want := rec.Header().Get("Location"), "http://app.test/login#error=auth_failed"; got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
-	if !clearsStateCookie(rec) {
-		t.Errorf("expected a Set-Cookie deleting %s", stateCookieName)
+	if clearsStateCookie(rec) {
+		t.Errorf("provider-error exit must NOT delete %s — it runs before state "+
+			"verification and is reachable by anyone", stateCookieName)
 	}
 	entries := hook.AllEntries()
 	if len(entries) != 1 || entries[0].Data["oauth_error"] != "invalid_scope" {

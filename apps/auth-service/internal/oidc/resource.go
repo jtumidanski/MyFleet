@@ -95,18 +95,27 @@ const (
 // failLogin returns the browser to the SPA's login page carrying a coarse
 // reason, instead of dead-ending on a plaintext error body.
 //
-// The state cookie is cleared on every path (FR-ERR-8): each of these exits
-// abandons the attempt, and the page the user lands on offers "Try again", so a
-// stale signed state must not survive to collide with the next attempt's. The
-// clear must precede http.Redirect, which calls WriteHeader — headers set after
-// that are dropped silently.
+// It deliberately does NOT clear the state cookie. GET /auth/callback is public
+// and carries no CSRF token, so any third party who can make a victim's browser
+// hit /auth/callback?error=access_denied reaches the exits ABOVE the state
+// check. Clearing there would let them destroy that browser's in-flight
+// oidc_state and break a login attempt they never touched. Instead the handler
+// clears the cookie exactly once, unconditionally, the moment verifyStateCookie
+// succeeds — so every exit at or after that point still leaves the abandoned
+// attempt's signed state cleared, and only the exits before it leave it intact.
+//
+// This is a knowing departure from plan Global Constraint FR-ERR-8 ("the state
+// cookie is cleared on every failure path"), adjudicated during review. The
+// constraint was written without the unauthenticated-attacker case in mind, and
+// the pre-diff code — which dead-ended on http.Error — left the cookie intact
+// on these early exits too, so clearing here was a regression. Do not "restore"
+// a clear to this function.
 //
 // The location is composed entirely from server configuration plus a constant,
 // so there is no open-redirect surface (FR-ERR-9). It is deliberately NOT
 // query-escaped: escaping would turn the "#" into "%23" and put the code in the
 // path rather than the fragment.
 func failLogin(w http.ResponseWriter, req *http.Request, d Dependencies, code loginErrorCode) {
-	clearStateCookie(w, d.CookieSecure)
 	http.Redirect(w, req, d.AppBaseURL+d.LoginPath+"#error="+string(code), http.StatusFound)
 }
 
@@ -209,6 +218,10 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 			failLogin(w, req, d, errInvalidState)
 			return
 		}
+		// The one and only clearing site. Every exit above this line is
+		// reachable by a third party who cannot prove they own the in-flight
+		// attempt, so those leave the cookie alone; everything below has
+		// verified the signed state and may safely abandon it. See failLogin.
 		clearStateCookie(w, d.CookieSecure)
 
 		ctx := req.Context()
