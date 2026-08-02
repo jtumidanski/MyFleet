@@ -8,18 +8,25 @@ import (
 // Entity maps to fleet.maintenance_categories (PRD §6, design §8.2).
 type Entity struct {
 	ID            string `gorm:"type:uuid;primaryKey"`
-	Name          string `gorm:"not null"`
+	// uniqueIndex (shared with Kind and FleetID below) is a case-SENSITIVE
+	// backstop against a double-submit or client retry inserting the same
+	// literal name twice (design §10.1 line 220-222); it does not replace the
+	// case-insensitive LOWER() dedupe in FindByName, which is the real
+	// user-facing match. PostgreSQL treats each NULL FleetID as distinct, so
+	// this index does not constrain system rows — Seed's FirstOrCreate is
+	// their guard.
+	Name          string `gorm:"not null;uniqueIndex:idx_maintenance_categories_scope"`
 	Description   string
 	SystemDefined bool `gorm:"not null;default:false"`
 	// The DEFAULT is what classifies the eight pre-existing rows in the same
 	// ALTER TABLE that adds the column — no backfill step (PRD FR-KIND-1).
 	// The literal is quoted because GORM copies the tag value verbatim into the
 	// DDL; unquoted, PostgreSQL reads `maintenance` as a column reference.
-	Kind string `gorm:"type:varchar(20);not null;default:'maintenance'"`
+	Kind string `gorm:"type:varchar(20);not null;default:'maintenance';uniqueIndex:idx_maintenance_categories_scope"`
 	// NULL means a system/global category visible to every fleet. A non-NULL
 	// value scopes the row to one fleet, so free-form names entered by one
 	// household never appear in another's picker (design §10.1).
-	FleetID *string `gorm:"type:uuid;index"`
+	FleetID *string `gorm:"type:uuid;index;uniqueIndex:idx_maintenance_categories_scope"`
 }
 
 func (Entity) TableName() string { return "fleet.maintenance_categories" }
@@ -35,6 +42,20 @@ func Make(e Entity) Model {
 		systemDefined: e.SystemDefined,
 		kind:          Kind(e.Kind),
 		fleetID:       e.FleetID,
+	}
+}
+
+// ToEntity converts a Model to an Entity for persistence. It is the only
+// place a Model turns back into a GORM Entity — entities otherwise never
+// leave the provider/administrator layer.
+func (m Model) ToEntity() Entity {
+	return Entity{
+		ID:            m.id,
+		Name:          m.name,
+		Description:   m.description,
+		SystemDefined: m.systemDefined,
+		Kind:          string(m.kind),
+		FleetID:       m.fleetID,
 	}
 }
 

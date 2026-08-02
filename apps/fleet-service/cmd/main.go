@@ -165,7 +165,7 @@ func main() {
 	// Category accessor for the record list's ?kind= filter. The processor is
 	// stateless, so constructing a second one here rather than reshaping
 	// maintenancecategory.InitializeRoutes costs nothing.
-	categoryProc := maintenancecategory.NewProcessor(log, maintenancecategory.NewProvider(db))
+	categoryProc := maintenancecategory.NewProcessor(log, maintenancecategory.NewProvider(db), maintenancecategory.NewAdministrator(db))
 
 	// Attachment ownership validation (PRD FR-DOC-6). Cluster-internal; the
 	// endpoint it calls is kept off the public internet by the priority-200

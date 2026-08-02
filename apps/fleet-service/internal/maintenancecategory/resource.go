@@ -18,7 +18,7 @@ import (
 // when it is system-defined (NULL fleet_id) or scoped to the caller's own
 // active fleet; any authenticated caller may list them.
 func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
-	proc := NewProcessor(log, NewProvider(db))
+	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
 	return func(r chi.Router) {
 		// GET /maintenance-categories — list categories (paged).
 		r.Get("/maintenance-categories", func(w http.ResponseWriter, req *http.Request) {

@@ -8,7 +8,9 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
-// Provider is the read-only interface for maintenance category data access.
+// Provider is the read interface for maintenance category data access.
+// Writes go through Administrator instead, which is the only thing in this
+// package that constructs an Entity from caller input.
 type Provider interface {
 	// List returns a page of categories visible to fleetID: system rows plus
 	// that fleet's own. An empty kind means no filter.
@@ -17,8 +19,6 @@ type Provider interface {
 	// a non-nil slice, because the record provider reads nil as "no filter"
 	// and empty-non-nil as "match nothing" (design D3).
 	IDsByKind(kind Kind, fleetID string) ([]string, error)
-	// Create inserts a category and returns the stored Model.
-	Create(e Entity) (Model, error)
 	// FindByName resolves a visible category by case-insensitive name and kind.
 	// The bool reports whether one was found.
 	FindByName(fleetID, name string, kind Kind) (Model, bool, error)
@@ -26,7 +26,7 @@ type Provider interface {
 
 type dbProvider struct{ db *gorm.DB }
 
-// NewProvider returns a read-only Provider backed by the given database.
+// NewProvider returns a Provider backed by the given database.
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 // visibleTo scopes a query to system rows plus one fleet's own.
@@ -81,19 +81,23 @@ func (p *dbProvider) IDsByKind(kind Kind, fleetID string) ([]string, error) {
 	return ids, nil
 }
 
-func (p *dbProvider) Create(e Entity) (Model, error) {
-	if err := p.db.Create(&e).Error; err != nil {
-		return Model{}, err
-	}
-	return Make(e), nil
-}
-
 func (p *dbProvider) FindByName(fleetID, name string, kind Kind) (Model, bool, error) {
 	var e Entity
 	// LOWER() on both sides rather than ILIKE: ILIKE is PostgreSQL-only and
 	// these providers are unit-tested against SQLite.
+	//
+	// The unique index on (fleet_id, name, kind) normally rules out more than
+	// one visible match, but it does NOT constrain system rows (PostgreSQL
+	// treats every NULL fleet_id as distinct), so a system row and a
+	// fleet-scoped row can legitimately share a name+kind. The explicit
+	// Order makes the system row win deterministically instead of leaving it
+	// to whatever order the database happens to return rows in — id ASC is
+	// a final tiebreak so the result is fully deterministic even between two
+	// rows that are both system-defined or both the same fleet's (which
+	// the unique index otherwise prevents).
 	err := visibleTo(p.db.Model(&Entity{}), fleetID).
 		Where("LOWER(name) = LOWER(?) AND kind = ?", name, string(kind)).
+		Order("CASE WHEN fleet_id IS NULL THEN 0 ELSE 1 END ASC, id ASC").
 		First(&e).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return Model{}, false, nil

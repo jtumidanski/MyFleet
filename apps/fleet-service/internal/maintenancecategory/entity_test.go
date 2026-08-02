@@ -57,6 +57,20 @@ func newTestDB(t *testing.T) *gorm.DB {
 	)`).Error; err != nil {
 		t.Fatalf("ddl: %v", err)
 	}
+	// Mirrors the uniqueIndex:idx_maintenance_categories_scope GORM tag on
+	// Entity's Name/Kind/FleetID fields (fleet_id, name, kind). SQLite, like
+	// PostgreSQL, treats each NULL fleet_id as distinct, so this does not
+	// constrain system rows — matching production semantics.
+	//
+	// SQLite's CREATE INDEX grammar qualifies the INDEX's own name with a
+	// schema ("schema-name.index-name"), not the table it indexes — the
+	// table-name that follows ON is never schema-qualified. That is the
+	// opposite of the ordinary table-reference syntax used elsewhere in this
+	// file, so the schema prefix moves from the table to the index name here.
+	if err := db.Exec(`CREATE UNIQUE INDEX fleet.idx_maintenance_categories_scope
+		ON maintenance_categories (fleet_id, name, kind)`).Error; err != nil {
+		t.Fatalf("unique index ddl: %v", err)
+	}
 	return db
 }
 
