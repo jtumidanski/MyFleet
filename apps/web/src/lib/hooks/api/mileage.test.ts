@@ -141,5 +141,19 @@ describe('useMileageRecords', () => {
     expect(result.current.data?.rows.map((r) => r.id)).toEqual(['r1', 'r2']);
     expect(result.current.hasNextPage).toBe(false);
     expect(listByVehicle).toHaveBeenCalledTimes(2);
+
+    // A call count alone would stay green even if the server-side truncation
+    // bug this task exists to fix (page[size] silently defaulting to 25) came
+    // back — assert the actual page-size argument was sent on both requests.
+    expect(listByVehicle).toHaveBeenNthCalledWith(
+      1,
+      'v1',
+      expect.objectContaining({ page: 1, pageSize: 100 }),
+    );
+    expect(listByVehicle).toHaveBeenNthCalledWith(
+      2,
+      'v1',
+      expect.objectContaining({ page: 2, pageSize: 100 }),
+    );
   });
 });

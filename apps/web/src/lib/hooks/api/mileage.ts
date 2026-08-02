@@ -42,8 +42,8 @@ export interface UseMileageParams {
 }
 
 /**
- * GET /api/fleet/vehicles/{vehicleId}/mileage — list mileage records.
- * Records come back chronological from the backend. Supports optional date filters.
+ * GET /api/fleet/vehicles/{vehicleId}/mileage — list mileage records (newest first).
+ * Supports optional date filters.
  *
  * Infinite rather than single-page: the unified records feed merges this with
  * two other independently-paginated sources, and a merge over sources that
@@ -69,7 +69,10 @@ export function useMileageRecords(params: UseMileageParams | null | undefined) {
     gcTime: 5 * 60 * 1000,
     select: (data) => ({
       rows: data.pages.flatMap((p) => p.data),
-      total: data.pages[0]?.meta?.total ?? 0,
+      // Read from the LAST page, not the first: `total` can change between
+      // fetches (a row created/removed while a later page was in flight),
+      // and the last page is the freshest information we have.
+      total: data.pages[data.pages.length - 1]?.meta?.total ?? 0,
     }),
   });
 }

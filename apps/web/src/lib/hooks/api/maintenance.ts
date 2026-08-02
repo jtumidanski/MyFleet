@@ -137,7 +137,9 @@ export function useMaintenanceRecords(
     gcTime: 5 * 60 * 1000,
     select: (data) => ({
       rows: data.pages.flatMap((p) => p.data),
-      total: data.pages[0]?.meta?.total ?? 0,
+      // Read from the LAST page, not the first: `total` can change between
+      // fetches, and the last page is the freshest information we have.
+      total: data.pages[data.pages.length - 1]?.meta?.total ?? 0,
     }),
   });
 }
