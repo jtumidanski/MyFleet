@@ -57,7 +57,7 @@ func Migration(db *gorm.DB) error {
 func ApplyPartialIndexes(db *gorm.DB) error {
 	create := `CREATE UNIQUE INDEX IF NOT EXISTS ux_membership_fleet_user
 	 ON fleet.fleet_memberships (fleet_id, user_id) WHERE deleted_at IS NULL`
-	if db.Dialector.Name() == "sqlite" {
+	if db.Name() == "sqlite" {
 		create = `CREATE UNIQUE INDEX IF NOT EXISTS fleet.ux_membership_fleet_user
 		 ON fleet_memberships (fleet_id, user_id) WHERE deleted_at IS NULL`
 	}
