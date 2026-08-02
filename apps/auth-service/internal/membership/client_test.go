@@ -95,3 +95,75 @@ func TestActive_errorDisclosesNeitherBodyNorUser(t *testing.T) {
 		t.Fatalf("error must name the status code so the failure is diagnosable: %q", msg)
 	}
 }
+
+func TestFleetMemberIDs_projectsUserIDs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/internal/fleets/f1/members" {
+			t.Errorf("path = %q, want /internal/fleets/f1/members", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[{"user_id":"u1","role":"owner"},{"user_id":"u2","role":"viewer"}]`))
+	}))
+	defer srv.Close()
+
+	ids, err := NewClient(srv.URL).FleetMemberIDs(context.Background(), "f1")
+	if err != nil {
+		t.Fatalf("FleetMemberIDs: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != "u1" || ids[1] != "u2" {
+		t.Fatalf("got %v, want [u1 u2]", ids)
+	}
+}
+
+func TestFleetMemberIDs_returnsEmptyForAFleetWithNoMembers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+
+	ids, err := NewClient(srv.URL).FleetMemberIDs(context.Background(), "f1")
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("got %v err %v, want an empty slice and no error", ids, err)
+	}
+}
+
+// The failure Active was written to catch, in a place where it bites harder:
+// fleet-service's error envelope is JSON, so without an explicit status check a
+// 500 decodes into an empty slice with err == nil, and every member name
+// silently disappears from the settings card with nothing in the logs.
+func TestFleetMemberIDs_failsClosedOnANon2xx(t *testing.T) {
+	for _, status := range []int{
+		http.StatusInternalServerError,
+		http.StatusBadGateway,
+		http.StatusServiceUnavailable,
+		http.StatusUnauthorized,
+	} {
+		c := serving(t, status, fleetErrorEnvelope)
+		ids, err := c.FleetMemberIDs(context.Background(), "f1")
+		if err == nil {
+			t.Errorf("status %d returned ids %v with no error; it must fail closed", status, ids)
+		}
+	}
+}
+
+// Active maps 404 to a zero value because "this user has no fleet" is a real
+// state. Here the fleet id came off a validated token, so a 404 means something
+// is wrong — it must NOT become "this fleet has no members".
+func TestFleetMemberIDs_treats404AsAnError(t *testing.T) {
+	c := serving(t, http.StatusNotFound, "")
+	if ids, err := c.FleetMemberIDs(context.Background(), "f1"); err == nil {
+		t.Fatalf("404 returned ids %v with no error; a fleet id from a valid token must exist", ids)
+	}
+}
+
+// Status code only: the body is upstream-controlled and the fleet id must not
+// ride along into a log line as an address.
+func TestFleetMemberIDs_errorCarriesNoIDAndNoBody(t *testing.T) {
+	c := serving(t, http.StatusInternalServerError, `{"errors":[{"detail":"secret-internal-detail"}]}`)
+	_, err := c.FleetMemberIDs(context.Background(), "fleet-abc")
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if strings.Contains(err.Error(), "fleet-abc") || strings.Contains(err.Error(), "secret-internal-detail") {
+		t.Fatalf("error %q must carry neither the fleet id nor the upstream body", err)
+	}
+}
