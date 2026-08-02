@@ -67,6 +67,41 @@ type VariantLookup interface {
 	Lookup(ctx context.Context, mediaObjectID, variant string) (VariantRef, bool, error)
 }
 
+// CardSource is what the generator needs in order to derive a card variant. It
+// crosses the port as plain data so the implementer needs none of mediaobject's
+// types — the same shape as VariantRef above.
+//
+// A named struct rather than four positional strings: four same-typed arguments
+// in a row is a swap waiting to happen, and a transposed fleetID/objectKey would
+// write a variant under the wrong key.
+type CardSource struct {
+	MediaObjectID string
+	FleetID       string
+	ObjectKey     string
+	ContentType   string
+}
+
+// CardGenerator schedules background generation of a missing card variant.
+//
+// Generate MUST return without blocking: it is called while serving an HTTP
+// response, and the whole point of the lazy path is that the request does not
+// wait for a decode. It has no error return because the caller has nothing to do
+// with one — the response has already been decided.
+//
+// Declared here and implemented in the composition root, the same shape as
+// VariantLookup, so mediaobject never imports the processing package.
+type CardGenerator interface {
+	Generate(src CardSource)
+}
+
+// nopCardGenerator is the default when no generator is wired
+// (MEDIA_LAZY_VARIANT_CONCURRENCY=0). Expressing "lazy generation is off" as a
+// no-op implementation rather than a nil check is what keeps Content free of a
+// branch that exists only for configuration.
+type nopCardGenerator struct{}
+
+func (nopCardGenerator) Generate(CardSource) {}
+
 // ContentInfo describes the bytes actually being served, which are not always
 // the media object's own metadata: a variant is re-encoded and carries its own
 // content type, and its length is not recorded anywhere. Returning this instead
@@ -150,10 +185,29 @@ type Processor struct {
 	storage  ObjectStore
 	variants VariantLookup
 	allow    Allowlist
+	cards    CardGenerator
 }
 
-func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore, variants VariantLookup, allow Allowlist) *Processor {
-	return &Processor{log: log, p: p, a: a, storage: st, variants: variants, allow: allow}
+// ProcessorOption configures an optional Processor dependency.
+type ProcessorOption func(*Processor)
+
+// WithCardGenerator enables lazy generation of missing card variants. It is an
+// option rather than a parameter because the dependency is genuinely optional —
+// MEDIA_LAZY_VARIANT_CONCURRENCY=0 wires no generator, and that is a supported
+// deployment, not a degraded one.
+func WithCardGenerator(g CardGenerator) ProcessorOption {
+	return func(pr *Processor) { pr.cards = g }
+}
+
+func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st ObjectStore, variants VariantLookup, allow Allowlist, opts ...ProcessorOption) *Processor {
+	pr := &Processor{
+		log: log, p: p, a: a, storage: st, variants: variants, allow: allow,
+		cards: nopCardGenerator{},
+	}
+	for _, opt := range opts {
+		opt(pr)
+	}
+	return pr
 }
 
 // InitUpload creates a media-object row in the uploaded state. The client then
@@ -312,21 +366,24 @@ func (pr *Processor) GetByID(id, identityFleetID string) (Model, error) {
 // browser.
 //
 // The media object is resolved and fleet-scoped FIRST, before any variant
-// lookup or object-store read, so a variant is never reachable by a caller who
-// could not read the original (FR-7.5). A cross-fleet caller exits here with
-// 404 — never 403, which would restore the existence oracle AuthorizeAccess
-// exists to prevent.
+// lookup, object-store read, or scheduling decision, so a variant is never
+// reachable by a caller who could not read the original (FR-7.5) and a caller
+// who cannot read a media object can cause no work to be scheduled for it. A
+// cross-fleet caller exits here with 404 — never 403, which would restore the
+// existence oracle AuthorizeAccess exists to prevent.
 //
-// A derived variant that cannot be served is a 404 — it does NOT fall back to
-// the original. Falling back looks harmless per request and is ruinous per page:
-// a twelve-card grid asking for thumbnails would quietly pull twelve full-size
-// originals, up to 25 MiB each, which is precisely the cost the thumbnail
-// variant exists to avoid. The caller asked for a small rendition; if there
-// isn't one, it must be told so rather than handed something orders of
-// magnitude larger. Both ways a derived variant can be unservable — no variant
-// row at all, and a row whose object is missing from the store — end in the
-// same 404, because the size consequence of serving the original is identical
-// in both.
+// A derived variant that cannot be served is a 404, with exactly one exception:
+// a missing card is served as a thumbnail. It does NOT fall back to the
+// original. Falling back to the original looks harmless per request and is
+// ruinous per page: a twelve-card grid asking for thumbnails would quietly pull
+// twelve full-size originals, up to 25 MiB each, which is precisely the cost the
+// derived variants exist to avoid. The card exception carries none of that: a
+// 320px thumbnail standing in for a 768px card is SMALLER than what was asked
+// for, never larger, and it exists because card variants are filled in lazily
+// for media uploaded before the variant existed. It is scoped to
+// card → thumbnail and generalises no further — a missing display still 404s,
+// so a detail view can never silently receive a smaller rendition than it asked
+// for.
 //
 // ?variant=original and a request with no parameter are untouched by any of
 // this: they serve the original with its Content-Length exactly as they always
@@ -337,57 +394,116 @@ func (pr *Processor) Content(ctx context.Context, id, identityFleetID string, wa
 	if err != nil {
 		return ContentInfo{}, nil, err
 	}
-
-	if want != ContentOriginal {
-		ref, found, err := pr.variants.Lookup(ctx, id, string(want))
-		if err != nil {
-			// A miss is found=false, so an error here means the database is
-			// broken — and GetByID just read the same database successfully.
-			// A 500 is the honest answer; a 404 would hide a real fault.
-			return ContentInfo{}, nil, err
-		}
-		if !found {
-			// Expected whenever processing has not run yet, or the media is not
-			// a processable image; debug, not warn.
-			pr.log.WithField("media_id", id).WithField("variant", string(want)).
-				Debug("no stored variant for the requested rendition")
-			return ContentInfo{}, nil, server.ErrNotFound
-		}
-		rc, err := pr.storage.GetObject(ctx, ref.ObjectKey)
-		switch {
-		case err == nil:
-			ct := ref.ContentType
-			if ct == "" {
-				// Should never happen — variants are re-encoded and always
-				// record a type — but an empty header is worse than a
-				// slightly wrong one.
-				ct = m.ContentType()
-			}
-			// A variant is re-encoded by the worker rather than supplied by a
-			// client, but it is still resolved through the allowlist so every
-			// response — original or variant — is described by the same
-			// trusted vocabulary, and a type nobody recognises degrades to
-			// octet-stream + attachment instead of being served as-is.
-			resolved, class := pr.allow.Resolve(ct)
-			// Size stays 0: media_variants records width/height/content_type
-			// but no byte count, so Content-Length is omitted (FR-7.8).
-			return ContentInfo{
-				ContentType: resolved,
-				Disposition: ContentDisposition(class, m.OriginalFilename(), m.ID()),
-			}, rc, nil
-		case errors.Is(err, storage.ErrObjectNotFound):
-			// DB/store drift, unlike the miss above — someone should see it,
-			// so this stays a Warn even though the response is the same 404.
-			pr.log.WithField("media_id", id).WithField("variant", string(want)).
-				WithField("object_key", ref.ObjectKey).
-				Warn("variant row has no object in storage")
-			return ContentInfo{}, nil, server.ErrNotFound
-		default:
-			return ContentInfo{}, nil, err
-		}
+	if want == ContentOriginal {
+		return pr.openOriginal(ctx, m)
 	}
 
-	return pr.openOriginal(ctx, m)
+	info, rc, err := pr.openVariant(ctx, m, want)
+	if err == nil {
+		return info, rc, nil
+	}
+	// Everything that is not a missing card leaves here: display and thumbnail
+	// 404s, and every 500. Only server.ErrNotFound downgrades, so a database or
+	// store fault still surfaces as a fault rather than being hidden behind a
+	// thumbnail.
+	if want != ContentCard || !errors.Is(err, server.ErrNotFound) {
+		return ContentInfo{}, nil, err
+	}
+
+	pr.scheduleCard(m)
+	// Expected and common during the lazy-fill period, so Debug: logging it
+	// loudly would be noise.
+	pr.log.WithField("media_id", m.ID()).
+		Debug("serving the thumbnail in place of an unavailable card variant")
+	// 200 with the thumbnail's own bytes, type and disposition — or its own 404
+	// if there is no thumbnail either. No third attempt.
+	return pr.openVariant(ctx, m, ContentThumbnail)
+}
+
+// openVariant opens one stored rendition. It returns server.ErrNotFound for both
+// ways a variant can be unservable — no row at all, and a row whose object is
+// missing from the store — because the caller's response is the same in both
+// cases; only the log level differs, since the second is drift someone should
+// see.
+func (pr *Processor) openVariant(ctx context.Context, m Model, want ContentVariant) (ContentInfo, io.ReadCloser, error) {
+	ref, found, err := pr.variants.Lookup(ctx, m.ID(), string(want))
+	if err != nil {
+		// A miss is found=false, so an error here means the database is broken
+		// — and GetByID just read the same database successfully. A 500 is the
+		// honest answer; a 404 would hide a real fault.
+		return ContentInfo{}, nil, err
+	}
+	if !found {
+		// Expected whenever processing has not run yet, or the media is not a
+		// processable image; debug, not warn.
+		pr.log.WithField("media_id", m.ID()).WithField("variant", string(want)).
+			Debug("no stored variant for the requested rendition")
+		return ContentInfo{}, nil, server.ErrNotFound
+	}
+	rc, err := pr.storage.GetObject(ctx, ref.ObjectKey)
+	switch {
+	case err == nil:
+		ct := ref.ContentType
+		if ct == "" {
+			// Should never happen — variants are re-encoded and always record a
+			// type — but an empty header is worse than a slightly wrong one.
+			ct = m.ContentType()
+		}
+		// A variant is re-encoded by the worker rather than supplied by a
+		// client, but it is still resolved through the allowlist so every
+		// response — original or variant — is described by the same trusted
+		// vocabulary, and a type nobody recognises degrades to octet-stream +
+		// attachment instead of being served as-is.
+		resolved, class := pr.allow.Resolve(ct)
+		// Size stays 0: media_variants records width/height/content_type but no
+		// byte count, so Content-Length is omitted (FR-7.8).
+		return ContentInfo{
+			ContentType: resolved,
+			Disposition: ContentDisposition(class, m.OriginalFilename(), m.ID()),
+		}, rc, nil
+	case errors.Is(err, storage.ErrObjectNotFound):
+		// DB/store drift, unlike the miss above — someone should see it, so this
+		// stays a Warn even though the response is the same 404.
+		pr.log.WithField("media_id", m.ID()).WithField("variant", string(want)).
+			WithField("object_key", ref.ObjectKey).
+			Warn("variant row has no object in storage")
+		return ContentInfo{}, nil, server.ErrNotFound
+	default:
+		return ContentInfo{}, nil, err
+	}
+}
+
+// scheduleCard asks the generator to fill in a missing card variant, if this
+// object is one a card can be derived from.
+//
+// Eligibility lives here rather than in the generator because the processor
+// holds the Model and the Allowlist and would otherwise be handing both across
+// the port. The generator owns single-flight, the concurrency cap, the failure
+// ledger and the work itself, because those are all its own state. Neither needs
+// to know the other's rules.
+//
+// It is called only after GetByID has authorized the caller, and only for
+// ContentCard — a missing thumbnail or display schedules nothing.
+func (pr *Processor) scheduleCard(m Model) {
+	if m.Status() != StatusReady {
+		pr.log.WithField("media_id", m.ID()).WithField("status", string(m.Status())).
+			Debug("card generation not scheduled: media object is not ready")
+		return
+	}
+	// ClassUnknown fails this check too, so a pre-allowlist row with an
+	// unrecognised type is never handed to image.Decode — the same guard Confirm
+	// applies before publishing media.uploaded.
+	if pr.allow.Classify(m.ContentType()) != ClassImage {
+		pr.log.WithField("media_id", m.ID()).
+			Debug("card generation not scheduled: media object is not a renderable image")
+		return
+	}
+	pr.cards.Generate(CardSource{
+		MediaObjectID: m.ID(),
+		FleetID:       m.FleetID(),
+		ObjectKey:     m.ObjectKey(),
+		ContentType:   m.ContentType(),
+	})
 }
 
 // openOriginal streams the uploaded bytes. Kept separate from Content so the

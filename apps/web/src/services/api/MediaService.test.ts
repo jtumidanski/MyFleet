@@ -39,4 +39,9 @@ describe('mediaService.getContentBlob', () => {
     await mediaService.getContentBlob('m1', 'display');
     expect(apiClient.requestBlob).toHaveBeenCalledWith('/api/media/m1/content?variant=display');
   });
+
+  it("appends ?variant=card for the list card's request", async () => {
+    await mediaService.getContentBlob('m1', 'card');
+    expect(apiClient.requestBlob).toHaveBeenCalledWith('/api/media/m1/content?variant=card');
+  });
 });

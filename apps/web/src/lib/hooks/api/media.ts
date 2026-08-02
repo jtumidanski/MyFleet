@@ -13,7 +13,7 @@ import type {
 // all                       -> ['media']
 // detail('m1')              -> ['media', 'detail', 'm1']
 // content('m1')             -> ['media', 'content', 'm1', 'original']
-// content('m1','thumbnail') -> ['media', 'content', 'm1', 'thumbnail']
+// content('m1','card')      -> ['media', 'content', 'm1', 'card']
 // vehicleMedia(vehicleId)   -> ['media', 'vehicle', vehicleId]
 export const mediaKeys = {
   all: ['media'] as const,

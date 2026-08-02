@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useFleetActivity } from '../lib/hooks/api/activity';
 import { ActivityFeed } from '../components/features/activity/ActivityFeed';
+import { PageHeader } from '../components/PageHeader';
 
 const PAGE_SIZE = 25;
 
@@ -21,7 +22,7 @@ export function ActivityPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Activity</h1>
+      <PageHeader title="Activity" />
       <ActivityFeed
         events={events}
         isLoading={isLoading}

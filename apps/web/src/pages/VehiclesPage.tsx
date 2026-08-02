@@ -7,6 +7,7 @@ import { VehicleList } from '../components/features/vehicles/VehicleList';
 import { VehicleForm } from '../components/features/vehicles/VehicleForm';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { PageHeader } from '../components/PageHeader';
 import type { VehicleFormInput } from '../lib/schemas/vehicle';
 import type { CreateVehicleAttributes } from '../types/models/vehicle';
 
@@ -45,18 +46,21 @@ export function VehiclesPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Vehicles</h1>
-        {canWrite && !showForm && (
-          <Button type="button" onClick={() => setShowForm(true)}>
-            Add Vehicle
-          </Button>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Vehicles"
+        actions={
+          canWrite &&
+          !showForm && (
+            <Button type="button" onClick={() => setShowForm(true)}>
+              Add Vehicle
+            </Button>
+          )
+        }
+      />
 
       {canWrite && showForm && (
-        <Card className="mt-6">
+        <Card>
           <CardHeader>
             <CardTitle className="text-lg">New Vehicle</CardTitle>
           </CardHeader>
@@ -71,9 +75,7 @@ export function VehiclesPage() {
         </Card>
       )}
 
-      <div className="mt-6">
-        <VehicleList vehicles={data?.data ?? []} isLoading={isLoading} />
-      </div>
+      <VehicleList vehicles={data?.data ?? []} isLoading={isLoading} />
     </div>
   );
 }

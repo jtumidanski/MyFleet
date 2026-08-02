@@ -10,6 +10,7 @@ type ContentVariant string
 const (
 	ContentOriginal  ContentVariant = "original"
 	ContentThumbnail ContentVariant = "thumbnail"
+	ContentCard      ContentVariant = "card"
 	ContentDisplay   ContentVariant = "display"
 )
 
@@ -28,6 +29,8 @@ func ParseContentVariant(raw string) (ContentVariant, error) {
 		return ContentOriginal, nil
 	case string(ContentThumbnail):
 		return ContentThumbnail, nil
+	case string(ContentCard):
+		return ContentCard, nil
 	case string(ContentDisplay):
 		return ContentDisplay, nil
 	default:

@@ -22,11 +22,18 @@ import { memberKeys, useRemoveMember, useUpdateMemberRole } from './members';
 import { authKeys } from './auth';
 import { mintAccessToken } from '../../api/refresh';
 import { toast } from 'sonner';
-import { inviteKeys, useCreateInvite, useRevokeInvite, useAcceptInvite } from './invites';
+import {
+  inviteKeys,
+  useCreateInvite,
+  useRevokeInvite,
+  useAcceptInvite,
+  useResendInvite,
+} from './invites';
 import { fleetKeys } from './fleets';
 import { useRenameFleet } from './fleetSettings';
 import { userKeys } from './users';
 import { memberService } from '../../../services/api/MemberService';
+import { inviteService } from '../../../services/api/InviteService';
 import { ApiError, createErrorFromUnknown } from '@myfleet/shared-ts';
 
 // ---------------------------------------------------------------------------
@@ -72,6 +79,7 @@ vi.mock('../../../services/api/InviteService', () => ({
     createInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
     revokeInvite: vi.fn().mockResolvedValue(undefined),
     acceptInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
+    resendInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
   },
 }));
 
@@ -438,5 +446,48 @@ describe('mutation invalidation contracts — real hooks', () => {
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
     expect(toast.error).toHaveBeenCalled();
+  });
+
+  // --------------------------------------------------------------------------
+  // useResendInvite
+  //
+  // Resend rotates the token, so a stale inviteKeys.list cache would hand the
+  // copy button a dead token — invalidation is REQUIRED, not cosmetic.
+  // useInvites reads inviteKeys.list({ fleetId }); asserting against
+  // inviteKeys.lists() here matches the sibling tests and still catches a
+  // typo'd or narrowed key via React Query's default prefix invalidation.
+  // --------------------------------------------------------------------------
+  it('useResendInvite invalidates inviteKeys.lists() on success', async () => {
+    const { result } = renderHook(() => useResendInvite('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('inv-1');
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));
+  });
+
+  // A user who hits the resend cooldown 429 and reloads must not see a dead
+  // token: invalidation runs in onSettled, so it must fire on rejection too.
+  it('useResendInvite invalidates inviteKeys.lists() even when the mutation rejects', async () => {
+    vi.mocked(inviteService.resendInvite).mockRejectedValueOnce(new Error('429'));
+
+    const { result } = renderHook(() => useResendInvite('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('inv-1');
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));
   });
 });
