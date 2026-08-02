@@ -161,19 +161,24 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 
 			if err := proc.ValidateAccept(inv, identity.Email); err != nil {
-				// Only the mismatch is logged. Already-accepted and expired are
-				// ordinary user outcomes the response body now explains;
-				// logging them adds noise. A mismatch is either a genuine
+				// Already-accepted and expired are ordinary user outcomes the
+				// response body now explains; logging them adds noise. The other
+				// two are worth being greppable: a mismatch is either a genuine
 				// wrong-account attempt or a regression of the empty-email-claim
-				// defect — worth being greppable. Invite id and correlation id
-				// only: never inv.Email(), never identity.Email (PRD FR-10/§8).
-				// The invite id joins to the row for an operator who already has
-				// database access, so the line itself discloses nothing.
-				if errors.Is(err, ErrEmailMismatch) {
-					log.WithFields(logrus.Fields{
-						"invite_id":      inv.ID(),
-						"correlation_id": telemetry.CorrelationIDFromContext(req.Context()),
-					}).Warn("invite accept rejected: email mismatch")
+				// defect, and an unusable invite is a corrupt row an operator
+				// should chase. Invite id and correlation id only: never
+				// inv.Email(), never identity.Email (PRD FR-10/§8). The invite id
+				// joins to the row for an operator who already has database
+				// access, so the line itself discloses nothing.
+				fields := logrus.Fields{
+					"invite_id":      inv.ID(),
+					"correlation_id": telemetry.CorrelationIDFromContext(req.Context()),
+				}
+				switch {
+				case errors.Is(err, ErrEmailMismatch):
+					log.WithFields(fields).Warn("invite accept rejected: email mismatch")
+				case errors.Is(err, ErrInviteUnusable):
+					log.WithFields(fields).Error("invite accept rejected: invite row has no email address")
 				}
 				server.WriteError(w, err)
 				return

@@ -57,6 +57,17 @@ var (
 	ErrAlreadyAccepted = server.Detailed(server.ErrConflict, "invite has already been accepted")
 	ErrInviteExpired   = server.Detailed(server.ErrConflict, "invite has expired")
 	ErrEmailMismatch   = server.Detailed(server.ErrConflict, "invite was issued to a different account")
+
+	// ErrInviteUnusable reports a corrupt row rather than anything the caller
+	// did: an invite with no email address cannot be matched against anyone, so
+	// it can never legitimately be accepted. It is separate from
+	// ErrEmailMismatch so the two are distinguishable in logs — a mismatch is a
+	// user outcome, a blank address is a data defect an operator should chase.
+	//
+	// It renders 409 like the other three (FR-8): the caller's request is
+	// well-formed and correctly authenticated, and the response must not tell a
+	// bearer-link holder that they found a broken row worth probing.
+	ErrInviteUnusable = server.Detailed(server.ErrConflict, "invite cannot be accepted")
 )
 
 // ValidateAccept enforces FR-FLEET-3: invite must be for the same email, not
@@ -71,6 +82,16 @@ func (pr *Processor) ValidateAccept(inv Model, authedEmail string) error {
 	}
 	if !inv.ExpiresAt().After(time.Now()) {
 		return ErrInviteExpired
+	}
+	// The blank-invite-email guard sits AT the email precondition, not ahead of
+	// the two above it, so the disclosure order is undisturbed. Without it
+	// strings.EqualFold("", "") below is true and a row with no address would be
+	// accepted by any authenticated caller — including one carrying the empty
+	// `email` claim this branch fixes. Unreachable today (resource.go rejects a
+	// blank email at creation); the guard makes it structurally impossible
+	// instead of impossible by another file's validation.
+	if inv.Email() == "" {
+		return ErrInviteUnusable
 	}
 	if !strings.EqualFold(inv.Email(), authedEmail) {
 		return ErrEmailMismatch

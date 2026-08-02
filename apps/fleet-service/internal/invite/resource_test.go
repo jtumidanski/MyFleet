@@ -141,6 +141,10 @@ func TestAcceptRoute_rendersADistinctDetailPerPrecondition(t *testing.T) {
 		{"already accepted", seedInvite("a@b.com", now.Add(time.Hour), &now), "a@b.com", "invite has already been accepted"},
 		{"expired", seedInvite("a@b.com", now.Add(-time.Hour), nil), "a@b.com", "invite has expired"},
 		{"email mismatch", seedInvite("invited@b.com", now.Add(time.Hour), nil), "other@b.com", "invite was issued to a different account"},
+		// A corrupt row: unreachable through the create endpoint, and the one
+		// case that used to be accepted rather than rejected when the caller's
+		// email claim was also empty.
+		{"invite row has no email", seedInvite("", now.Add(time.Hour), nil), "", "invite cannot be accepted"},
 	}
 	seen := map[string]bool{}
 	for _, c := range cases {
