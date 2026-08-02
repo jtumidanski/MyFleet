@@ -130,7 +130,8 @@ func newConfirmTestDB(t *testing.T) *gorm.DB {
 		status              TEXT NOT NULL,
 		created_at          DATETIME,
 		deleted_at          DATETIME,
-		purge_after         DATETIME
+		purge_after         DATETIME,
+		purge_operation_id  TEXT
 	)`).Error; err != nil {
 		t.Fatalf("create media_objects: %v", err)
 	}

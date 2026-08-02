@@ -20,6 +20,7 @@ type Entity struct {
 	CreatedAt        time.Time
 	DeletedAt        *time.Time `gorm:"index"`
 	PurgeAfter       *time.Time
+	PurgeOperationID *string `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "media.media_objects" }

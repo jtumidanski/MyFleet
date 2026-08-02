@@ -32,7 +32,9 @@ func newVariantTestDB(t *testing.T) *gorm.DB {
 		width           INTEGER,
 		height          INTEGER,
 		content_type    TEXT,
-		created_at      DATETIME
+		created_at      DATETIME,
+		deleted_at      DATETIME,
+		purge_operation_id TEXT
 	)`).Error; err != nil {
 		t.Fatalf("create media_variants: %v", err)
 	}

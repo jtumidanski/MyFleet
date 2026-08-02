@@ -34,9 +34,18 @@ func (a *dbAdministrator) ExistsByDedupeKey(k string) (bool, error) {
 // Insert persists a new notification. A unique-constraint violation on
 // dedupe_key (a concurrent generator) is surfaced as ErrDuplicate so the caller
 // can treat it as a successful dedupe.
+//
+// The conflict target names the PARTIAL unique index (dedupe_key WHERE
+// deleted_at IS NULL) — an unqualified ON CONFLICT (dedupe_key) no longer
+// infers an index now that the constraint is partial, and Postgres would
+// reject the statement outright.
 func (a *dbAdministrator) Insert(m Model) error {
 	e := m.ToEntity()
-	err := a.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "dedupe_key"}}, DoNothing: true}).Create(&e)
+	err := a.db.Clauses(clause.OnConflict{
+		Columns:     []clause.Column{{Name: "dedupe_key"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "deleted_at IS NULL"}}},
+		DoNothing:   true,
+	}).Create(&e)
 	if err.Error != nil {
 		if errors.Is(err.Error, gorm.ErrDuplicatedKey) {
 			return ErrDuplicate

@@ -19,6 +19,11 @@ func NewAdministrator(db *gorm.DB) Administrator { return &dbAdministrator{db: d
 
 // Upsert inserts or updates the in-app toggle for a (user, type) pair, keying on
 // the unique (user_id, type) index.
+//
+// The conflict target names the PARTIAL unique index (user_id, type WHERE
+// deleted_at IS NULL) — an unqualified ON CONFLICT (user_id, type) no longer
+// infers an index now that the constraint is partial, and Postgres would
+// reject the statement outright.
 func (a *dbAdministrator) Upsert(userID, typ string, enabled bool) (Model, error) {
 	e := Entity{
 		ID:           uuid.NewString(),
@@ -27,8 +32,9 @@ func (a *dbAdministrator) Upsert(userID, typ string, enabled bool) (Model, error
 		InAppEnabled: enabled,
 	}
 	if err := a.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "type"}},
-		DoUpdates: clause.AssignmentColumns([]string{"in_app_enabled"}),
+		Columns:     []clause.Column{{Name: "user_id"}, {Name: "type"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "deleted_at IS NULL"}}},
+		DoUpdates:   clause.AssignmentColumns([]string{"in_app_enabled"}),
 	}).Create(&e).Error; err != nil {
 		return Model{}, err
 	}

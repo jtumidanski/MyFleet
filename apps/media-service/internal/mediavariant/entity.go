@@ -8,14 +8,16 @@ import (
 
 // Entity maps to media.media_variants (PRD §6).
 type Entity struct {
-	ID            string `gorm:"type:uuid;primaryKey"`
-	MediaObjectID string `gorm:"type:uuid;not null;index"`
-	Variant       string `gorm:"not null"`
-	ObjectKey     string `gorm:"not null"`
-	Width         int
-	Height        int
-	ContentType   string
-	CreatedAt     time.Time
+	ID               string `gorm:"type:uuid;primaryKey"`
+	MediaObjectID    string `gorm:"type:uuid;not null;index"`
+	Variant          string `gorm:"not null"`
+	ObjectKey        string `gorm:"not null"`
+	Width            int
+	Height           int
+	ContentType      string
+	CreatedAt        time.Time
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeOperationID *string    `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "media.media_variants" }
