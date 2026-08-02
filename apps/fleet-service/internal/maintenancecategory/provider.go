@@ -22,15 +22,14 @@ type dbProvider struct{ db *gorm.DB }
 // NewProvider returns a read-only Provider backed by the given database.
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
-// visibleTo scopes a query to system rows plus one fleet's own. fleet_id is
-// a uuid column on PostgreSQL: binding "" as the parameter makes PostgreSQL
-// infer a uuid-typed placeholder and fail at bind time with "invalid input
-// syntax for type uuid" before any row is evaluated, so the IS NULL disjunct
-// never gets a chance to save the query. An empty fleetID — no active fleet,
-// or mid fleet-switch — must degrade to system-only rows, not a 500, so it
-// gets its own branch that never binds the empty string as a uuid parameter.
+// visibleTo scopes a query to system rows plus one fleet's own.
 func visibleTo(q *gorm.DB, fleetID string) *gorm.DB {
 	if fleetID == "" {
+		// This branch exists because fleet_id is uuid on PostgreSQL: binding
+		// "" as the parameter is a bind-time error there ("invalid input
+		// syntax for type uuid"), not a no-match. No test in this package
+		// can catch this branch's removal — see the comment on
+		// TestList_noActiveFleetSeesSystemOnly.
 		return q.Where("fleet_id IS NULL")
 	}
 	return q.Where("fleet_id IS NULL OR fleet_id = ?", fleetID)

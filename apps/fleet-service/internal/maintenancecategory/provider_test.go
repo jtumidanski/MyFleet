@@ -179,13 +179,14 @@ func TestIDsByKindScopesToFleet(t *testing.T) {
 	}
 }
 
-// TestList_noActiveFleetSeesSystemOnly proves the degradation path required
-// when a caller has no active fleet (removed from their last fleet, or
-// mid fleet-switch): List(kind, "", page) must still succeed and return
-// exactly the system categories, never fleet A's custom row and never an
-// error. This is the scenario visibleTo's empty-fleetID branch exists for —
-// on PostgreSQL, binding "" as a uuid parameter fails at bind time, so this
-// path must never fall through to "fleet_id = ?" with an empty string.
+// TestList_noActiveFleetSeesSystemOnly verifies query semantics only: that
+// List(kind, "", page) returns exactly the system categories and never
+// fleet A's custom row. It does NOT regression-guard the PostgreSQL bind
+// failure (SQLSTATE 22P02) that motivates the fleetID == "" branch in
+// visibleTo — SQLite does not type-check bind parameters, so
+// "fleet_id = ''" simply matches no rows there instead of erroring, and
+// this test passes identically whether that branch exists or not. Deleting
+// the branch will not fail this suite.
 func TestList_noActiveFleetSeesSystemOnly(t *testing.T) {
 	db := newTestDB(t)
 	if err := Seed(db); err != nil {
