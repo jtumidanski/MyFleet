@@ -113,33 +113,35 @@ export function VehicleDetailPage() {
           </>
         }
         actions={
-          <>
-            {canWrite && !editing && (
-              <Button type="button" variant="outline" onClick={() => setEditing(true)}>
-                Edit
-              </Button>
-            )}
-            {canWrite && (
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => void handleDelete()}
-                disabled={softDelete.isPending}
-              >
-                Delete
-              </Button>
-            )}
-            {canRestore && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void handleRestore()}
-                disabled={restore.isPending}
-              >
-                Restore
-              </Button>
-            )}
-          </>
+          (canWrite || canRestore) && (
+            <>
+              {canWrite && !editing && (
+                <Button type="button" variant="outline" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+              )}
+              {canWrite && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void handleDelete()}
+                  disabled={softDelete.isPending}
+                >
+                  Delete
+                </Button>
+              )}
+              {canRestore && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleRestore()}
+                  disabled={restore.isPending}
+                >
+                  Restore
+                </Button>
+              )}
+            </>
+          )
         }
       />
 

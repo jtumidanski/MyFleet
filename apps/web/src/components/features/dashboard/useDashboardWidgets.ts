@@ -80,6 +80,13 @@ export function useDashboardWidgets(fleetId: string): DashboardWidgets {
   );
 
   const addWidget = (type: WidgetType) => {
+    // Finding 1: while the initial GET is still in flight, `widgets` is `[]`
+    // (server data hasn't landed and there's no local copy yet). Adding here
+    // would `save([newWidget])`, and `save` is a full-replace PUT — it would
+    // wipe out whatever the server actually has once it responds, and the
+    // local copy would then mask the real GET result. No-op until we know
+    // what's really there.
+    if (isLoading) return;
     const entry = widgetRegistry[type];
     const next: GridWidget[] = [
       ...widgets,

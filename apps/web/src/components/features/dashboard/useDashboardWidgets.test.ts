@@ -102,6 +102,26 @@ describe('useDashboardWidgets', () => {
     ]);
   });
 
+  // Finding 1 (data loss): while the initial GET is still in flight,
+  // `widgets` is `[]` — there's no server data and no local copy yet. If
+  // addWidget ran anyway, `save` would fire a full-replace PUT with just the
+  // new widget, destroying whatever layout the server actually has, and the
+  // resulting local copy would then permanently mask the real GET response
+  // when it lands. addWidget must no-op until the query settles.
+  it('does not call saveLayout when addWidget is invoked while the layout query is still loading', async () => {
+    // A promise that never resolves keeps `isLoading` true for the life of
+    // the test.
+    vi.mocked(dashboardService.getLayout).mockReturnValue(new Promise<Dashboard>(() => {}));
+
+    const { result } = renderHook(() => useDashboardWidgets('f1'), { wrapper });
+    expect(result.current.isLoading).toBe(true);
+
+    act(() => result.current.addWidget('recent-activity'));
+
+    expect(result.current.widgets).toEqual([]);
+    expect(dashboardService.saveLayout).not.toHaveBeenCalled();
+  });
+
   it('removes a widget by id and persists', async () => {
     vi.mocked(dashboardService.getLayout).mockResolvedValue(
       layout([widget('w1', 'fleet-overview', 0), widget('w2', 'recent-activity', 1)]),

@@ -42,6 +42,35 @@ describe('PageHeader', () => {
     expect(container.firstElementChild?.children).toHaveLength(1);
   });
 
+  // Finding 2 (whole-branch review): VehicleDetailPage passes `actions` a
+  // fragment wrapping several role-gated buttons. A fragment is always
+  // truthy — even when every child inside it renders nothing (e.g. a viewer,
+  // where both canWrite and canRestore are false) — so gating only the
+  // individual buttons and not the fragment itself breaks the
+  // no-empty-actions-container contract pinned above. Asserted here rather
+  // than on VehicleDetailPage because that page has no existing test
+  // harness; this pins the exact caller pattern
+  // (`actions={(canWrite || canRestore) && <>...</>}`) that fixes it.
+  it('renders no actions container when a caller gates its actions fragment behind a false condition', () => {
+    const canWrite = false;
+    const canRestore = false;
+    const { container } = render(
+      <PageHeader
+        title="Vehicle"
+        actions={
+          (canWrite || canRestore) && (
+            <>
+              <button type="button">Edit</button>
+              <button type="button">Delete</button>
+            </>
+          )
+        }
+      />,
+    );
+
+    expect(container.firstElementChild?.children).toHaveLength(1);
+  });
+
   // FR-6: className merges via cn() rather than replacing the base classes.
   it('merges className with the base classes', () => {
     const { container } = render(<PageHeader title="Activity" className="max-w-md" />);
