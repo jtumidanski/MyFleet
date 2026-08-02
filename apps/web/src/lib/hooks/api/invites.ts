@@ -101,7 +101,13 @@ export function useAcceptInvite() {
     },
     onError: (err) => {
       const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not accept invite');
+      // Same precedence as InviteAcceptPage: `message` comes from the
+      // envelope's `title`, which for every invite conflict is the literal
+      // "conflict". `detail` is the only field that separates already-accepted,
+      // expired and wrong-account, and this toast fires alongside the page's
+      // own handler on the very same request — so both must prefer it or the
+      // user reads "conflict" next to the real reason.
+      toast.error(apiError.detail || apiError.message || 'Could not accept invite');
     },
   });
 }

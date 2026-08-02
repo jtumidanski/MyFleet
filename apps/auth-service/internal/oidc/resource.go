@@ -24,13 +24,14 @@ const stateCookieName = "oidc_state"
 const stateTTL = 10 * time.Minute
 
 // Dependencies bundles everything the callback orchestration needs. The
-// membership resolver is injected (Decision 1) so this package never imports
-// the concrete membership client.
+// principal resolver is injected (Decision 1) so this package never imports the
+// concrete membership client, and so this handler never constructs a Principal
+// of its own.
 type Dependencies struct {
 	OIDC        *Processor
 	Users       *user.Processor
 	Sessions    *session.Processor
-	Resolve     session.MembershipResolver
+	Resolve     session.PrincipalResolver
 	StateSecret []byte
 	// AppBaseURL is the SPA origin the browser is redirected back to.
 	AppBaseURL string
@@ -105,19 +106,18 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 			return
 		}
 
-		fleetID, role, err := d.Resolve(ctx, u.ID())
+		// The resolver reads the row ProvisionFromGoogle just wrote, by primary
+		// key. Safe: there is a single primary Postgres and no read replica in
+		// deploy/k8s, and the write has committed by the time ProvisionFromGoogle
+		// returns. This is the first place a read replica would break.
+		principal, err := d.Resolve(ctx, u.ID())
 		if err != nil {
-			log.WithError(err).Error("resolve membership on callback")
+			log.WithError(err).Error("resolve principal on callback")
 			http.Error(w, "authentication failed", http.StatusInternalServerError)
 			return
 		}
 
-		access, err := d.Sessions.MintAccess(session.Principal{
-			UserID:        u.ID(),
-			Email:         u.Email(),
-			ActiveFleetID: fleetID,
-			Role:          role,
-		})
+		access, err := d.Sessions.MintAccess(principal)
 		if err != nil {
 			log.WithError(err).Error("mint access on callback")
 			http.Error(w, "authentication failed", http.StatusInternalServerError)
@@ -137,8 +137,10 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		session.SetRefreshCookie(w, refresh, d.CookieSecure)
 
 		// New users without a fleet go to onboarding; everyone else lands home.
+		// membership.Client maps fleet-service's 404 to an empty fleet id, so
+		// this is how a brand-new user is recognised.
 		dest := d.AppBaseURL + d.HomePath
-		if fleetID == "" {
+		if principal.ActiveFleetID == "" {
 			dest = d.AppBaseURL + d.OnboardingPath
 		}
 		dest += "#access_token=" + url.QueryEscape(access)
