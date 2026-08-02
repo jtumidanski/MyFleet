@@ -1222,13 +1222,21 @@ None of the three list hooks passes `page[size]`, so each silently shows the new
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: each of `useMileageRecords`, `useFuelLogs`, `useMaintenanceRecords` accepts an optional `page` and returns the full `ListResult` (`{ data, meta }`) rather than a bare array:
+- Produces: all three become `useInfiniteQuery`. Each accumulates pages and exposes a flattened array plus the server's total:
 ```ts
-useMileageRecords({ vehicleId, from?, to?, page?, pageSize? })  // → ListResult<MileageRecordAttributes>
-useFuelLogs(vehicleId, page?)                                   // → ListResult<FuelLogAttributes>
-useMaintenanceRecords(vehicleId, kind?, page?)                  // → ListResult<MaintenanceRecordAttributes>
+// apps/web/src/lib/hooks/api/pageSize.ts
+export const RECORD_PAGE_SIZE = 100;   // server.ParsePage hard-caps page[size] at 100
+
+// Each hook's `data` (after select):
+interface PagedRows<A> { rows: Array<JsonApiResource<A>>; total: number }
+
+useMileageRecords({ vehicleId, from?, to? })   // → PagedRows<MileageRecordAttributes>
+useFuelLogs(vehicleId)                          // → PagedRows<FuelLogAttributes>
+useMaintenanceRecords(vehicleId, kind?)         // → PagedRows<MaintenanceRecordAttributes>
 ```
-`PAGE_SIZE = 100` is exported from `apps/web/src/lib/hooks/api/vehicleRecords.ts` in Task 8; until then each hook defines its own `const PAGE_SIZE = 100`.
+Each also returns React Query's `hasNextPage`, `fetchNextPage`, and `isFetchingNextPage`.
+
+`RECORD_PAGE_SIZE` lives in its own module so all three hooks and Task 8 share one constant rather than each redeclaring it.
 
 - [ ] **Step 1: Add page params to the services**
 
@@ -1253,42 +1261,112 @@ useMaintenanceRecords(vehicleId, kind?, page?)                  // → ListResul
 
 Apply the same shape to `FuelService.listByVehicle`. `MileageService.listByVehicle` already accepts `page` and `pageSize` — leave it.
 
-- [ ] **Step 2: Drop the array-flattening `select` and pass a page size**
+- [ ] **Step 2: Add the shared page-size constant**
 
-Each of the three hooks currently ends with `select: (result) => result.data`, which throws away `meta` — the exact field the feed needs to know whether more rows exist. Remove that `select` and pass the page through. For `useFuelLogs`:
+Create `apps/web/src/lib/hooks/api/pageSize.ts`:
 
 ```ts
-const PAGE_SIZE = 100; // server.ParsePage hard-caps page[size] at 100.
+/**
+ * server.ParsePage defaults page[size] to 25 and hard-caps it at 100
+ * (packages/shared-go/server/pagination.go:25,29). Requesting more is silently
+ * clamped, so 100 is the largest page a client can actually get.
+ */
+export const RECORD_PAGE_SIZE = 100;
+```
 
-/** GET /api/fleet/vehicles/{vehicleId}/fuel-logs — list fuel logs (newest first). */
-export function useFuelLogs(vehicleId: string | null | undefined, page = 1) {
-  return useQuery({
-    queryKey: fuelKeys.list({ vehicleId: vehicleId ?? '', page }),
-    queryFn: () => fuelService.listByVehicle(vehicleId as string, { page, pageSize: PAGE_SIZE }),
+- [ ] **Step 3: Convert the three hooks to useInfiniteQuery**
+
+Each hook currently ends with `select: (result) => result.data`, which throws away `meta` — the exact field needed to know whether more rows exist. Each becomes an infinite query that accumulates pages. For `useFuelLogs`:
+
+```ts
+/**
+ * GET /api/fleet/vehicles/{vehicleId}/fuel-logs — list fuel logs (newest first).
+ *
+ * Infinite rather than single-page: the unified records feed merges this with
+ * two other independently-paginated sources, and a merge over sources that
+ * REPLACE their rows on page advance would drop the newest rows from view.
+ * Pages accumulate; `rows` is every page fetched so far.
+ */
+export function useFuelLogs(vehicleId: string | null | undefined) {
+  return useInfiniteQuery({
+    queryKey: fuelKeys.list({ vehicleId: vehicleId ?? '' }),
+    queryFn: ({ pageParam }) =>
+      fuelService.listByVehicle(vehicleId as string, {
+        page: pageParam,
+        pageSize: RECORD_PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) =>
+      allPages.length < (lastPage.meta?.totalPages ?? 1) ? allPages.length + 1 : undefined,
     enabled: !!vehicleId,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
+    select: (data) => ({
+      rows: data.pages.flatMap((p) => p.data),
+      total: data.pages[0]?.meta?.total ?? 0,
+    }),
   });
 }
 ```
 
-Apply the same change to `useMileageRecords` and `useMaintenanceRecords`. **The `page` must be in the query key** or React Query will serve page 1's cache for every page.
+Import `useInfiniteQuery` from `@tanstack/react-query` and `RECORD_PAGE_SIZE` from `./pageSize`. Apply the same shape to `useMileageRecords` and `useMaintenanceRecords`, keeping each one's existing query-key parameters (`from`/`to` for mileage, `kind` for maintenance records) so the caches stay correctly partitioned.
 
-- [ ] **Step 3: Fix every consumer**
+`getNextPageParam` returning `undefined` is what sets `hasNextPage` to false — that is the signal Task 8 reads to know a source is exhausted.
 
-Removing `select` changes each hook's return type from `A[]` to `ListResult<A>`. Find all call sites and add `.data`:
+- [ ] **Step 4: Fix every consumer**
+
+The return shape changes from `A[]` to `{ rows, total }`. Find all call sites:
 
 Run: `grep -rn "useFuelLogs\|useMileageRecords\|useMaintenanceRecords" apps/web/src --include=*.tsx --include=*.ts`
 
-At each site, `const { data: records } = useMileageRecords(...)` becomes `const { data } = useMileageRecords(...)` with `const records = data?.data`. Note `getLatestMileage(records)` takes an array, so it now receives `data?.data ?? []`.
+At each site, `const { data: records } = useMileageRecords(...)` becomes `const { data } = useMileageRecords(...)` with `const records = data?.rows ?? []`. `getLatestMileage(records)` takes an array, so it now receives `data?.rows ?? []`.
 
-- [ ] **Step 4: Verify the build and the suite**
+- [ ] **Step 5: Verify accumulation with a hook test**
+
+Add to `apps/web/src/lib/hooks/api/mileage.test.ts` (the file already exists):
+
+```ts
+it('accumulates pages rather than replacing them', async () => {
+  // Two pages of one row each, meta reporting two total pages.
+  const listByVehicle = vi
+    .spyOn(mileageService, 'listByVehicle')
+    .mockResolvedValueOnce({
+      data: [mileageResource('r1', '2026-06-01T00:00:00Z', 84000)],
+      meta: { total: 2, totalPages: 2, number: 1, size: 100 },
+    })
+    .mockResolvedValueOnce({
+      data: [mileageResource('r2', '2026-01-01T00:00:00Z', 80000)],
+      meta: { total: 2, totalPages: 2, number: 2, size: 100 },
+    });
+
+  const { result } = renderHook(() => useMileageRecords({ vehicleId: 'v1' }), { wrapper });
+
+  await waitFor(() => expect(result.current.data?.rows).toHaveLength(1));
+  expect(result.current.hasNextPage).toBe(true);
+
+  await act(() => result.current.fetchNextPage().then(() => undefined));
+
+  // Page 2 ADDS to page 1 — the newest row must not disappear.
+  await waitFor(() => expect(result.current.data?.rows).toHaveLength(2));
+  expect(result.current.data?.rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+  expect(result.current.hasNextPage).toBe(false);
+  expect(listByVehicle).toHaveBeenCalledTimes(2);
+});
+```
+
+Match the existing file's fixture helpers and `wrapper` — read it first and reuse what it already defines rather than introducing a parallel setup. If it has no `mileageResource` helper, write one that builds a `JsonApiResource<MileageRecordAttributes>`.
+
+Run: `npm run -w apps/web test -- src/lib/hooks/api/mileage.test.ts`
+
+Expected: PASS, including every test already in the file.
+
+- [ ] **Step 6: Verify the build and the suite**
 
 Run: `npm run -w apps/web build && npm run -w apps/web test`
 
-Expected: PASS. TypeScript will name any consumer missed in Step 3.
+Expected: PASS. TypeScript will name any consumer missed in Step 4.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add apps/web/src
@@ -1567,14 +1645,13 @@ Adapts the three API shapes into `VehicleRecordRow`s and drives page loading.
 - Create: `apps/web/src/lib/hooks/api/vehicleRecords.ts`
 
 **Interfaces:**
-- Consumes: `mergeVehicleRecords` (Task 7); the hooks from Task 6
+- Consumes: `mergeVehicleRecords` (Task 7); the infinite hooks from Task 6
 - Produces:
 ```ts
-export const RECORD_PAGE_SIZE = 100;
 export function useVehicleRecords(vehicleId: string, categories: MaintenanceCategory[]): {
   rows: VehicleRecordRow[];
   withheldCount: number;
-  total: number;          // sum of meta.total across sources
+  total: number;          // sum of per-source totals
   isLoading: boolean;
   hasMore: boolean;
   loadMore: () => void;
@@ -1586,29 +1663,25 @@ export function useVehicleRecords(vehicleId: string, categories: MaintenanceCate
 Create `apps/web/src/lib/hooks/api/vehicleRecords.ts`:
 
 ```ts
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useMaintenanceRecords } from './maintenance';
 import { useFuelLogs } from './fuel';
 import { useMileageRecords } from './mileage';
 import { mergeVehicleRecords, type RecordSource, type VehicleRecordRow } from '../../vehicleRecords';
 import type { MaintenanceCategory } from '../../../types/models/maintenanceCategory';
 
-/** server.ParsePage hard-caps page[size] at 100. */
-export const RECORD_PAGE_SIZE = 100;
-
 /**
  * Composes the three paginated record sources into one feed.
  *
- * Each source keeps its own page cursor: "load more" advances every source
- * that is currently constraining the watermark, which is what releases
- * withheld rows (see mergeVehicleRecords).
+ * Each source paginates independently. "Load more" advances only the sources
+ * currently constraining the watermark — advancing an already-exhausted source
+ * would do nothing, and advancing a source whose oldest row is far below the
+ * watermark just fetches rows that stay withheld (see mergeVehicleRecords).
  */
 export function useVehicleRecords(vehicleId: string, categories: MaintenanceCategory[]) {
-  const [pages, setPages] = useState({ maintenance: 1, fuel: 1, mileage: 1 });
-
-  const maintenance = useMaintenanceRecords(vehicleId, undefined, pages.maintenance);
-  const fuel = useFuelLogs(vehicleId, pages.fuel);
-  const mileage = useMileageRecords({ vehicleId, page: pages.mileage, pageSize: RECORD_PAGE_SIZE });
+  const maintenance = useMaintenanceRecords(vehicleId);
+  const fuel = useFuelLogs(vehicleId);
+  const mileage = useMileageRecords({ vehicleId });
 
   const categoryById = useMemo(
     () => new Map(categories.map((c) => [c.id, c])),
@@ -1616,7 +1689,7 @@ export function useVehicleRecords(vehicleId: string, categories: MaintenanceCate
   );
 
   const sources = useMemo<RecordSource[]>(() => {
-    const maintenanceRows: VehicleRecordRow[] = (maintenance.data?.data ?? []).map((r) => {
+    const maintenanceRows: VehicleRecordRow[] = (maintenance.data?.rows ?? []).map((r) => {
       const category = categoryById.get(r.attributes.categoryId);
       return {
         id: `maintenance:${r.id}`,
@@ -1631,17 +1704,19 @@ export function useVehicleRecords(vehicleId: string, categories: MaintenanceCate
       };
     });
 
-    const fuelRows: VehicleRecordRow[] = (fuel.data?.data ?? []).map((l) => ({
+    const fuelRows: VehicleRecordRow[] = (fuel.data?.rows ?? []).map((l) => ({
       id: `fuel:${l.id}`,
       sourceId: l.id,
       kind: 'fuel',
       date: l.attributes.date,
       title: `${l.attributes.gallons.toFixed(3)} gal @ $${l.attributes.pricePerGallon.toFixed(3)}`,
       mileage: l.attributes.mileage,
+      // Task 9's deriveAvgEconomy needs gallons; nothing else reads it.
+      gallons: l.attributes.gallons,
       cost: l.attributes.totalCost,
     }));
 
-    const mileageRows: VehicleRecordRow[] = (mileage.data?.data ?? []).map((m) => ({
+    const mileageRows: VehicleRecordRow[] = (mileage.data?.rows ?? []).map((m) => ({
       id: `mileage:${m.id}`,
       sourceId: m.id,
       kind: 'mileage',
@@ -1651,18 +1726,21 @@ export function useVehicleRecords(vehicleId: string, categories: MaintenanceCate
     }));
 
     return [
-      { rows: maintenanceRows, hasMore: hasMore(maintenance.data?.meta, pages.maintenance) },
-      { rows: fuelRows, hasMore: hasMore(fuel.data?.meta, pages.fuel) },
-      { rows: mileageRows, hasMore: hasMore(mileage.data?.meta, pages.mileage) },
+      { rows: maintenanceRows, hasMore: maintenance.hasNextPage },
+      { rows: fuelRows, hasMore: fuel.hasNextPage },
+      { rows: mileageRows, hasMore: mileage.hasNextPage },
     ];
-  }, [maintenance.data, fuel.data, mileage.data, categoryById, pages]);
+  }, [
+    maintenance.data, maintenance.hasNextPage,
+    fuel.data, fuel.hasNextPage,
+    mileage.data, mileage.hasNextPage,
+    categoryById,
+  ]);
 
   const { rows, withheldCount } = useMemo(() => mergeVehicleRecords(sources), [sources]);
 
   const total =
-    (maintenance.data?.meta?.total ?? 0) +
-    (fuel.data?.meta?.total ?? 0) +
-    (mileage.data?.meta?.total ?? 0);
+    (maintenance.data?.total ?? 0) + (fuel.data?.total ?? 0) + (mileage.data?.total ?? 0);
 
   const anyHasMore = sources.some((s) => s.hasMore);
 
@@ -1673,21 +1751,17 @@ export function useVehicleRecords(vehicleId: string, categories: MaintenanceCate
     isLoading: maintenance.isLoading || fuel.isLoading || mileage.isLoading,
     // More to show means either unfetched pages or rows held below the watermark.
     hasMore: anyHasMore || withheldCount > 0,
-    loadMore: () =>
-      setPages((p) => ({
-        maintenance: sources[0].hasMore ? p.maintenance + 1 : p.maintenance,
-        fuel: sources[1].hasMore ? p.fuel + 1 : p.fuel,
-        mileage: sources[2].hasMore ? p.mileage + 1 : p.mileage,
-      })),
+    loadMore: () => {
+      // Fetch the next page of every source that still has one. Pages
+      // accumulate, so this widens coverage and lowers the watermark, which is
+      // what releases the withheld rows.
+      if (maintenance.hasNextPage) void maintenance.fetchNextPage();
+      if (fuel.hasNextPage) void fuel.fetchNextPage();
+      if (mileage.hasNextPage) void mileage.fetchNextPage();
+    },
   };
 }
-
-function hasMore(meta: { totalPages: number } | undefined, page: number): boolean {
-  return meta != null && page < meta.totalPages;
-}
 ```
-
-**Note on page accumulation:** each hook returns only the current page, so advancing a cursor replaces rather than appends that source's rows. If review finds that acceptable (each "load more" shows a deeper window rather than a growing list), leave it. If not, switch the three hooks to `useInfiniteQuery` and flatten `data.pages` — the merge function is unchanged either way, which is why it was built to take plain arrays.
 
 - [ ] **Step 2: Verify the build**
 
@@ -1797,7 +1871,7 @@ describe('deriveAvgEconomy', () => {
 });
 ```
 
-`deriveAvgEconomy` needs gallons, which `VehicleRecordRow` does not carry. Add an optional `gallons?: number` to `VehicleRecordRow` in `vehicleRecords.ts` and populate it in `useVehicleRecords` (Task 8) from `l.attributes.gallons`, then extend this test with a positive case:
+`deriveAvgEconomy` needs gallons. Add an optional `gallons?: number` to `VehicleRecordRow` in `vehicleRecords.ts` — Task 8's fuel adapter already populates it from `l.attributes.gallons`, so this only adds the field to the type. Then extend this test with a positive case:
 
 ```ts
   it('averages miles per gallon across consecutive fill-ups', () => {
@@ -2573,4 +2647,4 @@ components whose content the new layout absorbs."
 
 **Third gap, found on a verification pass:** `deriveNextService` originally switched on `MaintenanceScheduleAttributes.severity` to find the most urgent schedule. That field is `'urgent' | 'recommended' | 'informational'`; the overdue/upcoming vocabulary lives on `status`. Tasks 9 and 13 now both switch on `status` and share an exported `rankSchedule`.
 
-**Known soft spot.** Task 8's `loadMore` replaces rather than appends each source's page, so "load more" deepens the window instead of growing the list. The note in that task states the `useInfiniteQuery` alternative; the merge function takes plain arrays specifically so either choice works without touching Task 7.
+**Fourth gap, found in the pre-flight scan before execution:** Task 8 originally gave each source its own page cursor via `useState`, which made "load more" *replace* a source's rows rather than append them — dropping the newest records from view once any source exceeded 100 rows. Task 6 now converts all three hooks to `useInfiniteQuery` with a `select` that flattens accumulated pages, and Task 8 calls `fetchNextPage()` per source. Task 7's merge is untouched: it takes plain arrays precisely so the pagination strategy could change without it.
