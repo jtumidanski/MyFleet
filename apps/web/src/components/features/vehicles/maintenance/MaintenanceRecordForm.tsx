@@ -10,7 +10,7 @@ import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Textarea } from '../../../ui/textarea';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
+import { CategoryCombobox } from '../CategoryCombobox';
 import { AttachmentPicker } from './AttachmentPicker';
 import type {
   MaintenanceCategory,
@@ -80,20 +80,13 @@ export function MaintenanceRecordForm({
           render={({ field }) => (
             <FormItem>
               <FormLabel>Category</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a category" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {visibleCategories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id}>
-                      {cat.attributes.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CategoryCombobox
+                categories={visibleCategories}
+                kind={kind ?? 'maintenance'}
+                value={field.value}
+                onChange={field.onChange}
+                ariaLabel="Category"
+              />
               <FormMessage />
             </FormItem>
           )}

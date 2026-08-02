@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MaintenanceRecordForm } from './MaintenanceRecordForm';
 import { mediaService } from '../../../../services/api/MediaService';
 import type { MaintenanceCategory } from '../../../../types/models/maintenanceCategory';
@@ -16,14 +17,10 @@ vi.mock('../../../../services/api/MediaService', () => ({
   },
 }));
 
-// jsdom implements neither of these, and Radix's Select trigger calls both
-// when opened via pointer events — without the polyfill, opening the Select
-// throws "target.hasPointerCapture is not a function" before any listbox
-// renders.
-Element.prototype.hasPointerCapture = Element.prototype.hasPointerCapture ?? (() => false);
-Element.prototype.setPointerCapture = Element.prototype.setPointerCapture ?? (() => {});
-Element.prototype.releasePointerCapture = Element.prototype.releasePointerCapture ?? (() => {});
-Element.prototype.scrollIntoView = Element.prototype.scrollIntoView ?? (() => {});
+// cmdk measures its list; jsdom implements neither method.
+beforeAll(() => {
+  Element.prototype.scrollIntoView = vi.fn();
+});
 
 const categories: MaintenanceCategory[] = [
   {
@@ -38,26 +35,33 @@ const categories: MaintenanceCategory[] = [
   },
 ];
 
+// CategoryCombobox renders a React Query mutation hook, so every render needs
+// a provider — same pattern as CategoryCombobox.test.tsx.
+function renderForm(ui: React.ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+}
+
 describe('MaintenanceRecordForm', () => {
   it('offers only the categories of the requested kind', async () => {
     const user = userEvent.setup();
-    render(
+    renderForm(
       <MaintenanceRecordForm categories={categories} kind="modification" onSubmit={vi.fn()} />,
     );
 
-    // Open the picker and inspect its listbox directly — a Select renders no
-    // options until opened, so checking the closed document proves nothing.
+    // Open the picker — a Command renders no items until opened, so checking
+    // the closed document proves nothing.
     await user.click(screen.getByRole('combobox', { name: /category/i }));
-    const listbox = await screen.findByRole('listbox');
 
-    expect(await within(listbox).findByText('Exhaust')).toBeInTheDocument();
-    expect(within(listbox).queryByText('Oil Change')).not.toBeInTheDocument();
+    // The modification category is offered; the maintenance one is not.
+    expect(await screen.findByText('Exhaust')).toBeInTheDocument();
+    expect(screen.queryByText('Oil Change')).not.toBeInTheDocument();
   });
 
   it('rejects a description over 200 characters', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
-    render(<MaintenanceRecordForm categories={categories} onSubmit={onSubmit} />);
+    renderForm(<MaintenanceRecordForm categories={categories} onSubmit={onSubmit} />);
 
     await user.type(screen.getByLabelText(/description/i), 'a'.repeat(201));
     await user.click(screen.getByRole('button', { name: /log record/i }));
@@ -72,7 +76,7 @@ describe('MaintenanceRecordForm', () => {
     vi.mocked(mediaService.initUpload).mockReturnValue(new Promise(() => {}));
 
     const user = userEvent.setup();
-    render(<MaintenanceRecordForm categories={categories} onSubmit={vi.fn()} />);
+    renderForm(<MaintenanceRecordForm categories={categories} onSubmit={vi.fn()} />);
 
     const submit = screen.getByRole('button', { name: /log record/i });
     expect(submit).toBeEnabled();

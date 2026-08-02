@@ -9,6 +9,7 @@ import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
+import { CategoryCombobox } from '../CategoryCombobox';
 import type { MaintenanceCategory } from '../../../../types/models/maintenanceCategory';
 
 interface MaintenanceScheduleFormProps {
@@ -57,20 +58,13 @@ export function MaintenanceScheduleForm({
           render={({ field }) => (
             <FormItem>
               <FormLabel>Category</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a category" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {categories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id}>
-                      {cat.attributes.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CategoryCombobox
+                categories={categories}
+                kind="maintenance"
+                value={field.value}
+                onChange={field.onChange}
+                ariaLabel="Category"
+              />
               <FormMessage />
             </FormItem>
           )}
