@@ -13,6 +13,7 @@ func TestStatusFor_mapsDomainErrors(t *testing.T) {
 		ErrRequestEntityTooLarge: 413,
 		ErrUnsupportedMediaType:  415,
 		ErrValidation:            422,
+		ErrTooManyRequests:       429,
 	}
 	for err, want := range cases {
 		if got := StatusFor(err); got != want {
@@ -35,6 +36,7 @@ func TestCodeFor_namesEveryMappedStatus(t *testing.T) {
 		413: "payload_too_large",
 		415: "unsupported_media_type",
 		422: "validation_error",
+		429: "too_many_requests",
 		500: "internal_error",
 	}
 	for status, want := range cases {

@@ -29,6 +29,8 @@ func codeFor(status int) string {
 		return "unsupported_media_type"
 	case 422:
 		return "validation_error"
+	case 429:
+		return "too_many_requests"
 	default:
 		return "internal_error"
 	}
