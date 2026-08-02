@@ -18,13 +18,27 @@ import (
 const MaxInternalLookupIDs = 50
 
 // InternalUser is one resolved user in the internal lookup response.
+//
+// PlatformAdmin is sourced by a LEFT JOIN against auth.platform_admins in the
+// same schema and matches Provider.IsAdmin's definition exactly — a granted row
+// whose revoked_at is NULL. Deriving it any other way here would let the
+// directory disagree with the guard that actually admits people.
 type InternalUser struct {
-	ID          string     `json:"id"`
-	Email       string     `json:"email"`
-	DisplayName string     `json:"display_name"`
-	CreatedAt   time.Time  `json:"created_at"`
-	LastLoginAt *time.Time `json:"last_login_at"`
+	ID            string     `json:"id"`
+	Email         string     `json:"email"`
+	DisplayName   string     `json:"display_name"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastLoginAt   *time.Time `json:"last_login_at"`
+	PlatformAdmin bool       `json:"platform_admin"`
 }
+
+// userSelect is the projection both lookup modes share, so the two can never
+// drift on what a platform admin is.
+const userSelect = `SELECT u.id, u.email, u.display_name, u.created_at, u.last_login_at,
+       (a.user_id IS NOT NULL) AS platform_admin
+  FROM auth.users u
+  LEFT JOIN auth.platform_admins a
+    ON a.user_id = u.id AND a.revoked_at IS NULL`
 
 // internalUsersResponse carries Total so the paginated mode can report a page
 // count. In the ids mode Total is simply the number resolved.
@@ -86,8 +100,7 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Rout
 					return
 				}
 				var rows []InternalUser
-				if err := db.Raw(`SELECT id, email, display_name, created_at, last_login_at
-				                  FROM auth.users WHERE id IN ?`, ids).Scan(&rows).Error; err != nil {
+				if err := db.Raw(userSelect+` WHERE u.id IN ?`, ids).Scan(&rows).Error; err != nil {
 					log.WithError(err).Error("internal admin user lookup")
 					server.WriteError(w, err)
 					return
@@ -107,8 +120,7 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Rout
 				return
 			}
 			var rows []InternalUser
-			if err := db.Raw(`SELECT id, email, display_name, created_at, last_login_at
-			                  FROM auth.users ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+			if err := db.Raw(userSelect+` ORDER BY u.created_at DESC LIMIT ? OFFSET ?`,
 				page.Size, page.Offset()).Scan(&rows).Error; err != nil {
 				log.WithError(err).Error("internal admin user list")
 				server.WriteError(w, err)

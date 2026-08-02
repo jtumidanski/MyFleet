@@ -122,12 +122,13 @@ type UserPage struct {
 // UserRow is one user plus the fleets they belong to. The identity half comes
 // over HTTP from auth-service; the membership half is this service's own data.
 type UserRow struct {
-	ID          string
-	Email       string
-	DisplayName string
-	CreatedAt   time.Time
-	LastLoginAt *time.Time
-	Fleets      []UserFleetRow
+	ID            string
+	Email         string
+	DisplayName   string
+	CreatedAt     time.Time
+	LastLoginAt   *time.Time
+	PlatformAdmin bool
+	Fleets        []UserFleetRow
 }
 
 // UserFleetRow is one of a user's fleet memberships.
@@ -164,9 +165,17 @@ func (p *Processor) ListFleets(ctx context.Context, q string, deleted DeletedFil
 	where := []string{deletedPredicate("f", deleted)}
 	args := []any{}
 	if s := strings.TrimSpace(q); s != "" {
-		// Name search only at the SQL layer; owner-email search is applied after
-		// the auth-service lookup below, because emails do not live in this
-		// database and a cross-service join is forbidden (design D2).
+		// Fleet NAME only, and deliberately not owner email.
+		//
+		// The plan called for owner-email search too, and an earlier version of
+		// this comment claimed it was applied after the auth-service lookup —
+		// it never was, and it could not have been: this query has already
+		// narrowed to name matches by then, so filtering the page afterwards
+		// can only ever remove rows, never find the fleet whose owner matches
+		// but whose name does not. Emails live in auth-service and a
+		// cross-service join is forbidden (design D2), so a real owner-email
+		// search needs a search endpoint there. Until that exists the API does
+		// what it says and the console's placeholder says the same.
 		where = append(where, "lower(f.name) LIKE ?")
 		args = append(args, "%"+strings.ToLower(s)+"%")
 	}
@@ -457,13 +466,33 @@ func (p *Processor) ListUsers(ctx context.Context, page server.Page) (UserPage, 
 			fleets = []UserFleetRow{}
 		}
 		out.Rows = append(out.Rows, UserRow{
-			ID:          u.ID,
-			Email:       u.Email,
-			DisplayName: u.DisplayName,
-			CreatedAt:   u.CreatedAt,
-			LastLoginAt: u.LastLoginAt,
-			Fleets:      fleets,
+			ID:            u.ID,
+			Email:         u.Email,
+			DisplayName:   u.DisplayName,
+			CreatedAt:     u.CreatedAt,
+			LastLoginAt:   u.LastLoginAt,
+			PlatformAdmin: u.PlatformAdmin,
+			Fleets:        fleets,
 		})
 	}
 	return out, nil
+}
+
+// ListOperations, GetOperation and ListAuditEvents are thin passes to the
+// provider.
+//
+// They exist so the resource layer never reaches past the processor into the
+// data layer. They look redundant today precisely because these three reads
+// need no logic yet — but a handler that has learned to call proc.d.Provider
+// directly is how the next read that DOES need logic ends up bypassing it too.
+func (p *Processor) ListOperations(status string, page server.Page) ([]Operation, int, error) {
+	return p.d.Provider.ListOperations(status, page)
+}
+
+func (p *Processor) GetOperation(id string) (Operation, error) {
+	return p.d.Provider.GetOperation(id)
+}
+
+func (p *Processor) ListAuditEvents(f AuditFilter, page server.Page) ([]AuditEvent, int, error) {
+	return p.d.Provider.ListAudit(f, page)
 }

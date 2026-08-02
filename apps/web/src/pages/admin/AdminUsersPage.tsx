@@ -17,12 +17,9 @@ import { useAdminUsers } from '../../lib/hooks/api/admin';
  * The cross-fleet user directory (FR-ADMIN-FLEET-6).
  *
  * Read-only by design: granting platform admin is a deliberate out-of-band act
- * against auth.platform_admins, and the console does not offer it (PRD non-goal).
- *
- * There is deliberately no platform-admin column. The plan sketched one, but the
- * admin users endpoint does not return that flag — fleet-service would have to
- * ask auth-service per user to know it — and a column that silently rendered
- * "no" for every account would be worse than no column at all.
+ * against auth.platform_admins. The console SHOWS who holds it — FR-ADMIN-FLEET-6
+ * requires that — and offers no control to change it. Displaying and granting are
+ * different things, and only the second is a non-goal.
  */
 export function AdminUsersPage() {
   const [page, setPage] = useState(1);
@@ -57,6 +54,7 @@ export function AdminUsersPage() {
                 <TableHead>User</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Fleets</TableHead>
+                <TableHead>Created</TableHead>
                 <TableHead>Last sign-in</TableHead>
               </TableRow>
             </TableHeader>
@@ -65,7 +63,14 @@ export function AdminUsersPage() {
                 const a = u.attributes;
                 return (
                   <TableRow key={u.id} data-testid={`user-${u.id}`}>
-                    <TableCell className="text-sm">{a.display_name || u.id}</TableCell>
+                    <TableCell className="text-sm">
+                      <span>{a.display_name || u.id}</span>
+                      {a.platform_admin ? (
+                        <Badge variant="info" className="ml-2">
+                          Platform admin
+                        </Badge>
+                      ) : null}
+                    </TableCell>
                     <TableCell className="text-sm">{a.email}</TableCell>
                     <TableCell>
                       {a.fleets.length === 0 ? (
@@ -79,6 +84,9 @@ export function AdminUsersPage() {
                           ))}
                         </div>
                       )}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {new Date(a.created_at).toLocaleDateString()}
                     </TableCell>
                     <TableCell className="text-sm">
                       {a.last_login_at ? (

@@ -74,3 +74,25 @@ describe('PurgeConfirmDialog', () => {
     expect(screen.queryByText(/what survives/i)).not.toBeInTheDocument();
   });
 });
+
+describe('PurgeConfirmDialog transmission', () => {
+  // The finding that matters most: the server's exact comparison is the real
+  // control, and it can only work if the operator's ACTUAL keystrokes reach it.
+  // Handing back the expected phrase would make the disabled button the only
+  // gate and the server's 409 unreachable from the UI.
+  it('hands the caller what was typed, not the expected phrase', async () => {
+    const user = userEvent.setup();
+    const onConfirm = vi.fn();
+    render(<PurgeConfirmDialog {...props({ onConfirm })} />);
+    await user.type(screen.getByLabelText(/type the fleet name/i), 'The Tumidanski Fleet');
+    await user.click(screen.getByRole('button', { name: /purge this fleet/i }));
+    expect(onConfirm).toHaveBeenCalledWith('The Tumidanski Fleet');
+  });
+
+  // FR-ADMIN-UI-6 at the most consequential render site there is.
+  it('says the people count is unknown rather than zero when it is unavailable', () => {
+    render(<PurgeConfirmDialog {...props({ peopleCount: null })} />);
+    expect(screen.getByText(/unknown number of people/i)).toBeInTheDocument();
+    expect(screen.queryByText(/affects 0 people/i)).not.toBeInTheDocument();
+  });
+});

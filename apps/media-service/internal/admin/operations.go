@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -79,9 +80,39 @@ func Restore(tx *gorm.DB, opID string) error {
 
 // Reap hard-deletes every row carrying opID.
 func Reap(tx *gorm.DB, opID string) (map[string]int, error) {
+	return ReapSparing(tx, opID, nil)
+}
+
+// ReapSparing hard-deletes every row carrying opID except those belonging to the
+// named media objects, which keep BOTH their soft-delete and their
+// purge_operation_id.
+//
+// Keeping the id is the whole point. An earlier version spared a row by NULLing
+// purge_operation_id, which detached it from the only handle anything has on
+// it: the next reap keys on that column, restore keys on that column, and the
+// purge_after sweep never sees it because an admin stamp deliberately leaves
+// purge_after NULL. The row and its bytes were stranded permanently. A row we
+// could not finish with must stay attached to the operation that owns it.
+func ReapSparing(tx *gorm.DB, opID string, spareMediaObjectIDs []string) (map[string]int, error) {
 	out := make(map[string]int, len(Manifest))
 	for _, t := range Manifest {
-		res := tx.Exec("DELETE FROM "+t.Table+" WHERE purge_operation_id = ?", opID)
+		q := "DELETE FROM " + t.Table + " WHERE purge_operation_id = ?"
+		args := []any{opID}
+		if len(spareMediaObjectIDs) > 0 {
+			// media_objects are spared by their own id; their variants by the
+			// object they belong to, so a spared object never loses the
+			// variants that describe it.
+			switch t.Table {
+			case "media.media_objects":
+				q += " AND id NOT IN ?"
+			case "media.media_variants":
+				q += " AND media_object_id NOT IN ?"
+			}
+			if strings.HasSuffix(q, "NOT IN ?") {
+				args = append(args, spareMediaObjectIDs)
+			}
+		}
+		res := tx.Exec(q, args...)
 		if res.Error != nil {
 			return nil, fmt.Errorf("reap %s: %w", t.Table, res.Error)
 		}

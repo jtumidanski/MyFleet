@@ -258,3 +258,49 @@ func TestStats_countsLiveMediaObjects(t *testing.T) {
 		t.Errorf("media_objects = %d, want 2", body.MediaObjects)
 	}
 }
+
+// A row spared because its bytes could not be removed must remain REACHABLE by
+// the next attempt.
+//
+// The first implementation spared it by NULLing purge_operation_id — and then
+// keyed the retry off that same column, so the row became unreachable by
+// restore, by reap and by the purge_after sweep: soft-deleted, orphaned, and
+// its bytes stranded in the bucket forever. Sparing a row and forgetting which
+// operation owns it are not the same thing.
+func TestReap_sparedRowKeepsItsOperationIDSoTheNextTickCanRetry(t *testing.T) {
+	db := newMediaDB(t)
+	store := &recordingRemover{fail: map[string]bool{"k/mo-1": true}}
+	r := newMediaRouter(t, db, store)
+	post(t, r, "/internal/admin/purge", `{"operation_id":"op-1","scope":"fleet","fleet_ids":["fleet-1"]}`)
+
+	if rec := post(t, r, "/internal/admin/reap/op-1", ""); rec.Code == http.StatusOK {
+		t.Fatalf("a failed object removal must not report success, got %d", rec.Code)
+	}
+
+	var stamped int64
+	db.Raw(`SELECT count(*) FROM media.media_objects
+	        WHERE id = 'mo-1' AND purge_operation_id = 'op-1'`).Scan(&stamped)
+	if stamped != 1 {
+		t.Fatal("the spared row lost its purge_operation_id and is now unreachable by any path")
+	}
+
+	// The bucket recovers; the next tick must finish the job.
+	store.fail = nil
+	if rec := post(t, r, "/internal/admin/reap/op-1", ""); rec.Code != http.StatusOK {
+		t.Fatalf("the retry tick must succeed once the object can be removed, got %d", rec.Code)
+	}
+	var removed bool
+	for _, k := range store.removed {
+		if k == "k/mo-1" {
+			removed = true
+		}
+	}
+	if !removed {
+		t.Error("the previously-failed object was never removed on retry")
+	}
+	var rows int64
+	db.Raw(`SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`).Scan(&rows)
+	if rows != 0 {
+		t.Error("the row survived a successful retry")
+	}
+}

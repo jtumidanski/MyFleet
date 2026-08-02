@@ -135,6 +135,8 @@ export interface AdminUserAttributes {
   display_name: string;
   created_at: string;
   last_login_at: string | null;
+  /** Displayed, never editable here — granting is an out-of-band act. */
+  platform_admin: boolean;
   fleets: AdminUserFleetRow[];
 }
 

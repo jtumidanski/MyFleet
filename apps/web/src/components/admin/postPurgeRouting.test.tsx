@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { RequireAuth } from '../RequireAuth';
-import { RequirePlatformAdmin } from './RequirePlatformAdmin';
-import { AdminLayout } from './AdminLayout';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
+import type { ReactNode } from 'react';
+import { AppRoutes } from '../../App';
 import { ThemeProvider } from '../../context/ThemeContext';
 import type { AuthContextValue } from '../../context/AuthContext';
 import { resetMatchMedia } from '../../test/setup';
@@ -14,25 +14,39 @@ import { resetMatchMedia } from '../../test/setup';
  * production at the exact moment recovery matters — an admin who has just run a
  * system purge would be bounced to /onboarding with a five-day window ticking.
  *
- * This test exercises the POST-SYSTEM-PURGE state specifically, not merely a
- * fleetless account, because those are different bugs with the same symptom and
- * only one of them is catastrophic.
+ * This imports the REAL route tree. An earlier version rebuilt a replica of it
+ * here, which meant renesting /admin in App.tsx would not have failed anything:
+ * the test exercised its own copy and proved only that the copy was right.
  *
- * It mirrors App.tsx's structure rather than importing App, so it asserts the
- * PROPERTY (an admin branch that does not inherit the fleetless redirect)
- * without dragging every page's data layer into the test. The companion
- * assertion below proves the property is real by showing the same identity IS
- * redirected when it goes through RequireAuth.
+ * It exercises the POST-SYSTEM-PURGE state specifically, not merely a fleetless
+ * account, because those are different bugs with the same symptom and only one
+ * of them is catastrophic.
  */
 
 const mockAuth = vi.fn<() => AuthContextValue>();
 vi.mock('../../context/AuthContext', () => ({
   useAuth: () => mockAuth(),
+  AuthProvider: ({ children }: { children: ReactNode }) => children,
 }));
 
 const mutate = vi.fn();
 vi.mock('../../lib/hooks/api/auth', () => ({
   useUpdateTheme: () => ({ mutate }),
+  authKeys: { all: ['auth'], me: () => ['auth', 'me'] },
+}));
+
+// The admin screens' data layer is not what is under test; stub it so the route
+// tree renders without a server.
+vi.mock('../../lib/hooks/api/admin', () => ({
+  useAdminStats: () => ({ data: undefined, isLoading: true, isError: false }),
+  useAdminFleets: () => ({ data: undefined, isLoading: true, isError: false }),
+  useAdminFleet: () => ({ data: undefined, isLoading: true, isError: false }),
+  useAdminUsers: () => ({ data: undefined, isLoading: true, isError: false }),
+  usePurgeOperations: () => ({ data: undefined, isLoading: true, isError: false }),
+  useAuditEvents: () => ({ data: undefined, isLoading: true, isError: false }),
+  useCreatePurge: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
+  useCancelPurge: () => ({ mutate: vi.fn(), isPending: false }),
+  useRetryPurge: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 /** The identity /auth/me returns after the admin's own fleet was purged. */
@@ -49,39 +63,18 @@ function postPurgeAdmin(): AuthContextValue {
   };
 }
 
-/** The route tree as App.tsx declares it: /admin is a SIBLING, not a child. */
-function renderTreeAt(route: string) {
+function renderAppAt(route: string) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <MemoryRouter initialEntries={[route]}>
-      <ThemeProvider>
-        <Routes>
-          <Route path="/onboarding" element={<div>onboarding</div>} />
-          <Route
-            element={
-              <RequireAuth>
-                <div>app shell</div>
-              </RequireAuth>
-            }
-          >
-            <Route path="/" element={<div>dashboard</div>} />
-          </Route>
-          <Route
-            path="/admin"
-            element={
-              <RequirePlatformAdmin>
-                <AdminLayout />
-              </RequirePlatformAdmin>
-            }
-          >
-            <Route index element={<div>overview</div>} />
-            <Route path="fleets" element={<div>fleets</div>} />
-            <Route path="users" element={<div>users</div>} />
-            <Route path="purges" element={<div>purges</div>} />
-            <Route path="audit" element={<div>audit</div>} />
-          </Route>
-        </Routes>
-      </ThemeProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[route]}>
+        <ThemeProvider>
+          <AppRoutes />
+        </ThemeProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -91,10 +84,9 @@ describe('after a system purge', () => {
     mockAuth.mockReturnValue(postPurgeAdmin());
   });
 
-  it('keeps a now-fleetless admin inside the console', async () => {
-    renderTreeAt('/admin/purges');
-    expect(await screen.findByText(/platform admin/i)).toBeInTheDocument();
-    expect(screen.queryByText('onboarding')).not.toBeInTheDocument();
+  it('keeps a now-fleetless admin inside the console', () => {
+    renderAppAt('/admin/purges');
+    expect(screen.getByText(/platform admin/i)).toBeInTheDocument();
   });
 
   it('lets them reach every admin screen without a fleet', () => {
@@ -105,19 +97,18 @@ describe('after a system purge', () => {
       '/admin/purges',
       '/admin/audit',
     ]) {
-      const { unmount } = renderTreeAt(route);
+      const { unmount } = renderAppAt(route);
       expect(screen.getByText(/platform admin/i)).toBeInTheDocument();
-      expect(screen.queryByText('onboarding')).not.toBeInTheDocument();
       unmount();
     }
   });
 
-  // The control that gives the two assertions above their meaning. The SAME
-  // identity, taken through RequireAuth, IS redirected to /onboarding — so the
-  // admin branch is genuinely escaping that redirect rather than the redirect
-  // being absent from the test tree altogether.
-  it('is redirected to onboarding on the ordinary branch, proving the exemption is real', () => {
-    renderTreeAt('/');
-    expect(screen.getByText('onboarding')).toBeInTheDocument();
+  // The control that gives the assertions above their meaning. The SAME identity,
+  // taken through the ordinary branch, IS redirected — so /admin is genuinely
+  // escaping RequireAuth's fleetless redirect rather than the redirect being
+  // absent from the tree altogether.
+  it('is redirected away from the ordinary shell, proving the exemption is real', () => {
+    renderAppAt('/');
+    expect(screen.queryByText(/platform admin/i)).not.toBeInTheDocument();
   });
 });

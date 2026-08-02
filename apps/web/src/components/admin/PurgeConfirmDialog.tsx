@@ -26,7 +26,9 @@ import { Label } from '../ui/label';
  *    left guessing whether they are about to destroy the accounts too.
  *
  * The disabled button is a courtesy. The server's 409 on a mismatched phrase is
- * the actual control (risks.md R9).
+ * the actual control (risks.md R9) — which is why onConfirm receives what was
+ * TYPED rather than the expected phrase, so the server has something real to
+ * compare.
  */
 export interface PurgeConfirmDialogProps {
   open: boolean;
@@ -35,11 +37,26 @@ export interface PurgeConfirmDialogProps {
   /** The exact phrase the operator must type: the fleet name, or PURGE EVERYTHING. */
   confirmationPhrase: string;
   counts: Record<string, number>;
-  /** People affected — stated separately because rows are not the point. */
-  peopleCount: number;
+  /**
+   * People affected — stated separately because rows are not the point.
+   *
+   * null means auth-service could not be reached. That renders as an em dash,
+   * never as 0: telling an operator "this affects 0 people" immediately before
+   * they destroy a platform, when the truth is that nobody could ask, is the
+   * worst possible place to get that distinction wrong (FR-ADMIN-UI-6).
+   */
+  peopleCount: number | null;
   /** ISO deadline after which the purge becomes irreversible. */
   recoveryDeadline: string;
-  onConfirm: () => void;
+  /**
+   * Receives WHAT THE OPERATOR TYPED, not the expected phrase.
+   *
+   * This is the whole point: the caller forwards this verbatim so the server
+   * performs the real comparison. Passing the expected phrase instead would
+   * make the client-side disabled button the only gate, and the server's 409
+   * unreachable from the UI.
+   */
+  onConfirm: (typed: string) => void;
   isPending: boolean;
 }
 
@@ -106,10 +123,22 @@ export function PurgeConfirmDialog({
 
         <div className="space-y-4 text-sm">
           <div>
-            <p className="font-medium">This affects {peopleCount} people.</p>
-            <p className="text-muted-foreground">
-              They will lose access to the data listed below the next time they sign in.
-            </p>
+            {peopleCount === null ? (
+              <>
+                <p className="font-medium">This affects an unknown number of people.</p>
+                <p className="text-muted-foreground">
+                  We could not reach the account service to count them — the figure is not zero, it
+                  is unavailable.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium">This affects {peopleCount} people.</p>
+                <p className="text-muted-foreground">
+                  They will lose access to the data listed below the next time they sign in.
+                </p>
+              </>
+            )}
           </div>
 
           <div>
@@ -167,7 +196,7 @@ export function PurgeConfirmDialog({
             type="button"
             variant="destructive"
             disabled={!matches || isPending}
-            onClick={onConfirm}
+            onClick={() => onConfirm(typed)}
           >
             {scope === 'system' ? 'Purge everything' : 'Purge this fleet'}
           </Button>

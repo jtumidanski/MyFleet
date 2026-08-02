@@ -123,26 +123,21 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB, store ObjectR
 				}
 			}
 
+			// Spare the objects whose bytes are still in the bucket, and their
+			// variants with them — WITHOUT detaching them from the operation.
+			// They keep purge_operation_id so the next tick can find them again;
+			// clearing it would strand the row and its bytes permanently, since
+			// an admin stamp leaves purge_after NULL and the ordinary sweep
+			// therefore never sees it either.
+			spare := make([]string, 0, len(failed))
+			for id := range failed {
+				spare = append(spare, id)
+			}
+
 			var deleted map[string]int
 			if terr := db.Transaction(func(tx *gorm.DB) error {
-				if len(failed) > 0 {
-					ids := make([]string, 0, len(failed))
-					for id := range failed {
-						ids = append(ids, id)
-					}
-					// Spare the objects whose bytes are still in the bucket, and
-					// their variants with them.
-					if err := tx.Exec(`UPDATE media.media_objects SET purge_operation_id = NULL
-					                   WHERE purge_operation_id = ? AND id IN ?`, opID, ids).Error; err != nil {
-						return err
-					}
-					if err := tx.Exec(`UPDATE media.media_variants SET purge_operation_id = NULL
-					                   WHERE purge_operation_id = ? AND media_object_id IN ?`, opID, ids).Error; err != nil {
-						return err
-					}
-				}
 				var rerr error
-				deleted, rerr = Reap(tx, opID)
+				deleted, rerr = ReapSparing(tx, opID, spare)
 				return rerr
 			}); terr != nil {
 				log.WithError(terr).WithField("operation_id", opID).Error("media admin reap")

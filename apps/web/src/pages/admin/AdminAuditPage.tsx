@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
+import { Input } from '../../components/ui/input';
 import { Skeleton } from '../../components/ui/skeleton';
 import {
   Table,
@@ -40,7 +41,8 @@ const SYSTEM_ACTOR = 'system';
 
 export function AdminAuditPage() {
   const [action, setAction] = useState('');
-  const { data, isLoading, isError } = useAuditEvents({ action, actor: '', page: 1 });
+  const [actor, setActor] = useState('');
+  const { data, isLoading, isError } = useAuditEvents({ action, actor, page: 1 });
 
   return (
     <div className="space-y-4">
@@ -51,7 +53,7 @@ export function AdminAuditPage() {
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap items-center gap-1">
         {ACTIONS.map((a) => (
           <Button
             key={a.value || 'all'}
@@ -63,6 +65,18 @@ export function AdminAuditPage() {
             {a.label}
           </Button>
         ))}
+        {/*
+          Filters on actor_user_id, which is what the server matches — the id is
+          also what the reaper writes ("system"), so this is the way to isolate
+          scheduled deletions from human ones.
+        */}
+        <Input
+          className="ml-2 w-56"
+          placeholder="Filter by actor user id"
+          aria-label="Filter by actor user id"
+          value={actor}
+          onChange={(e) => setActor(e.target.value)}
+        />
       </div>
 
       <Card className="p-4">

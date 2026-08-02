@@ -93,8 +93,9 @@ export function AdminOverviewPage() {
    * route branch: RequirePlatformAdmin does not require a fleet, and /admin is
    * not nested under RequireAuth's fleetless redirect (risks.md R5).
    */
-  async function confirmSystemPurge() {
-    await createPurge.mutateAsync({ scope: 'system', confirmation: SYSTEM_CONFIRMATION });
+  async function confirmSystemPurge(typed: string) {
+    // `typed`, never SYSTEM_CONFIRMATION: the server compares this exactly.
+    await createPurge.mutateAsync({ scope: 'system', confirmation: typed });
     // Clear rather than invalidate: everything the cache holds is now
     // soft-deleted, and invalidating would render a frame of stale fleet data
     // between the purge and the refetch.
@@ -220,12 +221,16 @@ export function AdminOverviewPage() {
         scope="system"
         confirmationPhrase={SYSTEM_CONFIRMATION}
         counts={systemCounts(stats)}
-        peopleCount={stats.users ?? 0}
+        peopleCount={stats.users}
         recoveryDeadline={new Date(
           Date.now() + RECOVERY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
         ).toISOString()}
         isPending={createPurge.isPending}
-        onConfirm={() => void confirmSystemPurge()}
+        // The mutation already surfaces its own failure as a toast; catching here
+        // stops the rejection escaping as an unhandled promise.
+        onConfirm={(typed) => {
+          confirmSystemPurge(typed).catch(() => undefined);
+        }}
       />
     </div>
   );

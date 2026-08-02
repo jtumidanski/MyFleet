@@ -127,11 +127,15 @@ func TransformFleetDetail(d FleetDetail) server.Resource {
 }
 
 type userAttributes struct {
-	Email       string         `json:"email"`
-	DisplayName string         `json:"display_name"`
-	CreatedAt   time.Time      `json:"created_at"`
-	LastLoginAt *time.Time     `json:"last_login_at"`
-	Fleets      []UserFleetRow `json:"fleets"`
+	Email       string     `json:"email"`
+	DisplayName string     `json:"display_name"`
+	CreatedAt   time.Time  `json:"created_at"`
+	LastLoginAt *time.Time `json:"last_login_at"`
+	// FR-ADMIN-FLEET-6 requires this. The console displays it and offers no way
+	// to change it — granting is a deliberate out-of-band act, but an operator
+	// still needs to see who currently holds the privilege.
+	PlatformAdmin bool           `json:"platform_admin"`
+	Fleets        []UserFleetRow `json:"fleets"`
 }
 
 // TransformUsers renders a page of the cross-fleet user directory.
@@ -142,11 +146,12 @@ func TransformUsers(rows []UserRow) []server.Resource {
 			Type: TypeUser,
 			ID:   u.ID,
 			Attributes: userAttributes{
-				Email:       u.Email,
-				DisplayName: u.DisplayName,
-				CreatedAt:   u.CreatedAt,
-				LastLoginAt: u.LastLoginAt,
-				Fleets:      u.Fleets,
+				Email:         u.Email,
+				DisplayName:   u.DisplayName,
+				CreatedAt:     u.CreatedAt,
+				LastLoginAt:   u.LastLoginAt,
+				PlatformAdmin: u.PlatformAdmin,
+				Fleets:        u.Fleets,
 			},
 		})
 	}

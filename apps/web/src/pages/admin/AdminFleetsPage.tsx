@@ -97,15 +97,15 @@ function FleetList({
     <Card className="p-4" data-testid="fleet-list">
       <h2 className="text-lg font-semibold">Fleets</h2>
       {/*
-        The label says "on this page" deliberately. Owner email is matched after
-        the auth-service lookup, over the fetched page only — emails do not live
-        in fleet-service's database and a cross-service join is forbidden, so a
-        global email search is not something this box can deliver.
+        Fleet name only. Owner email is not searchable: emails live in
+        auth-service, a cross-service join is forbidden, and that service has no
+        search endpoint — so the placeholder promises exactly what the API
+        delivers rather than implying a lookup that returns nothing.
       */}
       <Input
         className="mt-3"
-        placeholder="Fleet name, or owner email on this page"
-        aria-label="Search fleets"
+        placeholder="Search by fleet name"
+        aria-label="Search fleets by name"
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
@@ -226,76 +226,86 @@ function FleetDetail({ id }: { id: string }) {
 
       <Card className="p-4">
         <h3 className="text-lg font-semibold">Members</h3>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Member</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {fleet.members.map((m) => (
-              <TableRow key={m.user_id} data-testid={`member-${m.user_id}`}>
-                <TableCell>{m.display_name || m.email || m.user_id}</TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{m.role}</Badge>
-                </TableCell>
-                <TableCell className="text-right">
-                  {/*
+        {fleet.members.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">No members.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Member</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {fleet.members.map((m) => (
+                <TableRow key={m.user_id} data-testid={`member-${m.user_id}`}>
+                  <TableCell>{m.display_name || m.email || m.user_id}</TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{m.role}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {/*
                     FR-ADMIN-UI-8: the owner's remove action is permanently
                     inert. A fleet must never lose its only owner, and offering
                     an action the server will refuse is worse than not offering
                     it — the title says why rather than leaving a dead button.
                   */}
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={m.role === 'owner'}
-                    title={
-                      m.role === 'owner'
-                        ? 'A fleet cannot lose its owner. Transfer ownership first.'
-                        : undefined
-                    }
-                  >
-                    Remove
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={m.role === 'owner'}
+                      title={
+                        m.role === 'owner'
+                          ? 'A fleet cannot lose its owner. Transfer ownership first.'
+                          : undefined
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </Card>
 
       <Card className="p-4">
         <h3 className="text-lg font-semibold">Vehicles</h3>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Vehicle</TableHead>
-              <TableHead>Mileage</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {fleet.vehicles.map((v) => (
-              <TableRow key={v.id} data-testid={`vehicle-${v.id}`}>
-                <TableCell className={cn(v.pending_purge && 'line-through text-muted-foreground')}>
-                  {v.nickname || `${v.year} ${v.make} ${v.model}`}
-                </TableCell>
-                <TableCell className="tabular-nums">{v.mileage}</TableCell>
-                <TableCell>
-                  {v.pending_purge ? (
-                    <Badge variant="warning">Pending purge</Badge>
-                  ) : v.status ? (
-                    <Badge variant="secondary">{v.status}</Badge>
-                  ) : null}
-                </TableCell>
+        {fleet.vehicles.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">No vehicles.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Vehicle</TableHead>
+                <TableHead>Mileage</TableHead>
+                <TableHead>Status</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {fleet.vehicles.map((v) => (
+                <TableRow key={v.id} data-testid={`vehicle-${v.id}`}>
+                  <TableCell
+                    className={cn(v.pending_purge && 'line-through text-muted-foreground')}
+                  >
+                    {v.nickname || `${v.year} ${v.make} ${v.model}`}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{v.mileage}</TableCell>
+                  <TableCell>
+                    {v.pending_purge ? (
+                      <Badge variant="warning">Pending purge</Badge>
+                    ) : v.status ? (
+                      <Badge variant="secondary">{v.status}</Badge>
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
       </Card>
 
       {fleet.invites.length > 0 ? (
@@ -344,9 +354,11 @@ function FleetDetail({ id }: { id: string }) {
         peopleCount={fleet.members.length}
         recoveryDeadline={recoveryDeadline()}
         isPending={createPurge.isPending}
-        onConfirm={() => {
+        onConfirm={(typed) => {
+          // `typed`, never `fleet.name`: the server compares this exactly, and
+          // sending the expected phrase would make its 409 unreachable.
           createPurge.mutate(
-            { scope: 'fleet', target_type: 'fleet', target_id: id, confirmation: fleet.name },
+            { scope: 'fleet', target_type: 'fleet', target_id: id, confirmation: typed },
             { onSuccess: () => setConfirmOpen(false) },
           );
         }}

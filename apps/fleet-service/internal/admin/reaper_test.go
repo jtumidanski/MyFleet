@@ -138,3 +138,55 @@ func (f *failingReap) Reap(ctx context.Context, opID string) (map[string]int, er
 	}
 	return f.stubDownstream.Reap(ctx, opID)
 }
+
+// A cancelled purge must NEVER be reaped, even when a downstream restore failed
+// and left the operation `partial`.
+//
+// This is the failure the status field alone could not represent: `partial`
+// meant both "the purge partly applied" and "the cancel partly applied", and
+// ListDue selected on it. An operator pressed Restore, one service was briefly
+// unreachable, and five days later the reaper destroyed the very data they had
+// asked to keep — then marked the operation reaped, so pressing Restore again
+// answered "its data is permanently deleted" while the local rows sat intact.
+func TestReapDue_neverReapsAnOperationWhoseCancelWasRequested(t *testing.T) {
+	db := admintest.NewDB(t)
+	admintest.SeedFleet(t, db, "fleet-1")
+	media := &failingRestore{stubDownstream: stubDownstream{name: "media"}, failRestore: true}
+	proc := newProcessor(t, db, stubAuth{admin: true}, media)
+	op, err := proc.Create(context.Background(), fleetInput())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// The cancel only partly succeeds: local rows come back, media does not.
+	got, err := proc.Cancel(context.Background(), op.ID(), admin.Actor{UserID: "a", Email: "a@x"})
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if got.Status() != admin.StatusPartial {
+		t.Fatalf("fixture expected a partial cancel, got %q", got.Status())
+	}
+	if got.CancelledAt() == nil {
+		t.Error("a requested cancel must be recorded durably even when it did not complete")
+	}
+
+	// Well past the recovery window.
+	later := admin.NewProcessorClockForTest(proc, testNow.Add(admin.DefaultRecoveryWindow+time.Hour))
+	if err := later.ReapDue(context.Background()); err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+
+	after, err := admin.NewProvider(db).GetOperation(op.ID())
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if after.Status() == admin.StatusReaped {
+		t.Error("the reaper destroyed data whose restore the operator had already requested")
+	}
+	if media.reaped != 0 {
+		t.Errorf("downstream reap ran on a cancelled operation (%d calls)", media.reaped)
+	}
+	if admintest.CountLive(t, db, "fleet.vehicles") != 2 {
+		t.Error("local rows restored by the cancel must stay restored")
+	}
+}

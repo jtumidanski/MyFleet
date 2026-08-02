@@ -412,3 +412,39 @@ func TestRetry_onACancelledOperationIs409(t *testing.T) {
 		t.Errorf("want 409 retrying a cancelled operation, got %v", err)
 	}
 }
+
+// Retry re-attempts a DESTRUCTIVE stamp, so it must refuse an operation whose
+// cancel has been requested — including one left `partial` because a downstream
+// restore failed. Without this the console offers "Retry" on a row the operator
+// just asked to restore, and pressing it re-purges everything.
+func TestRetry_refusesAnOperationWhoseCancelWasRequested(t *testing.T) {
+	db := admintest.NewDB(t)
+	admintest.SeedFleet(t, db, "fleet-1")
+	media := &failingRestore{stubDownstream: stubDownstream{name: "media"}, failRestore: true}
+	proc := newProcessor(t, db, stubAuth{admin: true}, media)
+	op, err := proc.Create(context.Background(), fleetInput())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	before := media.purgeCall
+
+	got, err := proc.Cancel(context.Background(), op.ID(), admin.Actor{UserID: "a", Email: "a@x"})
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if got.Status() != admin.StatusPartial {
+		t.Fatalf("fixture expected a partial cancel, got %q", got.Status())
+	}
+
+	if _, err := proc.Retry(context.Background(), op.ID(),
+		admin.Actor{UserID: "a", Email: "a@x"}); !errors.Is(err, server.ErrConflict) {
+		t.Errorf("want 409 retrying a cancelled operation, got %v", err)
+	}
+	if media.purgeCall != before {
+		t.Errorf("retry re-purged downstream on a cancelled operation: %d → %d calls",
+			before, media.purgeCall)
+	}
+	if admintest.CountLive(t, db, "fleet.vehicles") != 2 {
+		t.Error("retry re-stamped local rows the cancel had restored")
+	}
+}

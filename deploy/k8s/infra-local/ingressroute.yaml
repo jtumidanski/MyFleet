@@ -1,4 +1,31 @@
 ---
+# Terminates any request aimed at a service's /internal/* endpoints.
+#
+# This exists in local dev for the same reason it exists in main: those routes
+# are registered WITHOUT JWT, and two of them DELETE DATA. notification-service
+# is the load-bearing case — notifications-stripprefix removes the FULL
+# /api/notifications prefix, so without this rule
+# /api/notifications/internal/admin/purge arrives at the service as
+# /internal/admin/purge, an unauthenticated "delete everything for this fleet"
+# endpoint reachable from anything that can hit the NodePort.
+#
+# A local stack is not a safe place to leave that open: it is the stack running
+# against a developer's own data, and "it is only dev" is how a rule that should
+# be uniform becomes one that has to be remembered.
+#
+# ipAllowList with an unroutable /32 allows nobody. In-cluster callers use
+# ClusterVIPs directly and never traverse this router, so they are unaffected.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: internal-deny
+spec:
+  ipAllowList:
+    sourceRange:
+      - 255.255.255.255/32
+    rejectStatusCode: 403
+
+---
 # Local-dev routing: no Host match, since local dev hits the NodePort directly.
 # The main overlay ships its own host-matched IngressRoute.
 #
@@ -13,6 +40,46 @@ spec:
   entryPoints:
     - web
   routes:
+    # Priority 200: deny every /internal/* surface before the priority-100
+    # service routes can proxy it. PathRegexp with `[^/]*/*` for the same reason
+    # as the main overlay: Traefik normalises the path before matching, and
+    # stripPrefix removes a literal string rather than a path segment, so
+    # `/api/fleetinternal/…` would otherwise arrive as `/internal/…`.
+    #
+    # The service references are inert — internal-deny short-circuits with 403
+    # before anything is proxied.
+    - match: PathRegexp(`(?i)^/+api/+auth[^/]*/*internal`)
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: internal-deny
+      services:
+        - name: auth-service
+          port: 8080
+    - match: PathRegexp(`(?i)^/+api/+fleet[^/]*/*internal`)
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: internal-deny
+      services:
+        - name: fleet-service
+          port: 8080
+    - match: PathRegexp(`(?i)^/+api/+media[^/]*/*internal`)
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: internal-deny
+      services:
+        - name: media-service
+          port: 8080
+    - match: PathRegexp(`(?i)^/+api/+notifications[^/]*/*internal`)
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: internal-deny
+      services:
+        - name: notification-service
+          port: 8080
     - match: PathPrefix(`/api/auth`)
       kind: Rule
       priority: 100

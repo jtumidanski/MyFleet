@@ -119,7 +119,7 @@ func InitializeRoutes(log logrus.FieldLogger, proc *Processor) func(chi.Router) 
 				return
 			}
 			page := server.ParsePage(req)
-			ops, total, err := proc.d.Provider.ListOperations(req.URL.Query().Get("status"), page)
+			ops, total, err := proc.ListOperations(req.URL.Query().Get("status"), page)
 			if err != nil {
 				log.WithError(err).Error("admin list purge operations")
 				server.WriteError(w, errInternal)
@@ -135,7 +135,7 @@ func InitializeRoutes(log logrus.FieldLogger, proc *Processor) func(chi.Router) 
 			if !authorized(w, req) {
 				return
 			}
-			op, err := proc.d.Provider.GetOperation(chi.URLParam(req, "id"))
+			op, err := proc.GetOperation(chi.URLParam(req, "id"))
 			if err != nil {
 				if mapped := mapStoreError(err); isClientError(mapped) {
 					server.WriteError(w, mapped)
@@ -225,7 +225,7 @@ func InitializeRoutes(log logrus.FieldLogger, proc *Processor) func(chi.Router) 
 				return
 			}
 			page := server.ParsePage(req)
-			events, total, err := proc.d.Provider.ListAudit(AuditFilter{
+			events, total, err := proc.ListAuditEvents(AuditFilter{
 				Action: req.URL.Query().Get("action"),
 				Actor:  req.URL.Query().Get("actor"),
 			}, page)

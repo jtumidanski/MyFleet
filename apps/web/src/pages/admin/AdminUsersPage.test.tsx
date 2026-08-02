@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { AdminUsersPage } from './AdminUsersPage';
 import type { AdminUserAttributes } from '../../types/models/admin';
@@ -20,6 +20,7 @@ function mockUsers(rows: Array<{ id: string } & Partial<AdminUserAttributes>>) {
           display_name: 'A',
           created_at: '2026-01-01T00:00:00Z',
           last_login_at: null,
+          platform_admin: false,
           fleets: [],
           ...over,
         } as AdminUserAttributes,
@@ -63,6 +64,21 @@ describe('AdminUsersPage', () => {
     await screen.findByTestId('user-u1');
     expect(
       screen.queryByRole('button', { name: /grant|revoke|make admin/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  // FR-ADMIN-FLEET-6: the directory must SHOW who holds platform admin. Showing
+  // and granting are different things; only granting is a non-goal.
+  it('marks a platform admin', async () => {
+    mockUsers([
+      { id: 'u1', platform_admin: true },
+      { id: 'u2', platform_admin: false },
+    ]);
+    renderWithProviders(<AdminUsersPage />);
+    const adminRow = await screen.findByTestId('user-u1');
+    expect(within(adminRow).getByText(/platform admin/i)).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('user-u2')).queryByText(/platform admin/i),
     ).not.toBeInTheDocument();
   });
 });

@@ -62,9 +62,15 @@ func (p *dbProvider) ListOperations(status string, page server.Page) ([]Operatio
 // ListDue returns operations whose recovery window has elapsed and that have
 // not reached a terminal state. cancelled and reaped are excluded: the first
 // was undone, the second is done (FR-ADMIN-RESTORE-4).
+//
+// cancelled_at IS NULL is load-bearing and not redundant with the status filter.
+// A cancel whose downstream restore failed stays `partial` — the same status a
+// partly-applied purge carries — so selecting on status alone would sweep up an
+// operation the operator had explicitly asked to restore and destroy it. Intent
+// is recorded separately from outcome precisely so this query can honour it.
 func (p *dbProvider) ListDue(now time.Time) ([]Operation, error) {
 	var es []OperationEntity
-	if err := p.db.Where("status IN ? AND purge_after < ?",
+	if err := p.db.Where("status IN ? AND purge_after < ? AND cancelled_at IS NULL",
 		[]string{string(StatusPending), string(StatusPartial)}, now).
 		Order("purge_after asc").Find(&es).Error; err != nil {
 		return nil, err

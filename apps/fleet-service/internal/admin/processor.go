@@ -316,6 +316,15 @@ func (p *Processor) Cancel(ctx context.Context, opID string, actor Actor) (Opera
 		return op, nil
 	}
 
+	// Record the INTENT before doing any work. A crash between here and the end
+	// of this function must still leave the operation out of the reaper's reach:
+	// the operator asked for their data back, and that fact cannot depend on the
+	// restore having finished.
+	if err := p.d.Administrator.MarkCancelRequested(p.d.DB, opID, now); err != nil {
+		p.log.WithError(err).WithField("operation_id", opID).Error("record cancel request")
+		return Operation{}, err
+	}
+
 	// Local restore first and unconditionally: a downstream failure must not
 	// hold the product's own data hostage.
 	if err := p.d.DB.Transaction(func(tx *gorm.DB) error { return Restore(tx, opID) }); err != nil {
@@ -389,9 +398,12 @@ func (p *Processor) Retry(ctx context.Context, opID string, actor Actor) (Operat
 	if err != nil {
 		return Operation{}, err
 	}
-	if op.Status() == StatusReaped || op.Status() == StatusCancelled {
+	// CancelledAt, not just the status: a cancel whose downstream restore failed
+	// is still `partial`, and retrying it would re-purge everything the operator
+	// had just asked to have back.
+	if op.Status() == StatusReaped || op.Status() == StatusCancelled || op.CancelledAt() != nil {
 		return Operation{}, server.Detailed(server.ErrConflict,
-			"only a pending or partial operation can be retried")
+			"only a pending or partial operation that has not been cancelled can be retried")
 	}
 
 	// Re-resolve the media ids for a record purge. The target rows are
