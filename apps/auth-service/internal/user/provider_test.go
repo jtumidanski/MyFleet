@@ -168,17 +168,17 @@ func TestListByIDs_omitsUnknownIDsWithoutError(t *testing.T) {
 	}
 }
 
-// An empty argument must not become `WHERE id IN ()` — some drivers turn that
-// into a syntax error, and the caller's "nothing allowed" case is legitimate.
+// An empty argument must not become `WHERE id IN ()` — some drivers turn
+// that into a syntax error, and the caller's "nothing allowed" case is
+// legitimate. Passing a nil *gorm.DB is what makes this a real assertion:
+// the short-circuit is the only way to return without dereferencing it, so
+// deleting that guard turns this test into a panic rather than a pass.
 func TestListByIDs_returnsEmptyForNoIDs(t *testing.T) {
-	db := newTestDB(t)
-	seedUserWith(t, db, "u1", "sub-1", "one@example.com", "One")
-
-	ms, err := NewProvider(db).ListByIDs(nil)
+	ms, err := NewProvider(nil).ListByIDs(nil)
 	if err != nil {
 		t.Fatalf("ListByIDs(nil): %v", err)
 	}
 	if len(ms) != 0 {
-		t.Fatalf("got %d rows, want 0", len(ms))
+		t.Fatalf("got %+v, want an empty result", ms)
 	}
 }
