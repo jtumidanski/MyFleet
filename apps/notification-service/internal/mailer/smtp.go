@@ -65,11 +65,34 @@ func (s *smtpSender) dial(ctx context.Context) (*smtp.Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		return smtp.NewClient(conn, s.cfg.Host)
+		// net.Conn Read/Write do not observe ctx cancellation — only the initial
+		// dial does. Without an explicit deadline here, a relay that completes
+		// the handshake and then stalls (e.g. a middlebox eating post-handshake
+		// traffic) hangs smtp.NewClient's greeting read forever. One absolute
+		// deadline covers the whole session, matching cfg.Timeout's role as the
+		// per-attempt budget (design.md: "a black-holed relay cannot hang the
+		// goroutine").
+		if err := conn.SetDeadline(time.Now().Add(s.cfg.Timeout)); err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		c, err := smtp.NewClient(conn, s.cfg.Host)
+		if err != nil {
+			_ = conn.Close()
+			return nil, err
+		}
+		return c, nil
 	}
 
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
+		return nil, err
+	}
+	// Same reasoning as the implicit-TLS branch above: bound every subsequent
+	// read/write (greeting, EHLO/STARTTLS, AUTH, MAIL/RCPT/DATA/QUIT) with an
+	// absolute deadline, since ctx alone does not reach net.Conn I/O.
+	if err := conn.SetDeadline(time.Now().Add(s.cfg.Timeout)); err != nil {
+		_ = conn.Close()
 		return nil, err
 	}
 	c, err := smtp.NewClient(conn, s.cfg.Host)
