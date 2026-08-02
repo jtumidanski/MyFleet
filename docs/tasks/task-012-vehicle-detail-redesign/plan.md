@@ -1418,6 +1418,15 @@ export function mergeVehicleRecords(sources: RecordSource[]): MergeResult;
 export function filterVehicleRecords(rows: VehicleRecordRow[], kind: VehicleRecordKind | 'all'): VehicleRecordRow[];
 ```
 
+**The merge must dedupe by `id`.** None of the three backend list queries carries a
+tiebreaker in its `ORDER BY` — mileage orders on `recorded_at` alone, fuel on `date`,
+maintenance records on `performed_at`. Combined with `OFFSET`/`LIMIT`, rows sharing a
+timestamp can shuffle between pages, so the same row can arrive on two pages while
+another is skipped. That was harmless when each list fetched one page; it is not once
+pages accumulate. Deduping by `id` costs one `Map` and makes a duplicate render
+impossible. It cannot recover a row the server skipped — that needs a backend
+tiebreaker, which is deferred.
+
 - [ ] **Step 1: Write the failing test**
 
 Create `apps/web/src/lib/vehicleRecords.test.ts`:
