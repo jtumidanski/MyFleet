@@ -19,6 +19,8 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { memberKeys, useRemoveMember } from './members';
+import { authKeys } from './auth';
+import { refreshAccessToken } from '../../api/refresh';
 import { inviteKeys, useCreateInvite, useRevokeInvite, useAcceptInvite } from './invites';
 import { fleetKeys } from './fleets';
 import { useRenameFleet } from './fleetSettings';
@@ -62,6 +64,10 @@ vi.mock('../../../services/api/InviteService', () => ({
     revokeInvite: vi.fn().mockResolvedValue(undefined),
     acceptInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
   },
+}));
+
+vi.mock('../../api/refresh', () => ({
+  refreshAccessToken: vi.fn().mockResolvedValue('fresh-token'),
 }));
 
 vi.mock('../../../services/api/FleetSettingsService', () => ({
@@ -219,5 +225,34 @@ describe('mutation invalidation contracts — real hooks', () => {
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.all }));
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.all }));
+  });
+
+  // The JWT still carries the pre-accept active_fleet_id claim (empty for a
+  // first-time invitee), and /auth/me reports that claim. Without a fresh token
+  // the new member is bounced back to onboarding by RequireAuth.
+  it('useAcceptInvite mints a fresh token and refetches identity, in that order', async () => {
+    const { result } = renderHook(() => useAcceptInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('tok-abc');
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+
+    const invalidateCalls = invalidateSpy.mock.calls as Array<[{ queryKey?: unknown }]>;
+    const authCall = invalidateCalls.findIndex(
+      (c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(authKeys.all),
+    );
+    expect(authCall).toBeGreaterThanOrEqual(0);
+
+    // Fallbacks are deliberately order-violating so a missing call fails here
+    // rather than silently passing the comparison.
+    const refreshOrder = vi.mocked(refreshAccessToken).mock.invocationCallOrder[0] ?? Infinity;
+    const authOrder = invalidateSpy.mock.invocationCallOrder[authCall] ?? -1;
+    expect(refreshOrder).toBeLessThan(authOrder);
   });
 });

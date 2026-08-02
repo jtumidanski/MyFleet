@@ -11,8 +11,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { inviteService } from '../../../services/api/InviteService';
+import { refreshAccessToken } from '../../api/refresh';
 import { memberKeys } from './members';
 import { fleetKeys } from './fleets';
+import { authKeys } from './auth';
 import type { CreateInviteAttributes } from '../../../types/models/invite';
 
 // ---------------------------------------------------------------------------
@@ -89,11 +91,23 @@ export function useRevokeInvite() {
 /**
  * POST /api/fleet/invites/{token}/accept — accept an invite.
  * Invalidates memberKeys and fleetKeys so the new membership is reflected.
+ *
+ * Acceptance creates the membership server-side, but `active_fleet_id` and
+ * `role` are JWT claims resolved at mint time — the token in hand still says
+ * the caller has no fleet. onSuccess therefore mints a fresh token BEFORE
+ * refetching identity, so `/auth/me` reports the new fleet and RequireAuth
+ * stops bouncing the brand-new member to onboarding. Both awaits matter: the
+ * mutation must not settle until the session reflects the membership, because
+ * the accept page navigates as soon as it does.
  */
 export function useAcceptInvite() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (token: string) => inviteService.acceptInvite(token),
+    onSuccess: async () => {
+      await refreshAccessToken();
+      await queryClient.invalidateQueries({ queryKey: authKeys.all });
+    },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: memberKeys.all });
       void queryClient.invalidateQueries({ queryKey: fleetKeys.all });

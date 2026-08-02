@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
@@ -13,6 +13,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 export function LoginPage() {
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Set by RequireAuth when it bounced the user here; handed to auth-service so
+  // the OAuth callback returns to the page they actually wanted.
+  const from = (location.state as { from?: string } | null)?.from;
 
   useEffect(() => {
     if (isAuthenticated) navigate('/', { replace: true });
@@ -26,7 +30,7 @@ export function LoginPage() {
           <CardDescription>Sign in to manage your household fleet.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Button type="button" variant="outline" className="w-full" onClick={login}>
+          <Button type="button" variant="outline" className="w-full" onClick={() => login(from)}>
             Continue with Google
           </Button>
         </CardContent>
