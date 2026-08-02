@@ -104,7 +104,7 @@ func TestDDLColumnsMatchEntity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("table_info: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var gotCols []string
 	for rows.Next() {

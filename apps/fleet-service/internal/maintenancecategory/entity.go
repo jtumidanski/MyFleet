@@ -7,7 +7,7 @@ import (
 
 // Entity maps to fleet.maintenance_categories (PRD §6, design §8.2).
 type Entity struct {
-	ID            string `gorm:"type:uuid;primaryKey"`
+	ID string `gorm:"type:uuid;primaryKey"`
 	// uniqueIndex (shared with Kind and FleetID below) is a case-SENSITIVE
 	// backstop against a double-submit or client retry inserting the same
 	// literal name twice (design §10.1 line 220-222); it does not replace the

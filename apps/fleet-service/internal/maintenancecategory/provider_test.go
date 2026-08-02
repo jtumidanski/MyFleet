@@ -184,7 +184,8 @@ func TestIDsByKindScopesToFleet(t *testing.T) {
 // fleet A's custom row. It does NOT regression-guard the PostgreSQL bind
 // failure (SQLSTATE 22P02) that motivates the fleetID == "" branch in
 // visibleTo — SQLite does not type-check bind parameters, so
-// "fleet_id = ''" simply matches no rows there instead of erroring, and
+// comparing fleet_id against the empty string simply matches no rows
+// there instead of erroring, and
 // this test passes identically whether that branch exists or not. Deleting
 // the branch will not fail this suite.
 func TestList_noActiveFleetSeesSystemOnly(t *testing.T) {
