@@ -35,9 +35,7 @@ export function DashboardPage() {
       <PageHeader
         title="Dashboard"
         actions={
-          isOwner && (
-            <AddWidgetMenu placedTypes={widgets.map((w) => w.type)} onAdd={addWidget} />
-          )
+          isOwner && <AddWidgetMenu placedTypes={widgets.map((w) => w.type)} onAdd={addWidget} />
         }
       />
       <DashboardGrid
