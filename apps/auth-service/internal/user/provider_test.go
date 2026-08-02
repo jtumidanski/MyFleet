@@ -125,3 +125,60 @@ func TestGetBySub_matchesGoogleSubOnly(t *testing.T) {
 			"would mean google_sub and id are being conflated again", err)
 	}
 }
+
+func seedUserWith(t *testing.T, db *gorm.DB, id, sub, email, name string) {
+	t.Helper()
+	e := Entity{ID: id, GoogleSub: sub, Email: email, DisplayName: name, ThemePreference: ThemeSystem}
+	if err := db.Create(&e).Error; err != nil {
+		t.Fatalf("seed %s: %v", id, err)
+	}
+}
+
+func TestListByIDs_returnsOnlyTheRequestedUsers(t *testing.T) {
+	db := newTestDB(t)
+	seedUserWith(t, db, "u1", "sub-1", "one@example.com", "One")
+	seedUserWith(t, db, "u2", "sub-2", "two@example.com", "Two")
+	seedUserWith(t, db, "u3", "sub-3", "three@example.com", "Three")
+
+	ms, err := NewProvider(db).ListByIDs([]string{"u1", "u3"})
+	if err != nil {
+		t.Fatalf("ListByIDs: %v", err)
+	}
+	got := map[string]string{}
+	for _, m := range ms {
+		got[m.ID()] = m.DisplayName()
+	}
+	if len(got) != 2 || got["u1"] != "One" || got["u3"] != "Three" {
+		t.Fatalf("got %+v, want exactly u1 and u3", got)
+	}
+}
+
+// FR-1.4: an id with no users row is simply absent. The handler treats that as
+// a normal result, not an error, so the provider must not invent one.
+func TestListByIDs_omitsUnknownIDsWithoutError(t *testing.T) {
+	db := newTestDB(t)
+	seedUserWith(t, db, "u1", "sub-1", "one@example.com", "One")
+
+	ms, err := NewProvider(db).ListByIDs([]string{"u1", "ghost"})
+	if err != nil {
+		t.Fatalf("ListByIDs must not error on an unknown id: %v", err)
+	}
+	if len(ms) != 1 || ms[0].ID() != "u1" {
+		t.Fatalf("got %+v, want only u1", ms)
+	}
+}
+
+// An empty argument must not become `WHERE id IN ()` — some drivers turn
+// that into a syntax error, and the caller's "nothing allowed" case is
+// legitimate. Passing a nil *gorm.DB is what makes this a real assertion:
+// the short-circuit is the only way to return without dereferencing it, so
+// deleting that guard turns this test into a panic rather than a pass.
+func TestListByIDs_returnsEmptyForNoIDs(t *testing.T) {
+	ms, err := NewProvider(nil).ListByIDs(nil)
+	if err != nil {
+		t.Fatalf("ListByIDs(nil): %v", err)
+	}
+	if len(ms) != 0 {
+		t.Fatalf("got %+v, want an empty result", ms)
+	}
+}

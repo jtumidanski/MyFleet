@@ -14,10 +14,22 @@ import (
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 )
 
+// errRoleValidation is the TRANSPORT envelope for the domain's ErrInvalidRole.
+// It names the field and the accepted values without echoing the caller's
+// input in the JSON:API `detail` field, and it is a compile-time constant so
+// no attacker-supplied string can reach the response. server.Detailed is what
+// populates `detail` — the same pairing invite.ErrAlreadyAccepted etc. use —
+// unlike a fmt.Errorf("%w: ...") wrap, which WriteError renders only into
+// `title` because it doesn't implement Detail() string.
+var errRoleValidation = server.Detailed(server.ErrValidation, "role must be one of owner, member, viewer")
+
 // InitializeRoutes wires the JWT-protected membership endpoints under a fleet.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
+//
+// rec is the activity recorder run inside the role-change and removal
+// transactions (FR-5.2). Pass nil in tests that do not exercise the feed.
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, rec ActivityRecorder) func(chi.Router) {
 	prov := NewProvider(db)
-	adm := NewAdministrator(db)
+	adm := NewAdministrator(db).WithActivityRecorder(rec)
 	proc := NewProcessor(log, prov)
 	return func(r chi.Router) {
 		// GET /fleets/{id}/members — list fleet memberships (fleet-scoped)
@@ -36,8 +48,12 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 			server.WriteJSON(w, http.StatusOK, server.Document{Data: TransformSlice(ms)})
 		})
 
-		// DELETE /fleets/{id}/members/{userId} — owner-only; sole-owner guard
-		r.Delete("/fleets/{id}/members/{userId}", func(w http.ResponseWriter, req *http.Request) {
+		// PATCH /fleets/{id}/members/{userId} — change a membership's role.
+		// Owner-only at BOTH layers; zero-owner guard in ValidateRoleChange.
+		r.Patch("/fleets/{id}/members/{userId}", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
+			Role string `json:"role"`
+		},
+		) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
 			targetUserID := chi.URLParam(req, "userId")
@@ -51,13 +67,71 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 				server.WriteError(w, err)
 				return
 			}
-			// Authoritative DB check via processor (stale-claim guard, design §9)
+			// Authoritative DB check (stale-claim guard, SEC-5)
 			if err := proc.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
 				server.WriteError(w, err)
 				return
 			}
 
-			// Fetch the target membership via processor
+			target, err := proc.ValidateRoleChange(fleetID, targetUserID, attrs.Role)
+			if err != nil {
+				// Client errors are not incidents — do not log them.
+				if errors.Is(err, ErrInvalidRole) {
+					server.WriteError(w, errRoleValidation)
+					return
+				}
+				server.WriteError(w, err)
+				return
+			}
+
+			updated, err := adm.UpdateRole(target, attrs.Role, identity.UserID)
+			if err != nil {
+				// The row went away between ValidateRoleChange and the write.
+				// That is the caller losing a race, not an incident: 404, no log.
+				if errors.Is(err, ErrNotFound) {
+					server.WriteError(w, server.ErrNotFound)
+					return
+				}
+				log.WithError(err).Error("membership role update failed")
+				server.WriteError(w, err)
+				return
+			}
+			server.WriteJSON(w, http.StatusOK, server.Document{Data: Transform(updated)})
+		}))
+
+		// DELETE /fleets/{id}/members/{userId} — owner-only for OTHERS;
+		// self-removal needs no role (FR-3.1). Sole-owner guard unchanged.
+		r.Delete("/fleets/{id}/members/{userId}", func(w http.ResponseWriter, req *http.Request) {
+			identity := auth.IdentityFromContext(req.Context())
+			fleetID := chi.URLParam(req, "id")
+			targetUserID := chi.URLParam(req, "userId")
+
+			// OUTSIDE the isSelf branch on purpose: this is what makes a
+			// cross-fleet id 404 rather than leaking existence, and self-ness
+			// must not be able to bypass it. identity.UserID == targetUserID is
+			// necessary but not sufficient.
+			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+
+			// One predicate, two consequences: it relaxes the guard here and
+			// picks member.left over member.removed in Administrator.Remove, so
+			// the authorization decision and the audit trail cannot disagree.
+			isSelf := identity.UserID == targetUserID
+			if !isSelf {
+				// Token-level gate (fast path)
+				if err := authz.RequireOwner(identity); err != nil {
+					server.WriteError(w, err)
+					return
+				}
+				// Authoritative DB check (stale-claim guard, SEC-5)
+				if err := proc.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
+					server.WriteError(w, err)
+					return
+				}
+			}
+
 			targetMem, err := proc.GetMember(fleetID, targetUserID)
 			if err != nil {
 				if errors.Is(err, server.ErrNotFound) {
@@ -68,13 +142,21 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 				return
 			}
 
-			// Sole-owner self-removal guard
+			// Sole-owner self-removal guard (FR-3.2, unchanged)
 			if err := proc.ValidateRemoval(fleetID, identity.UserID, targetUserID, targetMem.Role()); err != nil {
 				server.WriteError(w, err)
 				return
 			}
 
-			if err := adm.Delete(targetMem.ID()); err != nil {
+			if err := adm.Remove(targetMem, identity.UserID); err != nil {
+				// Someone else removed the row first. The caller's intent is
+				// already satisfied, but 404 is the honest answer: this request
+				// did not delete anything and wrote no activity event.
+				if errors.Is(err, ErrNotFound) {
+					server.WriteError(w, server.ErrNotFound)
+					return
+				}
+				log.WithError(err).Error("membership removal failed")
 				server.WriteError(w, err)
 				return
 			}

@@ -23,6 +23,11 @@ import (
 type Provider interface {
 	GetByID(id string) (Model, error)
 	GetBySub(sub string) (Model, error)
+	// ListByIDs returns the users matching any of the given internal user ids.
+	// Unknown ids are simply absent from the result — not an error. There is NO
+	// scoping in here: every caller applies its own (the fleet-scoped
+	// /auth/users route intersects first; an admin route would not).
+	ListByIDs(ids []string) ([]Model, error)
 }
 
 type dbProvider struct{ db *gorm.DB }
@@ -55,5 +60,27 @@ func (s *dbProvider) GetBySub(sub string) (Model, error) {
 			return Model{}, err
 		}
 		return Make(e), nil
+	})()
+}
+
+// ListByIDs looks users up by primary key in a single query.
+//
+// An empty id list short-circuits: `WHERE id IN ()` is not portable SQL, and
+// "the caller is allowed to see nobody" is a legitimate outcome the /auth/users
+// intersection produces routinely.
+func (s *dbProvider) ListByIDs(ids []string) ([]Model, error) {
+	if len(ids) == 0 {
+		return []Model{}, nil
+	}
+	return database.Query(func() ([]Model, error) {
+		var es []Entity
+		if err := s.db.Where("id IN ?", ids).Find(&es).Error; err != nil {
+			return nil, err
+		}
+		out := make([]Model, 0, len(es))
+		for _, e := range es {
+			out = append(out, Make(e))
+		}
+		return out, nil
 	})()
 }

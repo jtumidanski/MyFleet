@@ -39,7 +39,8 @@ func newAuthRouter(t *testing.T) (chi.Router, *gorm.DB) {
 	log.SetOutput(io.Discard)
 
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db))
+	// nil gatherer: these tests drive /auth/me only, which never consults it.
+	r.Group(InitializeRoutes(log, db, nil))
 	return r, db
 }
 

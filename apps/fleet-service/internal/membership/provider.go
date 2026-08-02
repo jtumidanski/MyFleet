@@ -74,9 +74,19 @@ func (p *dbProvider) GetByFleetAndUser(fleetID, userID string) (Model, error) {
 	return Make(e), nil
 }
 
+// CountOwners counts the ACTIVE owners of a fleet.
+//
+// The status predicate is what makes this count usable as the zero-owner guard.
+// ValidateRoleChange refuses to act on a non-active target, so without it a
+// fleet holding one active owner and one revoked owner would count 2 and the
+// last real owner would become demotable. Status is vestigial today — every row
+// is written "active" and never changed — so this asserts intent rather than
+// filtering anything, and it matches ListActiveByFleetID above.
 func (p *dbProvider) CountOwners(fleetID string) (int, error) {
 	var count int64
-	if err := p.db.Model(&Entity{}).Where("fleet_id = ? AND role = ?", fleetID, "owner").Count(&count).Error; err != nil {
+	if err := p.db.Model(&Entity{}).
+		Where("fleet_id = ? AND role = ? AND status = ?", fleetID, "owner", "active").
+		Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return int(count), nil

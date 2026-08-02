@@ -61,3 +61,10 @@ func (pr *Processor) UpdateTheme(userID string, pref string) (Model, error) {
 	}
 	return pr.a.Update(m.WithThemePreference(pref))
 }
+
+// ListByIDs resolves a batch of internal user ids. Scoping is the caller's job:
+// GET /auth/users intersects the requested ids against the caller's fleet
+// BEFORE calling this, so nothing here can leak a user from another fleet.
+func (pr *Processor) ListByIDs(ids []string) ([]Model, error) {
+	return pr.p.ListByIDs(ids)
+}
