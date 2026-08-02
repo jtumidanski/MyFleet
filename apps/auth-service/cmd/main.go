@@ -78,6 +78,7 @@ func main() {
 		AppBaseURL:     config.Get("APP_BASE_URL", "http://localhost"),
 		HomePath:       config.Get("APP_HOME_PATH", "/"),
 		OnboardingPath: config.Get("APP_ONBOARDING_PATH", "/onboarding"),
+		LoginPath:      config.Get("APP_LOGIN_PATH", "/login"),
 		CookieSecure:   cookieSecure,
 	}
 

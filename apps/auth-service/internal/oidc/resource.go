@@ -55,9 +55,10 @@ type Dependencies struct {
 	StateSecret []byte
 	// AppBaseURL is the SPA origin the browser is redirected back to.
 	AppBaseURL string
-	// HomePath / OnboardingPath are relative paths under AppBaseURL.
+	// HomePath / OnboardingPath / LoginPath are relative paths under AppBaseURL.
 	HomePath       string
 	OnboardingPath string
+	LoginPath      string
 	// CookieSecure controls the Secure flag on cookies this package sets. It is
 	// false for local plaintext HTTP (Traefik :80) and true in production.
 	CookieSecure bool
@@ -70,6 +71,37 @@ func InitializeRoutes(log logrus.FieldLogger, d Dependencies) func(chi.Router) {
 		r.Get("/auth/login/google", loginHandler(log, d))
 		r.Get("/auth/callback", callbackHandler(log, d))
 	}
+}
+
+// loginErrorCode is the coarse, browser-visible outcome of a failed callback.
+// Deliberately not derived from the underlying error: nothing about the
+// failure's internals reaches the SPA (FR-ERR-4). A typed constant set means
+// the compiler, not review, enforces the closed vocabulary.
+type loginErrorCode string
+
+const (
+	errCancelled    loginErrorCode = "cancelled"
+	errInvalidState loginErrorCode = "invalid_state"
+	errAuthFailed   loginErrorCode = "auth_failed"
+	errServerError  loginErrorCode = "server_error"
+)
+
+// failLogin returns the browser to the SPA's login page carrying a coarse
+// reason, instead of dead-ending on a plaintext error body.
+//
+// The state cookie is cleared on every path (FR-ERR-8): each of these exits
+// abandons the attempt, and the page the user lands on offers "Try again", so a
+// stale signed state must not survive to collide with the next attempt's. The
+// clear must precede http.Redirect, which calls WriteHeader — headers set after
+// that are dropped silently.
+//
+// The location is composed entirely from server configuration plus a constant,
+// so there is no open-redirect surface (FR-ERR-9). It is deliberately NOT
+// query-escaped: escaping would turn the "#" into "%23" and put the code in the
+// path rather than the fragment.
+func failLogin(w http.ResponseWriter, req *http.Request, d Dependencies, code loginErrorCode) {
+	clearStateCookie(w, d.CookieSecure)
+	http.Redirect(w, req, d.AppBaseURL+d.LoginPath+"#error="+string(code), http.StatusFound)
 }
 
 func loginHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
@@ -88,12 +120,12 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		code := req.URL.Query().Get("code")
 		state := req.URL.Query().Get("state")
 		if code == "" || state == "" {
-			http.Error(w, "missing code or state", http.StatusBadRequest)
+			failLogin(w, req, d, errInvalidState)
 			return
 		}
 		wantNonce, ok := verifyStateCookie(req, d.StateSecret, state)
 		if !ok {
-			http.Error(w, "invalid state", http.StatusBadRequest)
+			failLogin(w, req, d, errInvalidState)
 			return
 		}
 		clearStateCookie(w, d.CookieSecure)
@@ -102,34 +134,34 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		rawIDToken, err := d.OIDC.Exchange(ctx, code)
 		if err != nil {
 			log.WithError(err).Error("oidc code exchange")
-			http.Error(w, "authentication failed", http.StatusBadGateway)
+			failLogin(w, req, d, errAuthFailed)
 			return
 		}
 		profile, gotNonce, err := d.OIDC.Verify(ctx, rawIDToken)
 		if err != nil {
 			log.WithError(err).Error("oidc id_token verification")
-			http.Error(w, "authentication failed", http.StatusUnauthorized)
+			failLogin(w, req, d, errAuthFailed)
 			return
 		}
 		// idtoken.Validate does not check the nonce; bind the id_token to this
 		// login attempt by comparing its nonce to the one in the state cookie.
 		if gotNonce == "" || !hmac.Equal([]byte(gotNonce), []byte(wantNonce)) {
 			log.Error("oidc nonce mismatch")
-			http.Error(w, "authentication failed", http.StatusUnauthorized)
+			failLogin(w, req, d, errAuthFailed)
 			return
 		}
 
 		u, err := d.Users.ProvisionFromGoogle(profile)
 		if err != nil {
 			log.WithError(err).Error("provision user from google")
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			failLogin(w, req, d, errServerError)
 			return
 		}
 
 		fleetID, role, err := d.Resolve(ctx, u.ID())
 		if err != nil {
 			log.WithError(err).Error("resolve membership on callback")
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			failLogin(w, req, d, errServerError)
 			return
 		}
 
@@ -141,13 +173,13 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		})
 		if err != nil {
 			log.WithError(err).Error("mint access on callback")
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			failLogin(w, req, d, errServerError)
 			return
 		}
 		refresh, err := d.Sessions.IssueRefresh(u.ID())
 		if err != nil {
 			log.WithError(err).Error("issue refresh on callback")
-			http.Error(w, "authentication failed", http.StatusInternalServerError)
+			failLogin(w, req, d, errServerError)
 			return
 		}
 
