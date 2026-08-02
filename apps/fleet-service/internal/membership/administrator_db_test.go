@@ -243,3 +243,89 @@ func TestRemove_worksWithoutARecorder(t *testing.T) {
 		t.Fatal("membership row still present")
 	}
 }
+
+// --- races against a row read outside the transaction ------------------------
+
+// deleteRow removes a membership behind the caller's back, standing in for a
+// concurrent request that won the race.
+func deleteRow(t *testing.T, db *gorm.DB, id string) {
+	t.Helper()
+	if err := db.Exec("DELETE FROM fleet.fleet_memberships WHERE id = ?", id).Error; err != nil {
+		t.Fatalf("delete row: %v", err)
+	}
+}
+
+// The model handed to UpdateRole is read OUTSIDE the transaction, so the row can
+// be gone by the time the write runs. An update matching zero rows must not
+// commit an activity event for a membership that no longer exists.
+func TestUpdateRole_returnsNotFoundAndRecordsNothingWhenTheRowIsGone(t *testing.T) {
+	db := newMembershipDB(t)
+	target := seedMembership(t, db, "u-target", "member")
+	deleteRow(t, db, target.ID())
+
+	var calls []recorded
+	adm := NewAdministrator(db).WithActivityRecorder(spyRecorder(&calls))
+
+	if _, err := adm.UpdateRole(target, "owner", "u-actor"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("UpdateRole against a deleted row = %v, want ErrNotFound", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("activity recorded for a membership that no longer exists: %+v", calls)
+	}
+}
+
+func TestRemove_returnsNotFoundAndRecordsNothingWhenTheRowIsGone(t *testing.T) {
+	db := newMembershipDB(t)
+	target := seedMembership(t, db, "u-target", "member")
+	deleteRow(t, db, target.ID())
+
+	var calls []recorded
+	adm := NewAdministrator(db).WithActivityRecorder(spyRecorder(&calls))
+
+	if err := adm.Remove(target, "u-owner"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Remove against a deleted row = %v, want ErrNotFound", err)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("departure recorded for a membership that was already gone: %+v", calls)
+	}
+}
+
+// --- CountOwners ------------------------------------------------------------
+
+// CountOwners is the zero-owner guard. ValidateRoleChange refuses to act on a
+// non-active target, so counting a revoked owner would make the last real owner
+// demotable.
+func TestCountOwners_countsOnlyActiveOwners(t *testing.T) {
+	db := newMembershipDB(t)
+	seedMembership(t, db, "u-owner", "owner")
+	seedMembership(t, db, "u-member", "member")
+	if err := db.Exec(`INSERT INTO fleet.fleet_memberships (id, fleet_id, user_id, role, status)
+		VALUES ('m-revoked', 'f1', 'u-gone', 'owner', 'revoked')`).Error; err != nil {
+		t.Fatalf("seed revoked owner: %v", err)
+	}
+
+	n, err := NewProvider(db).CountOwners("f1")
+	if err != nil {
+		t.Fatalf("CountOwners: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("CountOwners = %d, want 1 — a revoked owner is not an owner", n)
+	}
+}
+
+func TestCountOwners_isScopedToTheFleet(t *testing.T) {
+	db := newMembershipDB(t)
+	seedMembership(t, db, "u-owner", "owner")
+	if err := db.Exec(`INSERT INTO fleet.fleet_memberships (id, fleet_id, user_id, role, status)
+		VALUES ('m-other', 'other-fleet', 'u-elsewhere', 'owner', 'active')`).Error; err != nil {
+		t.Fatalf("seed foreign owner: %v", err)
+	}
+
+	n, err := NewProvider(db).CountOwners("f1")
+	if err != nil {
+		t.Fatalf("CountOwners: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("CountOwners = %d, want 1 — another fleet's owner must not count", n)
+	}
+}

@@ -31,7 +31,6 @@ import { displayFor } from '../../../lib/utils/displayName';
 
 interface MemberListProps {
   fleetId: string;
-  isOwner: boolean;
 }
 
 /**
@@ -44,7 +43,7 @@ type PendingAction =
   | { kind: 'leave' }
   | null;
 
-export function MemberList({ fleetId, isOwner }: MemberListProps) {
+export function MemberList({ fleetId }: MemberListProps) {
   const { user } = useAuth();
   const { data: members, isLoading } = useMembers(fleetId);
   const memberIds = useMemo(() => (members ?? []).map((m) => m.attributes.userId), [members]);
@@ -58,7 +57,7 @@ export function MemberList({ fleetId, isOwner }: MemberListProps) {
   const [pending, setPending] = useState<PendingAction>(null);
   const [successorId, setSuccessorId] = useState('');
 
-  const activeMembers = members ?? [];
+  const activeMembers = (members ?? []).filter((m) => m.attributes.status === 'active');
   const ownerCount = activeMembers.filter((m) => m.attributes.role === 'owner').length;
   const memberCount = activeMembers.length;
   // myRole comes from the MEMBERS LIST, not useAuth().role. The list is the
@@ -66,6 +65,10 @@ export function MemberList({ fleetId, isOwner }: MemberListProps) {
   // is only correct if myRole and ownerCount agree, and they only agree if both
   // come from the same response.
   const myRole = activeMembers.find((m) => m.attributes.userId === user?.id)?.attributes.role;
+  // Same reasoning, applied to the ACTIONS and not just the leave flow. Gating
+  // these on the JWT claim instead would show a just-promoted owner no owner
+  // actions, and offer a just-demoted one actions the server answers with 403.
+  const isOwner = myRole === 'owner';
 
   const soleOwner = myRole === 'owner' && ownerCount === 1;
   const needsSuccessor = soleOwner && memberCount > 1; // ux-flow state 3

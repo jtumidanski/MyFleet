@@ -69,8 +69,17 @@ func (a *dbAdministrator) Delete(id string) error {
 func (a *dbAdministrator) UpdateRole(m Model, role, actorUserID string) (Model, error) {
 	updated := m.WithRole(role)
 	err := a.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&Entity{}).Where("id = ?", m.ID()).Update("role", role).Error; err != nil {
-			return err
+		res := tx.Model(&Entity{}).Where("id = ?", m.ID()).Update("role", role)
+		if res.Error != nil {
+			return res.Error
+		}
+		// m was read OUTSIDE this transaction, so the row can have been deleted
+		// in between. Without this check the update matches nothing, the
+		// transaction still commits, and member.role_changed is recorded for a
+		// membership that no longer exists — while the handler returns 200 with
+		// a model computed in memory and never read back.
+		if res.RowsAffected == 0 {
+			return ErrNotFound
 		}
 		if a.record == nil {
 			return nil
@@ -101,8 +110,15 @@ func (a *dbAdministrator) UpdateRole(m Model, role, actorUserID string) (Model, 
 // and the authorization decision cannot disagree.
 func (a *dbAdministrator) Remove(m Model, actorUserID string) error {
 	return a.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Delete(&Entity{}, "id = ?", m.ID()).Error; err != nil {
-			return err
+		res := tx.Delete(&Entity{}, "id = ?", m.ID())
+		if res.Error != nil {
+			return res.Error
+		}
+		// See UpdateRole: m was read outside this transaction. Recording a
+		// departure for a row someone else already deleted would put a second,
+		// fictitious event in the only record that the membership ever existed.
+		if res.RowsAffected == 0 {
+			return ErrNotFound
 		}
 		if a.record == nil {
 			return nil

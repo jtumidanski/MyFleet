@@ -86,6 +86,12 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, rec ActivityRecorder)
 
 			updated, err := adm.UpdateRole(target, attrs.Role, identity.UserID)
 			if err != nil {
+				// The row went away between ValidateRoleChange and the write.
+				// That is the caller losing a race, not an incident: 404, no log.
+				if errors.Is(err, ErrNotFound) {
+					server.WriteError(w, server.ErrNotFound)
+					return
+				}
 				log.WithError(err).Error("membership role update failed")
 				server.WriteError(w, err)
 				return
@@ -143,6 +149,13 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, rec ActivityRecorder)
 			}
 
 			if err := adm.Remove(targetMem, identity.UserID); err != nil {
+				// Someone else removed the row first. The caller's intent is
+				// already satisfied, but 404 is the honest answer: this request
+				// did not delete anything and wrote no activity event.
+				if errors.Is(err, ErrNotFound) {
+					server.WriteError(w, server.ErrNotFound)
+					return
+				}
 				log.WithError(err).Error("membership removal failed")
 				server.WriteError(w, err)
 				return

@@ -102,7 +102,7 @@ describe('MemberList — names', () => {
       ],
     );
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     expect(await screen.findByText(/Jane Doe/)).toBeInTheDocument();
     expect(screen.getByText('sam@example.com')).toBeInTheDocument();
@@ -115,7 +115,7 @@ describe('MemberList — names', () => {
   it('falls through an empty-string displayName to the email', async () => {
     seed([membership('u1', 'member')], [userRow('u1', '', 'blank@example.com')]);
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     expect(await screen.findByText('blank@example.com')).toBeInTheDocument();
   });
@@ -128,7 +128,7 @@ describe('MemberList — names', () => {
     });
     vi.mocked(userService.listByIds).mockRejectedValue(new Error('auth-service down'));
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     expect(await screen.findByText('abcdefgh')).toBeInTheDocument();
   });
@@ -143,7 +143,7 @@ describe('MemberList — names', () => {
       ],
     );
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     expect(await screen.findByText(/Jane Doe \(you\)/)).toBeInTheDocument();
     expect(screen.getByText('Sam Ito')).toBeInTheDocument();
@@ -158,7 +158,7 @@ describe('MemberList — removing another member', () => {
       [userRow('other', 'Sam Ito', 'sam@example.com')],
     );
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /remove sam ito/i }));
 
@@ -176,7 +176,7 @@ describe('MemberList — removing another member', () => {
       [userRow('other', 'Sam Ito', 'sam@example.com')],
     );
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /remove sam ito/i }));
     await userEvent.click(await screen.findByRole('button', { name: /cancel/i }));
@@ -196,7 +196,7 @@ describe('MemberList — Make owner', () => {
       [userRow('other', 'Sam Ito', 'sam@example.com')],
     );
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /make sam ito an owner/i }));
 
@@ -210,13 +210,17 @@ describe('MemberList — Make owner', () => {
     );
   });
 
+  // This also pins where the owner decision COMES FROM. The useAuth mock above
+  // claims role: 'owner' for every test, so a component gating on the JWT claim
+  // would render both actions here. The members list says 'member', and the list
+  // is the database.
   it('is hidden from non-owners and never offered on an owner row', async () => {
     seed(
       [membership('me', 'member'), membership('boss', 'owner')],
       [userRow('boss', 'Jane Doe', 'jane@example.com')],
     );
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner={false} />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await screen.findByText('Jane Doe');
     expect(screen.queryByRole('button', { name: /make .* an owner/i })).not.toBeInTheDocument();
@@ -229,7 +233,7 @@ describe('MemberList — leaving', () => {
   it('offers a plain leave confirmation to a member', async () => {
     seed([membership('me', 'member'), membership('boss', 'owner')]);
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner={false} />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /^leave$/i }));
 
@@ -249,7 +253,7 @@ describe('MemberList — leaving', () => {
   it('offers a plain leave confirmation to one of two owners', async () => {
     seed([membership('me', 'owner'), membership('co', 'owner')]);
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /^leave$/i }));
 
@@ -266,7 +270,7 @@ describe('MemberList — leaving', () => {
       [userRow('other', 'Sam Ito', 'sam@example.com')],
     );
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /^leave$/i }));
 
@@ -289,7 +293,7 @@ describe('MemberList — leaving', () => {
       order.push('delete');
     });
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /^leave$/i }));
     await userEvent.click(await screen.findByRole('combobox'));
@@ -312,7 +316,7 @@ describe('MemberList — leaving', () => {
     );
     vi.mocked(memberService.updateRole).mockRejectedValue(new Error('boom'));
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /^leave$/i }));
     await userEvent.click(await screen.findByRole('combobox'));
@@ -332,7 +336,7 @@ describe('MemberList — leaving', () => {
       [userRow('watcher', 'Val Watcher', 'val@example.com')],
     );
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     await userEvent.click(await screen.findByRole('button', { name: /^leave$/i }));
     await userEvent.click(await screen.findByRole('combobox'));
@@ -345,7 +349,7 @@ describe('MemberList — leaving', () => {
   it('disables Leave for a sole owner who is the only member, with an explanation', async () => {
     seed([membership('me', 'owner')], [userRow('me', 'Jane Doe', 'jane@example.com')]);
 
-    renderWithProviders(<MemberList fleetId="f1" isOwner />);
+    renderWithProviders(<MemberList fleetId="f1" />);
 
     const leave = await screen.findByRole('button', { name: /^leave$/i });
     expect(leave).toBeDisabled();

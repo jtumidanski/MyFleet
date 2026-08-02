@@ -49,7 +49,10 @@ export function SettingsPage() {
       <Card>
         <CardContent className="pt-6">
           <h2 className="text-base font-semibold mb-4">Members</h2>
-          <MemberList fleetId={activeFleetId} isOwner={isOwner} />
+          {/* No isOwner prop: MemberList derives the caller's role from the
+              members list it already fetches, which is the database rather than
+              a token claim that can be stale. */}
+          <MemberList fleetId={activeFleetId} />
         </CardContent>
       </Card>
 
