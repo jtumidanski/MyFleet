@@ -34,3 +34,11 @@ func TransformSlice(ms []Model) []server.Resource {
 	}
 	return out
 }
+
+// CreateAttributes is the JSON:API attributes payload for creating a
+// free-form category. FleetID is deliberately absent: the fleet comes from the
+// caller's identity, never the body.
+type CreateAttributes struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}

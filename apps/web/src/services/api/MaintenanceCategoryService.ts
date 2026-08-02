@@ -1,4 +1,5 @@
 import type {
+  CreateMaintenanceCategoryAttributes,
   MaintenanceCategoryAttributes,
   MaintenanceCategoryKind,
 } from '../../types/models/maintenanceCategory';
@@ -8,11 +9,15 @@ import { BaseService, type ListResult } from './BaseService';
  * Maintenance Category service.
  *
  * Routes (apps/fleet-service/internal/maintenancecategory/resource.go, gateway-prefixed):
- *   GET /api/fleet/maintenance-categories[?kind=maintenance|modification] — list (paged)
+ *   GET  /api/fleet/maintenance-categories[?kind=maintenance|modification] — list (paged)
+ *   POST /api/fleet/maintenance-categories — create a fleet-scoped category (member/owner only)
  *
  * Categories are global/system data — any authenticated caller may list them.
  */
-class MaintenanceCategoryService extends BaseService<MaintenanceCategoryAttributes> {
+class MaintenanceCategoryService extends BaseService<
+  MaintenanceCategoryAttributes,
+  CreateMaintenanceCategoryAttributes
+> {
   protected readonly resourceType = 'maintenanceCategories';
   protected readonly basePath = '/api/fleet/maintenance-categories';
 

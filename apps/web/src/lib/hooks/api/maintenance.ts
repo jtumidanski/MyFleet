@@ -1,15 +1,22 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { maintenanceRecordService } from '../../../services/api/MaintenanceRecordService';
 import { maintenanceScheduleService } from '../../../services/api/MaintenanceScheduleService';
 import { maintenanceCategoryService } from '../../../services/api/MaintenanceCategoryService';
 import { vehicleKeys } from './vehicles';
-import type { CreateMaintenanceRecordAttributes } from '../../../types/models/maintenanceRecord';
+import { RECORD_PAGE_SIZE } from './pageSize';
+import type {
+  CreateMaintenanceRecordAttributes,
+  UpdateMaintenanceRecordAttributes,
+} from '../../../types/models/maintenanceRecord';
 import type {
   CreateMaintenanceScheduleAttributes,
   UpdateMaintenanceScheduleAttributes,
   CompleteMaintenanceScheduleAttributes,
 } from '../../../types/models/maintenanceSchedule';
-import type { MaintenanceCategoryKind } from '../../../types/models/maintenanceCategory';
+import type {
+  CreateMaintenanceCategoryAttributes,
+  MaintenanceCategoryKind,
+} from '../../../types/models/maintenanceCategory';
 
 // ---------------------------------------------------------------------------
 // Query key factories
@@ -81,21 +88,62 @@ export function useMaintenanceCategories(kind?: MaintenanceCategoryKind) {
 }
 
 // ---------------------------------------------------------------------------
+// Category mutations
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/fleet/maintenance-categories — create a free-form category.
+ *
+ * The server is idempotent on case-insensitive name, so a "create" may return
+ * a pre-existing system or fleet row. Callers must use the returned resource's
+ * id rather than assuming a new one was minted.
+ */
+export function useCreateMaintenanceCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (attrs: CreateMaintenanceCategoryAttributes) =>
+      maintenanceCategoryService.create(attrs),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: maintenanceCategoryKeys.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Maintenance record queries
 // ---------------------------------------------------------------------------
 
-/** GET /api/fleet/vehicles/{vehicleId}/maintenance-records[?kind=…] */
+/**
+ * GET /api/fleet/vehicles/{vehicleId}/maintenance-records[?kind=…]
+ *
+ * Infinite rather than single-page: the unified records feed merges this with
+ * two other independently-paginated sources, and a merge over sources that
+ * REPLACE their rows on page advance would drop the newest rows from view.
+ * Pages accumulate; `rows` is every page fetched so far.
+ */
 export function useMaintenanceRecords(
   vehicleId: string | null | undefined,
   kind?: MaintenanceCategoryKind,
 ) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: maintenanceRecordKeys.list({ vehicleId: vehicleId ?? '', kind }),
-    queryFn: () => maintenanceRecordService.listByVehicle(vehicleId as string, kind),
+    queryFn: ({ pageParam }) =>
+      maintenanceRecordService.listByVehicle(vehicleId as string, kind, {
+        page: pageParam,
+        pageSize: RECORD_PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) =>
+      allPages.length < (lastPage.meta?.totalPages ?? 1) ? allPages.length + 1 : undefined,
     enabled: !!vehicleId,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    select: (result) => result.data,
+    select: (data) => ({
+      rows: data.pages.flatMap((p) => p.data),
+      // Read from the LAST page, not the first: `total` can change between
+      // fetches, and the last page is the freshest information we have.
+      total: data.pages[data.pages.length - 1]?.meta?.total ?? 0,
+    }),
   });
 }
 
@@ -122,6 +170,46 @@ export function useCreateMaintenanceRecord(vehicleId: string) {
       maintenanceRecordService.createForVehicle(vehicleId, attrs),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
+    },
+  });
+}
+
+/** PATCH /api/fleet/maintenance-records/{id} — partial update. */
+export function useUpdateMaintenanceRecord(vehicleId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      attributes,
+    }: {
+      id: string;
+      attributes: UpdateMaintenanceRecordAttributes;
+    }) => maintenanceRecordService.patch(id, attributes),
+    onSettled: (_data, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(variables.id) });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+    },
+  });
+}
+
+/**
+ * POST /api/fleet/maintenance-records/{id}/document-media — attach one
+ * already-uploaded (confirmed) media object to an existing record.
+ *
+ * This is what lets the record drawer's Edit flow actually attach files a
+ * user picks mid-edit: `UpdateMaintenanceRecordAttributes` (the PATCH body)
+ * has no `documentMediaIds` field, so an update alone cannot carry new
+ * attachments — this append endpoint is the only server-side path that can.
+ */
+export function useAppendMaintenanceRecordDocument(vehicleId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, mediaId }: { id: string; mediaId: string }) =>
+      maintenanceRecordService.appendDocumentMedia(id, mediaId),
+    onSettled: (_data, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(variables.id) });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
     },
   });
 }

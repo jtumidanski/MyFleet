@@ -82,3 +82,19 @@ Object.defineProperty(window, 'matchMedia', {
 export function mediaListenerCount(): number {
   return mediaListeners.size;
 }
+
+// jsdom has no layout engine, so it never implements ResizeObserver. cmdk's
+// <Command> measures its list with one on mount; without this stub every test
+// that renders a Command (e.g. CategoryCombobox) throws "ResizeObserver is not
+// defined" before any assertion runs.
+class ResizeObserverStub {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+}
+
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  value: ResizeObserverStub,
+  writable: true,
+  configurable: true,
+});
