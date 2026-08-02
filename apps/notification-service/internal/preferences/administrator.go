@@ -40,8 +40,15 @@ func (a *dbAdministrator) Upsert(userID, typ string, enabled bool) (Model, error
 	}
 	// Re-read so the row's persisted id (which may differ from the generated one
 	// on an update) is reflected back to the caller.
+	//
+	// deleted_at IS NULL is required, not cosmetic: (user_id, type) is only
+	// unique among LIVE rows (the partial index), so a purged historical row can
+	// coexist with the new live one. Without this filter, First()'s implicit
+	// "order by primary key" tie-breaks on a random UUID — unrelated to which
+	// row is live — and can silently hand the caller the purged row's stale
+	// InAppEnabled and dead ID instead of the one just written.
 	var stored Entity
-	if err := a.db.Where("user_id = ? AND type = ?", userID, typ).First(&stored).Error; err != nil {
+	if err := a.db.Where("user_id = ? AND type = ? AND deleted_at IS NULL", userID, typ).First(&stored).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return Make(e), nil
 		}
