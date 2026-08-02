@@ -74,9 +74,13 @@ describe('PageHeader', () => {
   // The header row must be the same height with actions as without, or the
   // title sits lower and the gap to the content below grows on exactly the
   // pages that have a button (Dashboard, Vehicles) — which is what shipped.
-  // jsdom has no layout, so this pins the class that neutralises the taller
-  // control rather than the resulting pixel height.
-  it('keeps the actions from setting the header row height', () => {
+  //
+  // Named for what it actually does: jsdom has no layout, so it can only pin
+  // the class, not the 32px. It will not catch a caller passing a taller
+  // control (that invariant lives in a comment in PageHeader.tsx and would
+  // need a browser to test) — it only stops the class being tidied away by
+  // someone who reads it as decoration.
+  it('pins the class that keeps the actions out of the row height', () => {
     const { container } = render(
       <PageHeader title="Vehicles" actions={<button type="button">Add Vehicle</button>} />,
     );

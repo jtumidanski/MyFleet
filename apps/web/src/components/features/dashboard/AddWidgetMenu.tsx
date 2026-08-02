@@ -36,7 +36,7 @@ export function AddWidgetMenu({ placedTypes, onAdd }: AddWidgetMenuProps) {
           same slot. size="sm" left it 4px shorter than every other header
           control. The menu entries below stay sm — those are list rows. */}
       <Button variant="outline" onClick={() => setShowAddMenu((v) => !v)}>
-        <Plus className="mr-1 h-4 w-4" />
+        <Plus className="mr-2 h-4 w-4" />
         Add Widget
       </Button>
       {showAddMenu && (

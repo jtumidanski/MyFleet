@@ -74,6 +74,12 @@ export function PageHeader({
         // row height back to the title on both sides; the buttons simply
         // overhang the 32px line box symmetrically, which is where an
         // optically-centred control belongs anyway.
+        //
+        // The 4px assumes actions are at most 40px tall — the default Button.
+        // A size="lg" Button (44px) would grow the row by 2px again and put
+        // this back where it started; raise the offset with it, or don't put
+        // one here. Nothing enforces this, so it is written down where the
+        // next person changing button.tsx's heights will see it.
         <div className="-my-1 flex shrink-0 items-center gap-2">{actions}</div>
       )}
     </div>
