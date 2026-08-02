@@ -13,10 +13,12 @@ the next `PATCH /vehicles/:id`, fleet rename, or re-login re-zeroes the row — 
 repaired-then-recorrupted row that reads as a failed migration. Confirm the running images
 include the task-006 fix before continuing.
 
-**Connect as a role that can see all three schemas.** All four services share one database
-(`myfleet`) and differ only by `search_path` (`deploy/k8s/secrets.example.yaml:18,34,44,57`), so
-the cross-schema transaction below is valid — but it cannot be run through a service's own
-connection.
+**Connect with `psql` as the `myfleet` role** — all four services already use it, and every
+statement below is schema-qualified, so `search_path` is irrelevant
+(`deploy/k8s/secrets.example.yaml:18,34,44,57`). Do **not** attempt this repair through a service
+or a Go migration: `created_at` is now tagged `gorm:"<-:create"`, and GORM silently discards writes
+to such a column (`err=nil`, zero rows changed), so an ORM-based repair reports complete success
+and changes nothing.
 
 ## What a repaired value means, and what it does not
 
