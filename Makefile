@@ -19,10 +19,13 @@ fe-build:
 
 # Every JS workspace that has tests, not just apps/web. packages/shared-ts owns
 # fetchAuthenticated — the single 401-refresh path every SPA call goes through —
-# and its tests previously ran in no automated gate at all.
+# and its tests previously ran in no automated gate at all. packages/ui-components
+# was in the same position: it had a test script and a test file, and nothing ran
+# them.
 fe-test:
 	npm run -w apps/web test
 	npm run -w packages/shared-ts test
+	npm run -w packages/ui-components test
 
 lint: ## fix mode: formatters + auto-fixable lint findings, Go and web
 	./tools/lint.sh

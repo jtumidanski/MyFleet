@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
-import { StatusBadge, formatMileage, type VehicleStatus } from '@myfleet/ui-components';
+import { StatusBadge, formatMileage } from '@myfleet/ui-components';
 import { useAuth } from '../context/AuthContext';
 import {
   useVehicle,
@@ -19,21 +19,9 @@ import { VehicleActivityTimeline } from '../components/features/activity/Vehicle
 import { Skeleton } from '../components/ui/skeleton';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
+import { asVehicleStatus } from '../components/features/vehicles/vehicleBanner';
 import type { VehicleFormInput } from '../lib/schemas/vehicle';
 import type { UpdateVehicleAttributes } from '../types/models/vehicle';
-
-const KNOWN_STATUSES: readonly VehicleStatus[] = [
-  'Healthy',
-  'Upcoming Maintenance',
-  'Overdue',
-  'Inactive',
-];
-
-function asVehicleStatus(value: string | undefined): VehicleStatus | null {
-  return value && (KNOWN_STATUSES as readonly string[]).includes(value)
-    ? (value as VehicleStatus)
-    : null;
-}
 
 export function VehicleDetailPage() {
   const { id } = useParams<{ id: string }>();

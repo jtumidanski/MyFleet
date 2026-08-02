@@ -125,4 +125,45 @@ describe('VehiclePhotoThumbnail', () => {
     // reflow when the image arrives.
     expect(container.querySelector('.h-20.w-20')).toBeInTheDocument();
   });
+
+  describe('boxClassName override', () => {
+    const BOX = 'aspect-[16/9] w-full rounded-none';
+
+    it('reaches the no-photo placeholder', () => {
+      renderWithProviders(<VehiclePhotoThumbnail vehicleLabel="Civic" boxClassName={BOX} />);
+      expect(screen.getByRole('img', { name: 'No photo' })).toHaveClass('aspect-[16/9]', 'w-full');
+    });
+
+    it('reaches the loading skeleton', () => {
+      // The blob promise is left pending, so the component stays in isLoading.
+      vi.mocked(mediaService.getContentBlob).mockReturnValue(new Promise(() => {}));
+      const { container } = renderWithProviders(
+        <VehiclePhotoThumbnail mediaId="m1" vehicleLabel="Civic" boxClassName={BOX} />,
+      );
+      expect(container.querySelector('.aspect-\\[16\\/9\\]')).toBeInTheDocument();
+    });
+
+    it('reaches the failed-photo placeholder', async () => {
+      vi.mocked(mediaService.getContentBlob).mockRejectedValue(new Error('nope'));
+      renderWithProviders(
+        <VehiclePhotoThumbnail mediaId="m1" vehicleLabel="Civic" boxClassName={BOX} />,
+      );
+      const placeholder = await screen.findByRole('img', { name: 'Photo unavailable' });
+      expect(placeholder).toHaveClass('aspect-[16/9]', 'w-full');
+    });
+
+    it('reaches the loaded image', async () => {
+      vi.mocked(mediaService.getContentBlob).mockResolvedValue(new Blob(['x']));
+      renderWithProviders(
+        <VehiclePhotoThumbnail mediaId="m1" vehicleLabel="Civic" boxClassName={BOX} />,
+      );
+      const img = await screen.findByAltText('Photo of Civic');
+      expect(img).toHaveClass('aspect-[16/9]', 'w-full', 'object-cover');
+    });
+
+    it('keeps the 80x80 square when no override is given', () => {
+      renderWithProviders(<VehiclePhotoThumbnail vehicleLabel="Civic" />);
+      expect(screen.getByRole('img', { name: 'No photo' })).toHaveClass('h-20', 'w-20');
+    });
+  });
 });
