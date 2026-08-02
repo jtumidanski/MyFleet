@@ -192,6 +192,7 @@ func main() {
 		// Internal routes: no JWT, network-restricted (consumed by other services).
 		AddRouteInitializer(membership.InitializeInternalRoutes(log, db)).
 		AddRouteInitializer(maintenanceschedule.InitializeInternalRoutes(log, db)).
+		AddRouteInitializer(invite.InitializeInternalRoutes(log, db, fleet.NewProvider(db))).
 		// Protected routes: JWT required.
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
