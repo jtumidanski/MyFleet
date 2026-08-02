@@ -31,7 +31,7 @@ type VehicleAccessor interface {
 // the permitted value set in the domain that owns them, so the category and
 // record endpoints cannot drift on what ?kind= accepts (design D2).
 type CategoryAccessor interface {
-	IDsByKind(kind maintenancecategory.Kind) ([]string, error)
+	IDsByKind(kind maintenancecategory.Kind, fleetID string) ([]string, error)
 }
 
 // DocumentValidator proves every documentMediaId belongs to the caller's active
@@ -80,7 +80,7 @@ func InitializeRoutes(
 			// nothing". Never collapse the two (design D3).
 			var categoryIDs []string
 			if kind != "" {
-				categoryIDs, err = categoryAccessor.IDsByKind(kind)
+				categoryIDs, err = categoryAccessor.IDsByKind(kind, v.FleetID())
 				if err != nil {
 					log.WithError(err).Error("resolve category ids by kind")
 					server.WriteError(w, err)

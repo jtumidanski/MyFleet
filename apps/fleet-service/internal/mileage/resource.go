@@ -29,7 +29,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 	adm := NewAdministrator(db)
 	prov := NewProvider(db)
 	return func(r chi.Router) {
-		// GET /vehicles/{id}/mileage — list mileage records (chronological, paged)
+		// GET /vehicles/{id}/mileage — list mileage records (newest first, paged)
 		// Supports ?from= and ?to= as RFC3339 range filters on recorded_at.
 		r.Get("/vehicles/{id}/mileage", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())

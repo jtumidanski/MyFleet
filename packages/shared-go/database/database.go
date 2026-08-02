@@ -25,7 +25,11 @@ func Connect(log logrus.FieldLogger, opts ...Option) (*gorm.DB, error) {
 	for _, opt := range opts {
 		opt(o)
 	}
-	db, err := gorm.Open(postgres.Open(config.MustGet("DATABASE_URL")), &gorm.Config{})
+	// TranslateError lets each driver map its own raw errors (pgconn.PgError,
+	// sqlite3.Error, ...) onto GORM's portable sentinels (gorm.ErrDuplicatedKey
+	// et al.), so callers can use errors.Is against those sentinels instead of
+	// inspecting driver-specific, cgo-gated error types directly.
+	db, err := gorm.Open(postgres.Open(config.MustGet("DATABASE_URL")), &gorm.Config{TranslateError: true})
 	if err != nil {
 		return nil, err
 	}

@@ -1,28 +1,34 @@
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../ui/dialog';
 import { Skeleton } from '../../../ui/skeleton';
 import { Button } from '../../../ui/button';
-import { Card, CardContent } from '../../../ui/card';
 import {
   useVehicleMedia,
   useSetPrimaryImage,
   useDeleteMedia,
 } from '../../../../lib/hooks/api/media';
-import { MediaThumbnail } from './MediaThumbnail';
-import { MediaUploadButton } from './MediaUploadButton';
+import { MediaThumbnail } from '../media/MediaThumbnail';
+import { MediaUploadButton } from '../media/MediaUploadButton';
 
-interface VehicleMediaGalleryProps {
+interface PhotoGalleryDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   vehicleId: string;
-  /** Hides write actions (upload, set-primary, delete) for viewers. */
   canWrite: boolean;
 }
 
 /**
- * Gallery section shown on the vehicle detail page.
- * Lists all media refs for the vehicle, renders thumbnails via proxied content URLs,
- * and exposes upload + primary-image selection for member/owner roles.
+ * The body of VehicleMediaGallery, lifted into a dialog. Behavior and hooks
+ * are unchanged from the section it replaces — only the container differs
+ * (a modal instead of an always-visible page section).
  */
-export function VehicleMediaGallery({ vehicleId, canWrite }: VehicleMediaGalleryProps) {
+export function PhotoGalleryDialog({
+  open,
+  onOpenChange,
+  vehicleId,
+  canWrite,
+}: PhotoGalleryDialogProps) {
   const { data: mediaRefs, isLoading } = useVehicleMedia(vehicleId);
   const setPrimary = useSetPrimaryImage(vehicleId);
   const deleteMedia = useDeleteMedia(vehicleId);
@@ -48,12 +54,14 @@ export function VehicleMediaGallery({ vehicleId, canWrite }: VehicleMediaGallery
   };
 
   return (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold">Photos</h2>
-          {canWrite && <MediaUploadButton vehicleId={vehicleId} />}
-        </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center justify-between gap-2">
+            <DialogTitle>Photos</DialogTitle>
+            {canWrite && <MediaUploadButton vehicleId={vehicleId} />}
+          </div>
+        </DialogHeader>
 
         {isLoading ? (
           <div className="flex flex-wrap gap-3">
@@ -102,7 +110,7 @@ export function VehicleMediaGallery({ vehicleId, canWrite }: VehicleMediaGallery
             ))}
           </div>
         )}
-      </CardContent>
-    </Card>
+      </DialogContent>
+    </Dialog>
   );
 }

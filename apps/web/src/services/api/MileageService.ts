@@ -5,7 +5,7 @@ import type { MileageRecordAttributes, CreateMileageAttributes } from '../../typ
 /**
  * Mileage service — wraps the fleet-service mileage endpoints.
  * Backend routes (apps/fleet-service/internal/mileage/resource.go, gateway-prefixed):
- *   GET  /api/fleet/vehicles/{id}/mileage  — list mileage records (paged, ?from=&to=)
+ *   GET  /api/fleet/vehicles/{id}/mileage  — list mileage records (newest first, paged, ?from=&to=)
  *   POST /api/fleet/vehicles/{id}/mileage  — append a manual mileage record
  */
 class MileageService {
