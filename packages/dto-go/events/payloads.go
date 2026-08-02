@@ -38,6 +38,19 @@ type MemberInvitedData struct {
 	Role     string `json:"role"`
 }
 
+// InviteCreatedData is the payload of invite.created, emitted when an invite row
+// is created or its token is rotated by a resend. Deliberately NOT an alias of
+// MemberInvitedData: the two events mean opposite things (created vs accepted),
+// and aliasing would let a field added for one change the other's wire format.
+//
+// It carries NO token. The token is a bearer credential; the email consumer
+// fetches it over internal HTTP instead (design §2).
+type InviteCreatedData struct {
+	InviteID string `json:"invite_id"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+}
+
 type MediaUploadedData struct {
 	MediaID     string `json:"media_id"`
 	ContentType string `json:"content_type"`

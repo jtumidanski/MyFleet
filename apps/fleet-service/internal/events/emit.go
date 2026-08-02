@@ -69,6 +69,14 @@ func EmitMemberInvited(tx *gorm.DB, fleetID, actorID, traceID string, d dtoevent
 	return enqueue(tx, "member.invited", fleetID, actorID, traceID, d)
 }
 
+// EmitInviteCreated enqueues an invite.created event. Emitted when an invite row
+// is created AND when a resend rotates its token — a resend produces a fresh
+// event_id, which is what lets it past the consumer's (event_id, consumer)
+// ledger (FR-EVT-4). Distinct from member.invited, which fires on ACCEPT.
+func EmitInviteCreated(tx *gorm.DB, fleetID, actorID, traceID string, d dtoevents.InviteCreatedData) error {
+	return enqueue(tx, "invite.created", fleetID, actorID, traceID, d)
+}
+
 // EmitScheduleOverdue enqueues a schedule.overdue event. The recompute job emits
 // this only on the ok/upcoming→overdue transition edge (no human actor).
 func EmitScheduleOverdue(tx *gorm.DB, fleetID, actorID, traceID string, d dtoevents.ScheduleOverdueData) error {
