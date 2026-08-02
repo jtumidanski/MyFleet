@@ -18,13 +18,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { memberKeys, useRemoveMember } from './members';
+import { memberKeys, useRemoveMember, useUpdateMemberRole } from './members';
 import { authKeys } from './auth';
 import { mintAccessToken } from '../../api/refresh';
 import { toast } from 'sonner';
 import { inviteKeys, useCreateInvite, useRevokeInvite, useAcceptInvite } from './invites';
 import { fleetKeys } from './fleets';
 import { useRenameFleet } from './fleetSettings';
+import { userKeys } from './users';
+import { memberService } from '../../../services/api/MemberService';
 
 // ---------------------------------------------------------------------------
 // Key factory hierarchy
@@ -56,6 +58,11 @@ describe('inviteKeys', () => {
 vi.mock('../../../services/api/MemberService', () => ({
   memberService: {
     removeMember: vi.fn().mockResolvedValue(undefined),
+    updateRole: vi.fn().mockResolvedValue({
+      id: 'm1',
+      type: 'memberships',
+      attributes: { fleetId: 'f1', userId: 'user-1', role: 'owner', status: 'active' },
+    }),
   },
 }));
 
@@ -125,7 +132,7 @@ describe('mutation invalidation contracts — real hooks', () => {
     });
 
     await act(async () => {
-      result.current.mutate('user-1');
+      result.current.mutate({ userId: 'user-1', isSelf: false });
     });
 
     await waitFor(() =>
@@ -138,6 +145,96 @@ describe('mutation invalidation contracts — real hooks', () => {
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.lists() }));
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
+  });
+
+  // FR-4.1: role and active_fleet_id are JWT claims minted at login. After the
+  // actor's OWN membership disappears, the token still claims the fleet, so the
+  // SPA must re-mint before /auth/me is believed.
+  //
+  // mintAccessToken, NOT refreshAccessToken: the removal already committed
+  // server-side, so a transient mint failure must not clear a still-valid token
+  // and log the user out of a session they are mid-way through leaving. Same
+  // reasoning as useAcceptInvite.
+  it('useRemoveMember mints a fresh token and refetches identity on a self-leave', async () => {
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'me', isSelf: true });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mintAccessToken).toHaveBeenCalledTimes(1);
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+  });
+
+  // FR-4.4: removing SOMEONE ELSE leaves the actor's own claims untouched, so
+  // re-minting would be a pointless round trip on every removal.
+  it('useRemoveMember does not mint a token when removing another member', async () => {
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'someone-else', isSelf: false });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mintAccessToken).not.toHaveBeenCalled();
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+  });
+
+  // FR-4.3: names are keyed off the member list, so a membership change must
+  // drop the cached name map too.
+  it('useRemoveMember invalidates the user name cache', async () => {
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'user-1', isSelf: false });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: userKeys.all }));
+  });
+
+  it('useUpdateMemberRole PATCHes the role and invalidates members and fleets', async () => {
+    const { result } = renderHook(() => useUpdateMemberRole('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'user-1', role: 'owner' });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(memberService.updateRole).toHaveBeenCalledWith('f1', 'user-1', 'owner');
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.lists() }));
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
+  });
+
+  // FR-4.4 again: promoting someone else does not touch the actor's claims.
+  it('useUpdateMemberRole does not mint a token', async () => {
+    const { result } = renderHook(() => useUpdateMemberRole('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'user-1', role: 'owner' });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mintAccessToken).not.toHaveBeenCalled();
   });
 
   // --------------------------------------------------------------------------

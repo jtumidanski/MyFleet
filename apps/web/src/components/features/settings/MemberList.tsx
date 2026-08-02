@@ -46,7 +46,7 @@ export function MemberList({ fleetId, isOwner }: MemberListProps) {
                 variant="destructive"
                 size="sm"
                 disabled={removeMember.isPending}
-                onClick={() => removeMember.mutate(m.attributes.userId)}
+                onClick={() => removeMember.mutate({ userId: m.attributes.userId, isSelf })}
               >
                 {isSelf ? 'Leave' : 'Remove'}
               </Button>
