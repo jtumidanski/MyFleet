@@ -131,7 +131,8 @@ func TestResend_rotatesTokenAndEmitsFreshEvent(t *testing.T) {
 		func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
 			events++
 			return sharedevents.Enqueue(tx, sharedevents.Envelope{
-				EventID: "e" + strconv.Itoa(events), Type: "invite.created", FleetID: fleetID})
+				EventID: "e" + strconv.Itoa(events), Type: "invite.created", FleetID: fleetID,
+			})
 		})
 
 	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
