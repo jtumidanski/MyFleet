@@ -183,7 +183,7 @@ func main() {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
-				membership.InitializeRoutes(log, db)(pr)
+				membership.InitializeRoutes(log, db, activity.Record)(pr)
 				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited)(pr)
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
