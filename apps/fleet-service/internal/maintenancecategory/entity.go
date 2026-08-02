@@ -16,6 +16,10 @@ type Entity struct {
 	// The literal is quoted because GORM copies the tag value verbatim into the
 	// DDL; unquoted, PostgreSQL reads `maintenance` as a column reference.
 	Kind string `gorm:"type:varchar(20);not null;default:'maintenance'"`
+	// NULL means a system/global category visible to every fleet. A non-NULL
+	// value scopes the row to one fleet, so free-form names entered by one
+	// household never appear in another's picker (design §10.1).
+	FleetID *string `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.maintenance_categories" }
@@ -30,6 +34,7 @@ func Make(e Entity) Model {
 		description:   e.Description,
 		systemDefined: e.SystemDefined,
 		kind:          Kind(e.Kind),
+		fleetID:       e.FleetID,
 	}
 }
 

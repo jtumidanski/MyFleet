@@ -3,6 +3,8 @@ package maintenancecategory
 import (
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
@@ -19,7 +21,7 @@ func TestList_filtersByKindAndCountsAfterFiltering(t *testing.T) {
 	p := seededProvider(t)
 	page := server.Page{Number: 1, Size: 100}
 
-	all, allTotal, err := p.List("", page)
+	all, allTotal, err := p.List("", "", page)
 	if err != nil {
 		t.Fatalf("List(all): %v", err)
 	}
@@ -27,7 +29,7 @@ func TestList_filtersByKindAndCountsAfterFiltering(t *testing.T) {
 		t.Fatalf("unfiltered: len=%d total=%d, want 20/20", len(all), allTotal)
 	}
 
-	mods, modTotal, err := p.List(KindModification, page)
+	mods, modTotal, err := p.List(KindModification, "", page)
 	if err != nil {
 		t.Fatalf("List(modification): %v", err)
 	}
@@ -40,7 +42,7 @@ func TestList_filtersByKindAndCountsAfterFiltering(t *testing.T) {
 		}
 	}
 
-	maint, maintTotal, err := p.List(KindMaintenance, page)
+	maint, maintTotal, err := p.List(KindMaintenance, "", page)
 	if err != nil {
 		t.Fatalf("List(maintenance): %v", err)
 	}
@@ -53,7 +55,7 @@ func TestList_filtersByKindAndCountsAfterFiltering(t *testing.T) {
 func TestList_filteredTotalSurvivesPaging(t *testing.T) {
 	p := seededProvider(t)
 
-	first, total, err := p.List(KindModification, server.Page{Number: 1, Size: 5})
+	first, total, err := p.List(KindModification, "", server.Page{Number: 1, Size: 5})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -64,7 +66,7 @@ func TestList_filteredTotalSurvivesPaging(t *testing.T) {
 		t.Fatalf("page 1 len = %d, want 5", len(first))
 	}
 
-	third, _, err := p.List(KindModification, server.Page{Number: 3, Size: 5})
+	third, _, err := p.List(KindModification, "", server.Page{Number: 3, Size: 5})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -76,7 +78,7 @@ func TestList_filteredTotalSurvivesPaging(t *testing.T) {
 func TestIDsByKind(t *testing.T) {
 	p := seededProvider(t)
 
-	ids, err := p.IDsByKind(KindModification)
+	ids, err := p.IDsByKind(KindModification, "")
 	if err != nil {
 		t.Fatalf("IDsByKind: %v", err)
 	}
@@ -89,7 +91,7 @@ func TestIDsByKind(t *testing.T) {
 // reads nil as "no filter" and empty-non-nil as "match nothing" (design D3).
 func TestIDsByKind_emptyResultIsNonNil(t *testing.T) {
 	db := newTestDB(t) // no Seed — the table is empty
-	ids, err := NewProvider(db).IDsByKind(KindModification)
+	ids, err := NewProvider(db).IDsByKind(KindModification, "")
 	if err != nil {
 		t.Fatalf("IDsByKind: %v", err)
 	}
@@ -99,4 +101,89 @@ func TestIDsByKind_emptyResultIsNonNil(t *testing.T) {
 	if len(ids) != 0 {
 		t.Fatalf("len(ids) = %d, want 0", len(ids))
 	}
+}
+
+// TestListScopesToFleet proves a category created by fleet A is invisible to
+// fleet B, while system rows (NULL fleet_id) stay visible to both.
+func TestListScopesToFleet(t *testing.T) {
+	db := newTestDB(t)
+	if err := Seed(db); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	fleetA := "11111111-1111-1111-1111-111111111111"
+	custom := Entity{
+		ID:      uuid.NewString(),
+		Name:    "Rear Diff Fluid",
+		Kind:    string(KindMaintenance),
+		FleetID: &fleetA,
+	}
+	if err := db.Create(&custom).Error; err != nil {
+		t.Fatalf("create custom: %v", err)
+	}
+
+	p := NewProvider(db)
+	page := server.Page{Number: 1, Size: 100}
+
+	aRows, _, err := p.List(KindMaintenance, fleetA, page)
+	if err != nil {
+		t.Fatalf("list fleet A: %v", err)
+	}
+	if !containsName(aRows, "Rear Diff Fluid") {
+		t.Fatal("fleet A must see its own custom category")
+	}
+	if !containsName(aRows, "Oil Change") {
+		t.Fatal("fleet A must still see system categories")
+	}
+
+	bRows, _, err := p.List(KindMaintenance, "22222222-2222-2222-2222-222222222222", page)
+	if err != nil {
+		t.Fatalf("list fleet B: %v", err)
+	}
+	if containsName(bRows, "Rear Diff Fluid") {
+		t.Fatal("fleet B must NOT see fleet A's custom category")
+	}
+	if !containsName(bRows, "Oil Change") {
+		t.Fatal("fleet B must still see system categories")
+	}
+}
+
+// TestIDsByKindScopesToFleet proves the record ?kind= filter set is bounded to
+// the caller's fleet, so one fleet's custom categories cannot widen another's.
+func TestIDsByKindScopesToFleet(t *testing.T) {
+	db := newTestDB(t)
+	if err := Seed(db); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	fleetA := "11111111-1111-1111-1111-111111111111"
+	if err := db.Create(&Entity{
+		ID:      uuid.NewString(),
+		Name:    "Rear Diff Fluid",
+		Kind:    string(KindMaintenance),
+		FleetID: &fleetA,
+	}).Error; err != nil {
+		t.Fatalf("create custom: %v", err)
+	}
+
+	p := NewProvider(db)
+	aIDs, err := p.IDsByKind(KindMaintenance, fleetA)
+	if err != nil {
+		t.Fatalf("ids fleet A: %v", err)
+	}
+	bIDs, err := p.IDsByKind(KindMaintenance, "22222222-2222-2222-2222-222222222222")
+	if err != nil {
+		t.Fatalf("ids fleet B: %v", err)
+	}
+	if len(aIDs) != len(bIDs)+1 {
+		t.Fatalf("fleet A should have exactly one more id than fleet B, got %d vs %d",
+			len(aIDs), len(bIDs))
+	}
+}
+
+func containsName(ms []Model, name string) bool {
+	for _, m := range ms {
+		if m.Name() == name {
+			return true
+		}
+	}
+	return false
 }

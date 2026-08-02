@@ -22,8 +22,26 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err := db.Exec("ATTACH DATABASE ':memory:' AS fleet").Error; err != nil {
 		t.Fatalf("attach fleet schema: %v", err)
 	}
-	if err := Migration(db); err != nil {
-		t.Fatalf("migrate: %v", err)
+	// Not Migration(db)/AutoMigrate: gorm's sqlite driver builds CREATE INDEX
+	// without the schema qualifier for a schema-qualified table (it uses the
+	// bare table name instead of routing through CurrentTable like the core
+	// migrator does), so an indexed column on a "fleet."-prefixed TableName
+	// fails with "no such table: main.maintenance_categories" under
+	// AutoMigrate on SQLite even though the table lives in the attached
+	// "fleet" schema. Postgres's migrator does not have this bug. The
+	// activity package hits the identical issue with its own indexed
+	// FleetID and works around it the same way (see
+	// activity/processor_test.go's newActivityDB): create the table with
+	// explicit DDL mirroring the GORM entity instead of AutoMigrate.
+	if err := db.Exec(`CREATE TABLE fleet.maintenance_categories (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT,
+		system_defined BOOLEAN NOT NULL DEFAULT 0,
+		kind TEXT NOT NULL DEFAULT 'maintenance',
+		fleet_id TEXT
+	)`).Error; err != nil {
+		t.Fatalf("ddl: %v", err)
 	}
 	return db
 }
