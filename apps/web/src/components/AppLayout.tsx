@@ -8,8 +8,6 @@ import { Button } from './ui/button';
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/vehicles', label: 'Vehicles' },
-  { to: '/maintenance', label: 'Maintenance' },
-  { to: '/fuel', label: 'Fuel' },
   { to: '/activity', label: 'Activity' },
   { to: '/notifications', label: 'Notifications' },
   { to: '/settings', label: 'Settings' },

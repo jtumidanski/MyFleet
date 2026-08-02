@@ -13,6 +13,8 @@ import {
 import { VehicleForm } from '../components/features/vehicles/VehicleForm';
 import { VehicleMediaGallery } from '../components/features/vehicles/media/VehicleMediaGallery';
 import { VehicleMileageSection } from '../components/features/vehicles/mileage/VehicleMileageSection';
+import { VehicleMaintenanceSection } from '../components/features/vehicles/maintenance/VehicleMaintenanceSection';
+import { VehicleFuelSection } from '../components/features/vehicles/fuel/VehicleFuelSection';
 import { VehicleActivityTimeline } from '../components/features/activity/VehicleActivityTimeline';
 import { Skeleton } from '../components/ui/skeleton';
 import { Button } from '../components/ui/button';
@@ -191,6 +193,20 @@ export function VehicleDetailPage() {
 
       {/* Task 15.2 — Mileage history + trend */}
       <VehicleMileageSection
+        vehicleId={vehicle.id}
+        currentMileage={attributes.currentMileage}
+        canWrite={canWrite}
+      />
+
+      {/* Task 15.3 — Maintenance records, schedules and modifications */}
+      <VehicleMaintenanceSection
+        vehicleId={vehicle.id}
+        currentMileage={attributes.currentMileage}
+        canWrite={canWrite}
+      />
+
+      {/* Task 15.4 — Fuel logs */}
+      <VehicleFuelSection
         vehicleId={vehicle.id}
         currentMileage={attributes.currentMileage}
         canWrite={canWrite}

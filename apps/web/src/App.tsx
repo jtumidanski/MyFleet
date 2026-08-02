@@ -10,7 +10,6 @@ import { NotificationsPage } from './pages/NotificationsPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { InviteAcceptPage } from './pages/InviteAcceptPage';
-import { MaintenancePage, FuelPage } from './pages/PlaceholderPage';
 
 export function App() {
   return (
@@ -50,8 +49,6 @@ export function App() {
           <Route index element={<DashboardPage />} />
           <Route path="/vehicles" element={<VehiclesPage />} />
           <Route path="/vehicles/:id" element={<VehicleDetailPage />} />
-          <Route path="/maintenance" element={<MaintenancePage />} />
-          <Route path="/fuel" element={<FuelPage />} />
           <Route path="/activity" element={<ActivityPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
