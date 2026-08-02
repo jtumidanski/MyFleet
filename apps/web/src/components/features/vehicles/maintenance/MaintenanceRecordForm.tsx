@@ -10,7 +10,7 @@ import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Textarea } from '../../../ui/textarea';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
+import { CategoryCombobox } from '../CategoryCombobox';
 import { AttachmentPicker } from './AttachmentPicker';
 import type {
   MaintenanceCategory,
@@ -24,8 +24,19 @@ interface MaintenanceRecordFormProps {
    * Restricts the category picker to one kind and relabels the submit button.
    * The picker is not grouped by kind because it never shows more than one kind
    * at a time (design D19).
+   *
+   * Required: `CategoryCombobox` assigns this kind to anything created inline,
+   * so an unset kind here would silently mis-kind a newly created category
+   * (it would still pass a value to the server, just the wrong one).
    */
-  kind?: MaintenanceCategoryKind;
+  kind: MaintenanceCategoryKind;
+  /**
+   * Prefills the form for editing an existing record. Omitted fields fall
+   * back to the create-flow defaults below (blank / `defaultMileage`).
+   * Merged in last, so an explicit `undefined` on a field here still yields
+   * that field's create-flow default rather than `undefined` itself.
+   */
+  defaultValues?: Partial<MaintenanceRecordFormInput>;
   onSubmit: (
     values: MaintenanceRecordFormInput,
     documentMediaIds: string[],
@@ -37,12 +48,13 @@ interface MaintenanceRecordFormProps {
 /**
  * Form for logging a maintenance record.
  * - Category dropdown populated from GET /maintenance-categories, filtered by `kind`.
- * - Mileage pre-filled from latest mileage record (auto-fill).
+ * - Mileage pre-filled from latest mileage record (auto-fill), or overridden by `defaultValues`.
  */
 export function MaintenanceRecordForm({
   categories,
   defaultMileage,
   kind,
+  defaultValues,
   onSubmit,
   onCancel,
   submitting,
@@ -50,9 +62,7 @@ export function MaintenanceRecordForm({
   const now = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM for datetime-local
   const attachments = usePendingAttachments();
 
-  const visibleCategories = kind
-    ? categories.filter((c) => c.attributes.kind === kind)
-    : categories;
+  const visibleCategories = categories.filter((c) => c.attributes.kind === kind);
 
   const form = useForm<MaintenanceRecordFormInput>({
     resolver: zodResolver(maintenanceRecordSchema),
@@ -65,6 +75,7 @@ export function MaintenanceRecordForm({
       vendor: '',
       notes: '',
       documentMediaIds: [],
+      ...defaultValues,
     },
   });
 
@@ -80,20 +91,15 @@ export function MaintenanceRecordForm({
           render={({ field }) => (
             <FormItem>
               <FormLabel>Category</FormLabel>
-              <Select onValueChange={field.onChange} value={field.value}>
-                <FormControl>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a category" />
-                  </SelectTrigger>
-                </FormControl>
-                <SelectContent>
-                  {visibleCategories.map((cat) => (
-                    <SelectItem key={cat.id} value={cat.id}>
-                      {cat.attributes.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <FormControl>
+                <CategoryCombobox
+                  categories={visibleCategories}
+                  kind={kind}
+                  value={field.value}
+                  onChange={field.onChange}
+                  ariaLabel="Category"
+                />
+              </FormControl>
               <FormMessage />
             </FormItem>
           )}

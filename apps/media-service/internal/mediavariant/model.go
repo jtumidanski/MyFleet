@@ -7,6 +7,7 @@ type Variant string
 
 const (
 	VariantThumbnail Variant = "thumbnail" // max edge 320
+	VariantCard      Variant = "card"      // max edge 768
 	VariantDisplay   Variant = "display"   // max edge 1280
 )
 

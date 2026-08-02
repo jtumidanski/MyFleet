@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
@@ -32,7 +34,7 @@ func newPendingRouter(t *testing.T, fleets map[string]string, invites ...Model) 
 
 	adm := NewAdministrator(db)
 	for _, inv := range invites {
-		if _, err := adm.Insert(inv); err != nil {
+		if _, err := adm.Insert(context.Background(), inv, "trace-test"); err != nil {
 			t.Fatalf("seed invite: %v", err)
 		}
 	}
@@ -41,7 +43,7 @@ func newPendingRouter(t *testing.T, fleets map[string]string, invites ...Model) 
 	log.SetOutput(io.Discard)
 
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db, stubOwnerChecker{}, nil, nil))
+	r.Group(InitializeRoutes(log, db, stubOwnerChecker{}, nil, nil, nil, Limits{CreatePerWindow: 1000, CreateWindow: time.Hour}))
 	return r
 }
 
@@ -152,13 +154,18 @@ func TestPendingRoute_matchesTheEmailCaseInsensitively(t *testing.T) {
 func TestPendingRoute_omitsSpentAndExpiredInvites(t *testing.T) {
 	now := time.Now()
 	accepted := now.Add(-time.Hour)
+	// Rows to be written directly, so built via Make like seedInvite — accepted_at
+	// is only ever stamped inside Administrator.Accept's transaction.
 	r := newPendingRouter(t, map[string]string{"fleet-1": "Household"},
-		NewBuilder().SetFleetID("fleet-1").SetEmail("jane@example.com").SetRole("member").
-			SetToken("tok-accepted").SetExpiresAt(now.Add(24*time.Hour)).
-			SetInvitedByUserID("owner-1").setAcceptedAt(&accepted).Build(),
-		NewBuilder().SetFleetID("fleet-1").SetEmail("jane@example.com").SetRole("member").
-			SetToken("tok-expired").SetExpiresAt(now.Add(-time.Hour)).
-			SetInvitedByUserID("owner-1").Build(),
+		Make(Entity{
+			ID: uuid.NewString(), FleetID: "fleet-1", Email: "jane@example.com", Role: "member",
+			Token: "tok-accepted", ExpiresAt: now.Add(24 * time.Hour), AcceptedAt: &accepted,
+			InvitedByUserID: "owner-1",
+		}),
+		Make(Entity{
+			ID: uuid.NewString(), FleetID: "fleet-1", Email: "jane@example.com", Role: "member",
+			Token: "tok-expired", ExpiresAt: now.Add(-time.Hour), InvitedByUserID: "owner-1",
+		}),
 	)
 
 	_, items := getPending(t, r, "jane@example.com")

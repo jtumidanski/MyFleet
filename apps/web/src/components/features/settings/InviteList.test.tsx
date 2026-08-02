@@ -8,7 +8,7 @@ import { InviteList } from './InviteList';
 import type { Invite } from '../../../types/models/invite';
 
 vi.mock('../../../services/api/InviteService', () => ({
-  inviteService: { listByFleet: vi.fn(), revokeInvite: vi.fn() },
+  inviteService: { listByFleet: vi.fn(), revokeInvite: vi.fn(), resendInvite: vi.fn() },
 }));
 
 function makeInvite(overrides: Partial<Invite['attributes']> = {}): Invite {
@@ -67,5 +67,27 @@ describe('InviteList', () => {
 
     expect(await screen.findByText(/no pending invites/i)).toBeInTheDocument();
     expect(screen.queryByText(inviteAcceptUrl('tok-abc'))).not.toBeInTheDocument();
+  });
+
+  // Resend rotates the token server-side, so the invitee gets a fresh email and
+  // the previously copied link dies. The id, not the token, addresses the row.
+  it('resends a pending invite by id', async () => {
+    vi.mocked(inviteService.resendInvite).mockResolvedValue(makeInvite({ token: 'tok-new' }));
+
+    renderWithProviders(<InviteList fleetId="f1" isOwner />);
+    await userEvent.click(await screen.findByRole('button', { name: /resend/i }));
+
+    await waitFor(() => expect(inviteService.resendInvite).toHaveBeenCalledWith('f1', 'i1'));
+  });
+
+  // Resend and Revoke are owner-only, matching the server-side gate. The accept
+  // link itself is not gated — a non-owner member seeing it changes nothing,
+  // since the token is already in the list response they just read.
+  it('hides the mutating controls from a non-owner', async () => {
+    renderWithProviders(<InviteList fleetId="f1" isOwner={false} />);
+
+    expect(await screen.findByText(inviteAcceptUrl('tok-abc'))).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resend/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /revoke/i })).not.toBeInTheDocument();
   });
 });

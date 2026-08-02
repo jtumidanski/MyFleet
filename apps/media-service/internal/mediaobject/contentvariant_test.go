@@ -17,6 +17,7 @@ func TestParseContentVariant(t *testing.T) {
 		"original":  ContentOriginal,
 		"thumbnail": ContentThumbnail,
 		"display":   ContentDisplay,
+		"card":      ContentCard,
 	}
 	for raw, want := range valid {
 		got, err := ParseContentVariant(raw)
@@ -30,7 +31,7 @@ func TestParseContentVariant(t *testing.T) {
 
 	// Exact lowercase matching only: a wrong-case value and an unknown value are
 	// both 400s, never a silent fallback.
-	for _, raw := range []string{"Thumbnail", "THUMBNAIL", "bogus", "small", " thumbnail"} {
+	for _, raw := range []string{"Thumbnail", "THUMBNAIL", "bogus", "small", " thumbnail", "Card", "cards"} {
 		got, err := ParseContentVariant(raw)
 		if !errors.Is(err, server.ErrBadRequest) {
 			t.Fatalf("ParseContentVariant(%q) = (%q, %v), want ErrBadRequest", raw, got, err)

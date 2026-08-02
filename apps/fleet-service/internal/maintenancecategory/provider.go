@@ -1,31 +1,52 @@
 package maintenancecategory
 
 import (
+	"errors"
+
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
-// Provider is the read-only interface for maintenance category data access.
+// Provider is the read interface for maintenance category data access.
+// Writes go through Administrator instead, which is the only thing in this
+// package that constructs an Entity from caller input.
 type Provider interface {
-	// List returns a page of categories. An empty kind means no filter.
-	List(kind Kind, page server.Page) ([]Model, int, error)
-	// IDsByKind returns every category ID of a kind. It always returns a
-	// non-nil slice, because the record provider reads nil as "no filter"
+	// List returns a page of categories visible to fleetID: system rows plus
+	// that fleet's own. An empty kind means no filter.
+	List(kind Kind, fleetID string, page server.Page) ([]Model, int, error)
+	// IDsByKind returns every visible category ID of a kind. It always returns
+	// a non-nil slice, because the record provider reads nil as "no filter"
 	// and empty-non-nil as "match nothing" (design D3).
-	IDsByKind(kind Kind) ([]string, error)
+	IDsByKind(kind Kind, fleetID string) ([]string, error)
+	// FindByName resolves a visible category by case-insensitive name and kind.
+	// The bool reports whether one was found.
+	FindByName(fleetID, name string, kind Kind) (Model, bool, error)
 }
 
 type dbProvider struct{ db *gorm.DB }
 
-// NewProvider returns a read-only Provider backed by the given database.
+// NewProvider returns a Provider backed by the given database.
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
-func (p *dbProvider) List(kind Kind, page server.Page) ([]Model, int, error) {
+// visibleTo scopes a query to system rows plus one fleet's own.
+func visibleTo(q *gorm.DB, fleetID string) *gorm.DB {
+	if fleetID == "" {
+		// This branch exists because fleet_id is uuid on PostgreSQL: binding
+		// "" as the parameter is a bind-time error there ("invalid input
+		// syntax for type uuid"), not a no-match. No test in this package
+		// can catch this branch's removal — see the comment on
+		// TestList_noActiveFleetSeesSystemOnly.
+		return q.Where("fleet_id IS NULL")
+	}
+	return q.Where("fleet_id IS NULL OR fleet_id = ?", fleetID)
+}
+
+func (p *dbProvider) List(kind Kind, fleetID string, page server.Page) ([]Model, int, error) {
 	// Two independent query builders: reusing one after Count() carries the
 	// aggregate's state into the Find.
-	count := p.db.Model(&Entity{})
-	find := p.db.Model(&Entity{})
+	count := visibleTo(p.db.Model(&Entity{}), fleetID)
+	find := visibleTo(p.db.Model(&Entity{}), fleetID)
 	if kind != "" {
 		count = count.Where("kind = ?", string(kind))
 		find = find.Where("kind = ?", string(kind))
@@ -47,9 +68,10 @@ func (p *dbProvider) List(kind Kind, page server.Page) ([]Model, int, error) {
 	return out, int(total), nil
 }
 
-func (p *dbProvider) IDsByKind(kind Kind) ([]string, error) {
+func (p *dbProvider) IDsByKind(kind Kind, fleetID string) ([]string, error) {
 	var ids []string
-	if err := p.db.Model(&Entity{}).Where("kind = ?", string(kind)).
+	if err := visibleTo(p.db.Model(&Entity{}), fleetID).
+		Where("kind = ?", string(kind)).
 		Pluck("id", &ids).Error; err != nil {
 		return nil, err
 	}
@@ -57,4 +79,31 @@ func (p *dbProvider) IDsByKind(kind Kind) ([]string, error) {
 		ids = []string{}
 	}
 	return ids, nil
+}
+
+func (p *dbProvider) FindByName(fleetID, name string, kind Kind) (Model, bool, error) {
+	var e Entity
+	// LOWER() on both sides rather than ILIKE: ILIKE is PostgreSQL-only and
+	// these providers are unit-tested against SQLite.
+	//
+	// The unique index on (fleet_id, name, kind) normally rules out more than
+	// one visible match, but it does NOT constrain system rows (PostgreSQL
+	// treats every NULL fleet_id as distinct), so a system row and a
+	// fleet-scoped row can legitimately share a name+kind. The explicit
+	// Order makes the system row win deterministically instead of leaving it
+	// to whatever order the database happens to return rows in — id ASC is
+	// a final tiebreak so the result is fully deterministic even between two
+	// rows that are both system-defined or both the same fleet's (which
+	// the unique index otherwise prevents).
+	err := visibleTo(p.db.Model(&Entity{}), fleetID).
+		Where("LOWER(name) = LOWER(?) AND kind = ?", name, string(kind)).
+		Order("CASE WHEN fleet_id IS NULL THEN 0 ELSE 1 END ASC, id ASC").
+		First(&e).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return Model{}, false, nil
+	}
+	if err != nil {
+		return Model{}, false, err
+	}
+	return Make(e), true, nil
 }

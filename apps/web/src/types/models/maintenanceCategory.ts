@@ -15,3 +15,9 @@ export interface MaintenanceCategoryAttributes {
 }
 
 export type MaintenanceCategory = JsonApiResource<MaintenanceCategoryAttributes>;
+
+/** Body for POST /api/fleet/maintenance-categories. Fleet comes from the JWT. */
+export interface CreateMaintenanceCategoryAttributes {
+  name: string;
+  kind: MaintenanceCategoryKind;
+}

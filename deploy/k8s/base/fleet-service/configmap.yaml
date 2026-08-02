@@ -11,3 +11,8 @@ data:
   # maintenance record's documentMediaIds belong to the caller's fleet
   # (PRD FR-DOC-6). Cluster-internal ClusterVIP; never traverses the edge.
   MEDIA_INTERNAL_URL: "http://media-service:8080"
+
+  # Invite abuse control (task-009, FR-RATE-1/2). Both are enforced in the
+  # domain layer against persisted state, so they hold across replicas.
+  INVITE_RATE_LIMIT_PER_DAY: "20"
+  INVITE_RESEND_COOLDOWN_SECONDS: "300"

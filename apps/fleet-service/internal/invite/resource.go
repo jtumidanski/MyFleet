@@ -1,11 +1,8 @@
 package invite
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
@@ -17,10 +14,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
-	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 )
-
-const defaultExpiry = 7 * 24 * time.Hour
 
 // OwnerChecker performs the authoritative DB-level owner check (stale-claim guard,
 // design §9). Satisfied by *membership.Processor.
@@ -30,23 +24,31 @@ type OwnerChecker interface {
 
 // InitializeRoutes wires the JWT-protected invite endpoints.
 // ownerCheck is injected for the authoritative DB owner recheck on mutations.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, record ActivityRecorder, emit InvitedEmitter) func(chi.Router) {
-	prov := NewProvider(db)
-	adm := NewAdministrator(db).WithActivityRecorder(record).WithEmitter(emit)
-	proc := NewProcessor(log, prov)
+//
+// The handlers below authorize, call ONE domain operation and render. Token
+// minting, expiry computation, model construction, the rate limits and the
+// accept/resend invariants all live in the processor; the administrator is
+// reachable only through it.
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, record ActivityRecorder, emit InvitedEmitter, emitCreated CreatedEmitter, limits Limits) func(chi.Router) {
+	proc := NewProcessor(log, NewProvider(db)).
+		WithAdministrator(NewAdministrator(db).
+			WithActivityRecorder(record).
+			WithEmitter(emit).
+			WithCreatedEmitter(emitCreated)).
+		WithLimits(limits)
 	// Read-only, and only to name the fleet an invitee is being asked to join
 	// — they hold no membership yet, so they cannot resolve the id themselves.
 	fleets := fleet.NewProvider(db)
 
 	return func(r chi.Router) {
 		// POST /fleets/{id}/invites — owner-only; creates an invite with a unique token
-		r.Post("/fleets/{id}/invites", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
-			Email string `json:"email"`
-			Role  string `json:"role"`
-		},
-		) {
+		r.Post("/fleets/{id}/invites", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs CreateRequest) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
+			// One id for both jobs: it is the log field an operator greps on and
+			// the trace id stamped on the outbox envelope, so a mail that never
+			// arrived can be walked back to the request that created it.
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
 			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
 				server.WriteError(w, err)
@@ -59,36 +61,31 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 			// Authoritative DB check via processor (stale-claim guard, design §9)
 			if err := ownerCheck.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
+				// ErrForbidden is the routine "not an owner" outcome; anything
+				// else is a DB fault an operator needs to see.
+				if !errors.Is(err, server.ErrForbidden) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"fleet_id":       fleetID,
+						"user_id":        identity.UserID,
+						"correlation_id": correlationID,
+					}).Error("check invite owner")
+				}
 				server.WriteError(w, err)
 				return
 			}
 
-			// Role is copied verbatim onto the membership created at accept
-			// time, so an unrecognised value would mint a membership whose
-			// role no authz gate understands. Validate against the vocabulary
-			// membership owns.
-			if attrs.Email == "" || !membership.IsValidRole(attrs.Role) {
-				server.WriteError(w, server.ErrValidation)
-				return
-			}
-
-			token, err := generateToken()
+			created, err := proc.Create(req.Context(), fleetID, attrs.Email, attrs.Role, identity.UserID, correlationID)
 			if err != nil {
-				server.WriteError(w, err)
-				return
-			}
-
-			m := NewBuilder().
-				SetFleetID(fleetID).
-				SetEmail(attrs.Email).
-				SetRole(attrs.Role).
-				SetToken(token).
-				SetExpiresAt(time.Now().Add(defaultExpiry)).
-				SetInvitedByUserID(identity.UserID).
-				Build()
-
-			created, err := adm.Insert(m)
-			if err != nil {
+				// ErrValidation (bad role or address) and ErrTooManyRequests
+				// (the per-fleet window, FR-RATE-1) are routine client
+				// outcomes. Anything else is the count query, the entropy
+				// source or the insert failing — an operator's problem.
+				if !errors.Is(err, server.ErrValidation) && !errors.Is(err, server.ErrTooManyRequests) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"fleet_id":       fleetID,
+						"correlation_id": correlationID,
+					}).Error("create invite")
+				}
 				server.WriteError(w, err)
 				return
 			}
@@ -99,13 +96,18 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Get("/fleets/{id}/invites", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
 			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
 				server.WriteError(w, err)
 				return
 			}
-			ms, err := proc.ListByFleet(fleetID)
+			ms, err := proc.ListByFleet(req.Context(), fleetID)
 			if err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					"fleet_id":       fleetID,
+					"correlation_id": correlationID,
+				}).Error("list invites")
 				server.WriteError(w, err)
 				return
 			}
@@ -130,11 +132,11 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		// /invites/{id} exists in the first place.
 		r.Get("/invites/pending", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
-			ms, err := proc.ListRedeemableForEmail(identity.Email)
+			ms, err := proc.ListRedeemableForEmail(req.Context(), identity.Email)
 			if err != nil {
-				log.WithError(err).WithField("correlation_id",
-					telemetry.CorrelationIDFromContext(req.Context())).
+				log.WithError(err).WithField("correlation_id", correlationID).
 					Error("list pending invites")
 				server.WriteError(w, err)
 				return
@@ -149,8 +151,11 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				// the sake of one stale row.
 				f, ferr := fleets.GetByID(m.FleetID())
 				if ferr != nil {
-					log.WithError(ferr).WithField("fleet_id", m.FleetID()).
-						Warn("pending invite names a fleet that cannot be read; omitting it")
+					log.WithError(ferr).WithFields(logrus.Fields{
+						"invite_id":      m.ID(),
+						"fleet_id":       m.FleetID(),
+						"correlation_id": correlationID,
+					}).Warn("pending invite names a fleet that cannot be read; omitting it")
 					continue
 				}
 				out = append(out, TransformPending(m, f.Name()))
@@ -162,13 +167,18 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Delete("/invites/{id}", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
-			inv, err := proc.GetByID(id)
+			inv, err := proc.GetByID(req.Context(), id)
 			if err != nil {
 				if errors.Is(err, server.ErrNotFound) {
 					server.WriteError(w, server.ErrNotFound)
 					return
 				}
+				log.WithError(err).WithFields(logrus.Fields{
+					"invite_id":      id,
+					"correlation_id": correlationID,
+				}).Error("get invite")
 				server.WriteError(w, err)
 				return
 			}
@@ -184,71 +194,166 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 			// Authoritative DB check via processor (stale-claim guard, design §9)
 			if err := ownerCheck.RequireOwnerInFleet(inv.FleetID(), identity.UserID); err != nil {
+				if !errors.Is(err, server.ErrForbidden) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"invite_id":      id,
+						"fleet_id":       inv.FleetID(),
+						"user_id":        identity.UserID,
+						"correlation_id": correlationID,
+					}).Error("check invite owner")
+				}
 				server.WriteError(w, err)
 				return
 			}
 
-			if err := adm.Delete(id); err != nil {
+			if err := proc.Delete(req.Context(), id); err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					"invite_id":      id,
+					"fleet_id":       inv.FleetID(),
+					"correlation_id": correlationID,
+				}).Error("delete invite")
 				server.WriteError(w, err)
 				return
 			}
 			w.WriteHeader(http.StatusNoContent)
 		})
 
-		// POST /invites/{token}/accept — look up by token; validate; create membership + stamp accepted_at
-		r.Post("/invites/{token}/accept", func(w http.ResponseWriter, req *http.Request) {
+		// POST /fleets/{fleetId}/invites/{inviteId}/resend — owner-only.
+		// Rotates the token and resets expiry (FR-RSND-1…5): resend is used when
+		// the previous link never arrived or expired, so invalidating it costs
+		// nothing and bounds the lifetime of a token that leaked into a mailbox.
+		r.Post("/fleets/{fleetId}/invites/{inviteId}/resend", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
-			token := chi.URLParam(req, "token")
+			fleetID := chi.URLParam(req, "fleetId")
+			inviteID := chi.URLParam(req, "inviteId")
+			// One id for both jobs: it is the log field an operator greps on and
+			// the trace id stamped on the outbox envelope, so a mail that never
+			// arrived can be walked back to the request that created it.
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
-			inv, err := proc.GetByToken(token)
+			inv, err := proc.GetByID(req.Context(), inviteID)
 			if err != nil {
-				if errors.Is(err, server.ErrNotFound) {
-					server.WriteError(w, server.ErrNotFound)
-					return
+				if !errors.Is(err, server.ErrNotFound) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"invite_id":      inviteID,
+						"correlation_id": correlationID,
+					}).Error("get invite")
 				}
 				server.WriteError(w, err)
 				return
 			}
 
-			if err := proc.ValidateAccept(inv, identity.Email); err != nil {
+			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			// Path-pair mismatch → 404, not 403 (authz.RequireSameFleet's
+			// convention, mirrored here by hand since the invite came from
+			// proc.GetByID rather than a second RequireSameFleet call): the
+			// invite belongs to a different fleet than the one named in the
+			// path, and that must look identical to a nonexistent invite so
+			// cross-fleet existence is never leaked.
+			if inv.FleetID() != fleetID {
+				server.WriteError(w, server.ErrNotFound)
+				return
+			}
+			// Token-level owner gate (fast path)
+			if err := authz.RequireOwner(identity); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			// Authoritative DB check via processor (stale-claim guard, design §9)
+			if err := ownerCheck.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
+				if !errors.Is(err, server.ErrForbidden) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"invite_id":      inviteID,
+						"fleet_id":       fleetID,
+						"user_id":        identity.UserID,
+						"correlation_id": correlationID,
+					}).Error("check invite owner")
+				}
+				server.WriteError(w, err)
+				return
+			}
+
+			updated, err := proc.Resend(req.Context(), inv, correlationID)
+			if err != nil {
+				// ErrConflict is either the already-accepted invariant
+				// (FR-RSND-3, checked before the cooldown so an accepted invite
+				// never reports a cooldown it could never satisfy) or the TOCTOU
+				// race the administrator's UPDATE catches; ErrTooManyRequests is
+				// the cooldown itself (FR-RATE-2). All routine. Anything else is
+				// the entropy source or the UPDATE failing.
+				if !errors.Is(err, server.ErrConflict) && !errors.Is(err, server.ErrTooManyRequests) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"invite_id":      inviteID,
+						"fleet_id":       fleetID,
+						"correlation_id": correlationID,
+					}).Error("resend invite")
+				}
+				server.WriteError(w, err)
+				return
+			}
+			server.WriteJSON(w, http.StatusOK, server.Document{Data: Transform(updated)})
+		})
+
+		// POST /invites/{token}/accept — look up by token; validate; create membership + stamp accepted_at
+		r.Post("/invites/{token}/accept", func(w http.ResponseWriter, req *http.Request) {
+			identity := auth.IdentityFromContext(req.Context())
+			token := chi.URLParam(req, "token")
+			// One id for both jobs: it is the log field an operator greps on and
+			// the trace id stamped on the outbox envelope, so a mail that never
+			// arrived can be walked back to the request that created it.
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
+
+			inv, err := proc.GetByToken(req.Context(), token)
+			if err != nil {
+				if errors.Is(err, server.ErrNotFound) {
+					server.WriteError(w, server.ErrNotFound)
+					return
+				}
+				// The token itself must never reach a log field or message
+				// (PRD §8 Security) — this branch logs no identifying field at
+				// all, only the correlation id, since the lookup by definition
+				// failed to resolve one.
+				log.WithError(err).WithField("correlation_id", correlationID).Error("get invite by token")
+				server.WriteError(w, err)
+				return
+			}
+
+			updated, err := proc.Accept(req.Context(), inv, identity.UserID, identity.Email, correlationID)
+			if err != nil {
 				// Already-accepted and expired are ordinary user outcomes the
-				// response body now explains; logging them adds noise. The other
-				// two are worth being greppable: a mismatch is either a genuine
+				// response body explains; logging them adds noise. The next two
+				// are worth being greppable: a mismatch is either a genuine
 				// wrong-account attempt or a regression of the empty-email-claim
 				// defect, and an unusable invite is a corrupt row an operator
-				// should chase. Invite id and correlation id only: never
-				// inv.Email(), never identity.Email (PRD FR-10/§8). The invite id
-				// joins to the row for an operator who already has database
-				// access, so the line itself discloses nothing.
+				// should chase. Anything else is the accept transaction failing.
+				//
+				// Invite id and correlation id only: never inv.Email(), never
+				// identity.Email (PRD FR-10/§8). The invite id joins to the row
+				// for an operator who already has database access, so the line
+				// itself discloses nothing.
 				fields := logrus.Fields{
 					"invite_id":      inv.ID(),
-					"correlation_id": telemetry.CorrelationIDFromContext(req.Context()),
+					"fleet_id":       inv.FleetID(),
+					"correlation_id": correlationID,
 				}
 				switch {
 				case errors.Is(err, ErrEmailMismatch):
 					log.WithFields(fields).Warn("invite accept rejected: email mismatch")
 				case errors.Is(err, ErrInviteUnusable):
 					log.WithFields(fields).Error("invite accept rejected: invite row has no email address")
+				case errors.Is(err, ErrAlreadyAccepted), errors.Is(err, ErrInviteExpired):
+					// Routine; the 409 body says which.
+				default:
+					log.WithError(err).WithFields(fields).
+						WithField("user_id", identity.UserID).Error("accept invite")
 				}
-				server.WriteError(w, err)
-				return
-			}
-
-			updated, err := adm.Accept(inv, identity.UserID, telemetry.CorrelationIDFromContext(req.Context()))
-			if err != nil {
 				server.WriteError(w, err)
 				return
 			}
 			server.WriteJSON(w, http.StatusOK, server.Document{Data: Transform(updated)})
 		})
 	}
-}
-
-// generateToken returns a cryptographically random 32-byte hex string.
-func generateToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }

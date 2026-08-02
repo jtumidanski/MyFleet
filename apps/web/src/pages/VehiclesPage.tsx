@@ -6,6 +6,7 @@ import { useVehicles, useCreateVehicle } from '../lib/hooks/api/vehicles';
 import { VehicleList } from '../components/features/vehicles/VehicleList';
 import { VehicleForm } from '../components/features/vehicles/VehicleForm';
 import { Button } from '../components/ui/button';
+import { PageHeader } from '../components/PageHeader';
 import {
   Dialog,
   DialogContent,
@@ -65,15 +66,17 @@ export function VehiclesPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Vehicles</h1>
-        {canWrite && (
-          <Button type="button" ref={headerButtonRef} onClick={() => openFrom('header')}>
-            Add Vehicle
-          </Button>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Vehicles"
+        actions={
+          canWrite && (
+            <Button type="button" ref={headerButtonRef} onClick={() => openFrom('header')}>
+              Add Vehicle
+            </Button>
+          )
+        }
+      />
 
       {canWrite && (
         <Dialog
@@ -114,19 +117,17 @@ export function VehiclesPage() {
         </Dialog>
       )}
 
-      <div className="mt-6">
-        <VehicleList
-          vehicles={data?.data ?? []}
-          isLoading={isLoading}
-          emptyAction={
-            canWrite ? (
-              <Button type="button" onClick={() => openFrom('empty')}>
-                Add Vehicle
-              </Button>
-            ) : undefined
-          }
-        />
-      </div>
+      <VehicleList
+        vehicles={data?.data ?? []}
+        isLoading={isLoading}
+        emptyAction={
+          canWrite ? (
+            <Button type="button" onClick={() => openFrom('empty')}>
+              Add Vehicle
+            </Button>
+          ) : undefined
+        }
+      />
     </div>
   );
 }

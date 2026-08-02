@@ -2,17 +2,27 @@ package maintenancecategory
 
 import (
 	"errors"
+	"sort"
+	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	// TranslateError mirrors packages/shared-go/database.Connect's production
+	// gorm.Config: it lets gorm.io/driver/sqlite map a raw SQLITE_CONSTRAINT
+	// error onto gorm.ErrDuplicatedKey, the same sentinel PostgreSQL produces
+	// in production. Without it here, TestCreate_losesRaceReturnsWinner would
+	// exercise a different (untranslated) error shape than production ever
+	// sees.
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
@@ -22,10 +32,107 @@ func newTestDB(t *testing.T) *gorm.DB {
 	if err := db.Exec("ATTACH DATABASE ':memory:' AS fleet").Error; err != nil {
 		t.Fatalf("attach fleet schema: %v", err)
 	}
-	if err := Migration(db); err != nil {
-		t.Fatalf("migrate: %v", err)
+	// Not Migration(db)/AutoMigrate: gorm's sqlite driver builds CREATE INDEX
+	// without the schema qualifier for a schema-qualified table (it uses the
+	// bare table name instead of routing through CurrentTable like the core
+	// migrator does), so an indexed column on a "fleet."-prefixed TableName
+	// fails with "no such table: main.maintenance_categories" under
+	// AutoMigrate on SQLite even though the table lives in the attached
+	// "fleet" schema. Postgres's migrator does not have this bug. The
+	// activity package hits the identical issue with its own indexed
+	// FleetID and works around it the same way (see
+	// activity/processor_test.go's newActivityDB): create the table with
+	// explicit DDL mirroring the GORM entity instead of AutoMigrate.
+	//
+	// PIN: this DDL's column set MUST mirror the Entity struct exactly. A new
+	// Entity field with no matching column here does not fail to compile —
+	// it silently vanishes from every query gorm builds against this test DB
+	// (Find/Create pick columns from the struct via reflection, so a column
+	// gorm expects but the table lacks fails per-column, not per-test). That
+	// is exactly how the PostgreSQL-only uuid-bind bug in visibleTo went
+	// undetected here: FleetID was TEXT in this DDL but uuid in production.
+	// TestDDLColumnsMatchEntity below fails loudly the moment this list and
+	// the Entity struct's columns disagree; keep them in lockstep by hand.
+	if err := db.Exec(`CREATE TABLE fleet.maintenance_categories (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT,
+		system_defined BOOLEAN NOT NULL DEFAULT 0,
+		kind TEXT NOT NULL DEFAULT 'maintenance',
+		fleet_id TEXT
+	)`).Error; err != nil {
+		t.Fatalf("ddl: %v", err)
+	}
+	// Mirrors the uniqueIndex:idx_maintenance_categories_scope GORM tag on
+	// Entity's Name/Kind/FleetID fields (fleet_id, name, kind). SQLite, like
+	// PostgreSQL, treats each NULL fleet_id as distinct, so this does not
+	// constrain system rows — matching production semantics.
+	//
+	// SQLite's CREATE INDEX grammar qualifies the INDEX's own name with a
+	// schema ("schema-name.index-name"), not the table it indexes — the
+	// table-name that follows ON is never schema-qualified. That is the
+	// opposite of the ordinary table-reference syntax used elsewhere in this
+	// file, so the schema prefix moves from the table to the index name here.
+	if err := db.Exec(`CREATE UNIQUE INDEX fleet.idx_maintenance_categories_scope
+		ON maintenance_categories (fleet_id, name, kind)`).Error; err != nil {
+		t.Fatalf("unique index ddl: %v", err)
 	}
 	return db
+}
+
+// TestDDLColumnsMatchEntity guards the pin above: newTestDB's hand-written
+// DDL must declare exactly the columns gorm derives from the Entity struct,
+// no more and no fewer. AutoMigrate itself can't be used as the source of
+// truth here — that's the whole reason this DDL exists (see the comment in
+// newTestDB): gorm's sqlite driver breaks on the schema-qualified table's
+// indexed column. So this compares two independent sources instead: gorm's
+// own schema parser (what Entity SHOULD produce, via reflection — no table
+// involved) against sqlite's PRAGMA table_info for the table newTestDB
+// actually created (what the DDL DID produce). A field added to Entity with
+// no corresponding line in the DDL — or a DDL column with no matching
+// Entity field — fails this test immediately instead of drifting silently.
+func TestDDLColumnsMatchEntity(t *testing.T) {
+	s, err := schema.Parse(&Entity{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatalf("parse Entity schema: %v", err)
+	}
+	wantCols := append([]string(nil), s.DBNames...)
+	sort.Strings(wantCols)
+
+	db := newTestDB(t)
+	rows, err := db.Raw("PRAGMA fleet.table_info(maintenance_categories)").Rows()
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var gotCols []string
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan table_info row: %v", err)
+		}
+		gotCols = append(gotCols, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate table_info rows: %v", err)
+	}
+	sort.Strings(gotCols)
+
+	if len(wantCols) != len(gotCols) {
+		t.Fatalf("column count mismatch: Entity has %v, newTestDB's DDL has %v — "+
+			"update the hand-written DDL in newTestDB to match", wantCols, gotCols)
+	}
+	for i := range wantCols {
+		if wantCols[i] != gotCols[i] {
+			t.Fatalf("column mismatch: Entity has %v, newTestDB's DDL has %v — "+
+				"update the hand-written DDL in newTestDB to match", wantCols, gotCols)
+		}
+	}
 }
 
 // TestSeedIsIdempotent verifies that running Seed twice does not duplicate rows.
@@ -45,6 +152,47 @@ func TestSeedIsIdempotent(t *testing.T) {
 	}
 	if count != int64(len(seeds)) {
 		t.Fatalf("want %d categories after double-seed, got %d", len(seeds), count)
+	}
+}
+
+// TestSeed_ignoresFleetScopedNameCollision proves Seed's name lookup is
+// constrained to system rows (fleet_id IS NULL): a fleet-scoped row sharing a
+// system name must NOT satisfy the FirstOrCreate lookup, or the system row
+// would never get created on a later startup that runs Seed after a fleet
+// already created a same-named category.
+func TestSeed_ignoresFleetScopedNameCollision(t *testing.T) {
+	db := newTestDB(t)
+
+	fleetA := "11111111-1111-1111-1111-111111111111"
+	if err := db.Create(&Entity{
+		ID:      uuid.NewString(),
+		Name:    "Oil Change",
+		Kind:    string(KindMaintenance),
+		FleetID: &fleetA,
+	}).Error; err != nil {
+		t.Fatalf("create fleet-scoped row: %v", err)
+	}
+
+	if err := Seed(db); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	var systemCount int64
+	if err := db.Model(&Entity{}).
+		Where("name = ? AND fleet_id IS NULL", "Oil Change").
+		Count(&systemCount).Error; err != nil {
+		t.Fatalf("count system rows: %v", err)
+	}
+	if systemCount != 1 {
+		t.Fatalf("want exactly 1 system-defined 'Oil Change' row after seed, got %d", systemCount)
+	}
+
+	var total int64
+	if err := db.Model(&Entity{}).Where("name = ?", "Oil Change").Count(&total).Error; err != nil {
+		t.Fatalf("count all rows: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("want the fleet-scoped row AND the system row to coexist (2 total), got %d", total)
 	}
 }
 

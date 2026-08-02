@@ -14,7 +14,12 @@ type Server struct {
 	inits  []func(chi.Router)
 }
 
+// New builds the shared server. It also installs log as the package's error
+// logger (see SetErrorLogger), which is what gives every service's 5xx
+// responses a server-side record of the error WriteError redacts — with no
+// per-service wiring, since every main already calls this exactly once.
 func New(log logrus.FieldLogger) *Server {
+	SetErrorLogger(log)
 	return &Server{log: log, router: chi.NewRouter()}
 }
 

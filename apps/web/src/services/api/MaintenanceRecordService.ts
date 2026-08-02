@@ -27,9 +27,18 @@ class MaintenanceRecordService extends BaseService<
   protected readonly basePath = '/api/fleet/maintenance-records';
 
   /** GET /api/fleet/vehicles/{vehicleId}/maintenance-records[?kind=…] */
-  listByVehicle(vehicleId: string, kind?: MaintenanceCategoryKind) {
+  listByVehicle(
+    vehicleId: string,
+    kind?: MaintenanceCategoryKind,
+    params?: { page?: number; pageSize?: number },
+  ) {
+    const search = new URLSearchParams();
+    if (kind) search.set('kind', kind);
+    if (params?.page != null) search.set('page[number]', String(params.page));
+    if (params?.pageSize != null) search.set('page[size]', String(params.pageSize));
+    const qs = search.toString();
     const path = `/api/fleet/vehicles/${vehicleId}/maintenance-records`;
-    return this.listAt(kind ? `${path}?kind=${kind}` : path);
+    return this.listAt(qs ? `${path}?${qs}` : path);
   }
 
   /** POST /api/fleet/vehicles/{vehicleId}/maintenance-records */

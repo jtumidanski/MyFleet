@@ -10,6 +10,8 @@ import (
 
 // Provider is the read-only interface for mileage data access.
 type Provider interface {
+	// ListByVehicle returns a page of a vehicle's mileage records, newest first
+	// (recorded_at desc), matching the fuel and maintenance-record siblings.
 	ListByVehicle(vehicleID string, from, to *time.Time, page server.Page) ([]Model, int, error)
 }
 
@@ -33,7 +35,7 @@ func (p *dbProvider) ListByVehicle(vehicleID string, from, to *time.Time, page s
 	}
 
 	var es []Entity
-	if err := q.Order("recorded_at asc").Offset(page.Offset()).Limit(page.Size).Find(&es).Error; err != nil {
+	if err := q.Order("recorded_at desc").Offset(page.Offset()).Limit(page.Size).Find(&es).Error; err != nil {
 		return nil, 0, err
 	}
 

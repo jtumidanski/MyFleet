@@ -19,6 +19,8 @@ import (
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/consumer"
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/fleetclient"
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/inbox"
+	"github.com/jtumidanski/myfleet/apps/notification-service/internal/mailconsumer"
+	"github.com/jtumidanski/myfleet/apps/notification-service/internal/mailer"
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/notification"
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/preferences"
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/reminder"
@@ -56,6 +58,24 @@ func main() {
 	cons := consumer.NewConsumer(log, inboxStore, fleetClient, notifProc)
 	for _, topic := range consumer.Topics {
 		go cons.Run(ctx, brokers, topic)
+	}
+
+	// Invite email delivery (design §3). A SEPARATE consumer group from the
+	// in-app "notification" group, so a stalled relay cannot hold back in-app
+	// notification offsets and vice versa.
+	//
+	// ConfigFromEnv fails at startup on a misconfiguration (FR-CFG-5); when
+	// SMTP_ENABLED is false it reads nothing else and the consumer short-circuits
+	// before any network call, so a cluster with no relay credentials is a
+	// documented no-op rather than a crash loop (FR-CFG-4).
+	mailCfg := mailer.ConfigFromEnv()
+	var mailSender mailer.Sender
+	if mailCfg.Enabled {
+		mailSender = mailer.NewSMTPSender(mailCfg)
+	}
+	go mailconsumer.NewConsumer(log, inboxStore, fleetClient, mailSender, mailCfg).Run(ctx, brokers)
+	if !mailCfg.Enabled {
+		log.Warn("SMTP is disabled; invite emails will be recorded and skipped")
 	}
 
 	// Daily reminder safety-net: re-derive overdue schedules and generate the

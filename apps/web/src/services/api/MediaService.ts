@@ -14,7 +14,7 @@ import type {
  *   POST   /api/media/{id}/confirm  — mark uploaded→processing
  *   GET    /api/media/{id}          — get metadata
  *   GET    /api/media/{id}/content  — stream the bytes (proxied from MinIO);
- *                                     optional ?variant=thumbnail|display
+ *                                     optional ?variant=thumbnail|card|display
  *   DELETE /api/media/{id}          — soft delete
  *
  * Bytes are proxied through media-service, not presigned: MinIO is a shared
@@ -65,7 +65,16 @@ class MediaService {
    * MediaService.test.ts pins it.
    *
    * A derived variant that the service cannot produce answers 404; it does NOT
-   * fall back to the original (apps/media-service/internal/mediaobject/processor.go).
+   * fall back to the original
+   * (apps/media-service/internal/mediaobject/processor.go).
+   *
+   * One exception, and only one: a missing `card` is answered with the
+   * `thumbnail` bytes rather than a 404, because card variants are filled in
+   * lazily for media uploaded before the variant existed. Nothing LARGER than
+   * the requested rendition is ever substituted, and the rule does not
+   * generalise — a missing `display` still 404s. The response carries no signal
+   * that a downgrade happened, so the caller cannot distinguish it; the visible
+   * consequence is a slightly soft image until the background generation lands.
    */
   async getContentBlob(id: string, variant: MediaVariant = 'original'): Promise<Blob> {
     const suffix = variant === 'original' ? '' : `?variant=${variant}`;
