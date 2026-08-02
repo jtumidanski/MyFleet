@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -23,14 +24,19 @@ const stateCookieName = "oidc_state"
 // stateTTL bounds how long a login attempt's state/nonce cookie is valid.
 const stateTTL = 10 * time.Minute
 
+// maxReturnPathLen bounds the post-login return path carried through the OAuth
+// dance, so a hostile link cannot stuff an unbounded value into the cookie.
+const maxReturnPathLen = 512
+
 // Dependencies bundles everything the callback orchestration needs. The
-// membership resolver is injected (Decision 1) so this package never imports
-// the concrete membership client.
+// principal resolver is injected (Decision 1) so this package never imports the
+// concrete membership client, and so this handler never constructs a Principal
+// of its own.
 type Dependencies struct {
 	OIDC        *Processor
 	Users       *user.Processor
 	Sessions    *session.Processor
-	Resolve     session.MembershipResolver
+	Resolve     session.PrincipalResolver
 	StateSecret []byte
 	// AppBaseURL is the SPA origin the browser is redirected back to.
 	AppBaseURL string
@@ -55,11 +61,69 @@ func loginHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		state := uuid.NewString()
 		nonce := uuid.NewString()
+		// Where to land after the dance, e.g. the invite-accept route the user
+		// clicked before being bounced to login. It rides in the SIGNED state
+		// cookie rather than the OAuth state parameter so it cannot be swapped
+		// mid-flight, and it is sanitized here so only site-relative paths
+		// survive (open-redirect guard).
+		returnPath := safeReturnPath(req.URL.Query().Get("return_to"))
 		// Persist state+nonce in a signed, short-lived cookie for CSRF/replay
 		// defense; verified on callback.
-		setStateCookie(w, d.StateSecret, state, nonce, d.CookieSecure)
+		setStateCookie(w, d.StateSecret, state, nonce, returnPath, d.CookieSecure)
 		http.Redirect(w, req, d.OIDC.AuthCodeURL(state, nonce), http.StatusFound)
 	}
+}
+
+// safeReturnPath reduces a caller-supplied return target to a site-relative
+// path under AppBaseURL, or "" if it is anything else. Anything with a scheme
+// or authority — including the protocol-relative "//host" and "/\host" forms
+// browsers resolve off-site — is rejected, so this can never become an open
+// redirect. The fragment is dropped because the callback appends its own.
+func safeReturnPath(raw string) string {
+	if raw == "" || len(raw) > maxReturnPathLen {
+		return ""
+	}
+	if !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") || strings.HasPrefix(raw, "/\\") {
+		return ""
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return ""
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "" || u.Host != "" || u.Opaque != "" {
+		return ""
+	}
+	// Collapse dot segments and duplicate slashes BEFORE the authority re-check:
+	// "/.//evil.example" and "/x/..//evil.example" both resolve to "//evil.example"
+	// in the browser, which the prefix test above cannot see. Clearing RawPath
+	// makes RequestURI re-encode from the cleaned value.
+	u.Path = path.Clean(u.Path)
+	u.RawPath = ""
+	if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") {
+		return ""
+	}
+	// /api/* is same-origin but routed to the services, not the SPA: landing
+	// there strands the access-token fragment on a JSON 401.
+	if strings.HasPrefix(u.Path, "/api/") {
+		return ""
+	}
+	return u.RequestURI()
+}
+
+// destination resolves where the callback sends the browser: an explicit return
+// path wins, otherwise fleetless users go to onboarding and everyone else home.
+// Takes the Principal rather than a fleet-id string so the two arguments cannot
+// be silently transposed at the call site.
+func destination(d Dependencies, principal session.Principal, returnPath string) string {
+	if returnPath != "" {
+		return d.AppBaseURL + returnPath
+	}
+	if principal.ActiveFleetID == "" {
+		return d.AppBaseURL + d.OnboardingPath
+	}
+	return d.AppBaseURL + d.HomePath
 }
 
 func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
@@ -70,7 +134,7 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 			http.Error(w, "missing code or state", http.StatusBadRequest)
 			return
 		}
-		wantNonce, ok := verifyStateCookie(req, d.StateSecret, state)
+		wantNonce, returnPath, ok := verifyStateCookie(req, d.StateSecret, state)
 		if !ok {
 			http.Error(w, "invalid state", http.StatusBadRequest)
 			return
@@ -105,19 +169,18 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 			return
 		}
 
-		fleetID, role, err := d.Resolve(ctx, u.ID())
+		// The resolver reads the row ProvisionFromGoogle just wrote, by primary
+		// key. Safe: there is a single primary Postgres and no read replica in
+		// deploy/k8s, and the write has committed by the time ProvisionFromGoogle
+		// returns. This is the first place a read replica would break.
+		principal, err := d.Resolve(ctx, u.ID())
 		if err != nil {
-			log.WithError(err).Error("resolve membership on callback")
+			log.WithError(err).Error("resolve principal on callback")
 			http.Error(w, "authentication failed", http.StatusInternalServerError)
 			return
 		}
 
-		access, err := d.Sessions.MintAccess(session.Principal{
-			UserID:        u.ID(),
-			Email:         u.Email(),
-			ActiveFleetID: fleetID,
-			Role:          role,
-		})
+		access, err := d.Sessions.MintAccess(principal)
 		if err != nil {
 			log.WithError(err).Error("mint access on callback")
 			http.Error(w, "authentication failed", http.StatusInternalServerError)
@@ -136,22 +199,24 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		// cookie would be invisible to the SPA and break the API client.
 		session.SetRefreshCookie(w, refresh, d.CookieSecure)
 
-		// New users without a fleet go to onboarding; everyone else lands home.
-		dest := d.AppBaseURL + d.HomePath
-		if fleetID == "" {
-			dest = d.AppBaseURL + d.OnboardingPath
-		}
-		dest += "#access_token=" + url.QueryEscape(access)
+		// A return path from the login request wins; otherwise new users without
+		// a fleet go to onboarding and everyone else lands home. membership.Client
+		// maps fleet-service's 404 to an empty fleet id, so that is how a
+		// brand-new user is recognised.
+		dest := destination(d, principal, returnPath) + "#access_token=" + url.QueryEscape(access)
 		http.Redirect(w, req, dest, http.StatusFound)
 	}
 }
 
 // --- signed state cookie helpers ---
 
-// setStateCookie stores "state|nonce|exp" with an HMAC signature.
-func setStateCookie(w http.ResponseWriter, secret []byte, state, nonce string, secure bool) {
+// setStateCookie stores "state|nonce|exp|b64(returnPath)" with an HMAC
+// signature. The return path is base64'd so a path containing the "|" field
+// separator cannot forge extra fields, and signed so it cannot be swapped for
+// an off-site destination after the fact.
+func setStateCookie(w http.ResponseWriter, secret []byte, state, nonce, returnPath string, secure bool) {
 	exp := time.Now().Add(stateTTL).Unix()
-	payload := state + "|" + nonce + "|" + itoa(exp)
+	payload := state + "|" + nonce + "|" + itoa(exp) + "|" + base64.RawURLEncoding.EncodeToString([]byte(returnPath))
 	value := payload + "|" + sign(secret, payload)
 	http.SetCookie(w, &http.Cookie{
 		Name:     stateCookieName,
@@ -165,32 +230,53 @@ func setStateCookie(w http.ResponseWriter, secret []byte, state, nonce string, s
 }
 
 // verifyStateCookie validates the cookie signature, expiry, and state match,
-// returning the embedded nonce on success.
-func verifyStateCookie(req *http.Request, secret []byte, state string) (nonce string, ok bool) {
+// returning the embedded nonce and post-login return path on success. The
+// return path is re-sanitized after the signature check: the value was signed
+// by this service, but a sanitizer that tightens later must not be bypassed by
+// a cookie minted by an older build.
+func verifyStateCookie(req *http.Request, secret []byte, state string) (nonce, returnPath string, ok bool) {
 	c, err := req.Cookie(stateCookieName)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(c.Value)
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	parts := strings.Split(string(raw), "|")
-	if len(parts) != 4 {
-		return "", false
+	// 4 fields is the pre-return-path format. Accepted so a login already in
+	// flight when this version deploys still completes — a rolling deploy fails
+	// in BOTH directions otherwise, for the whole rollout rather than one TTL.
+	// Removable one release after this ships.
+	if len(parts) == 4 {
+		parts = []string{parts[0], parts[1], parts[2], "", parts[3]}
 	}
-	gotState, gotNonce, expStr, sig := parts[0], parts[1], parts[2], parts[3]
-	payload := gotState + "|" + gotNonce + "|" + expStr
+	if len(parts) != 5 {
+		return "", "", false
+	}
+	gotState, gotNonce, expStr, encPath, sig := parts[0], parts[1], parts[2], parts[3], parts[4]
+	payload := gotState + "|" + gotNonce + "|" + expStr + "|" + encPath
 	if !hmac.Equal([]byte(sig), []byte(sign(secret, payload))) {
-		return "", false
+		// A legacy cookie was signed without the trailing return-path field, so
+		// its signature only matches the three-field payload. An empty encPath
+		// is the only case that can be legacy; a current empty-path cookie
+		// matched above.
+		legacy := gotState + "|" + gotNonce + "|" + expStr
+		if encPath != "" || !hmac.Equal([]byte(sig), []byte(sign(secret, legacy))) {
+			return "", "", false
+		}
 	}
 	if exp, perr := atoi(expStr); perr != nil || time.Now().Unix() > exp {
-		return "", false
+		return "", "", false
 	}
 	if gotState != state {
-		return "", false
+		return "", "", false
 	}
-	return gotNonce, true
+	pathBytes, err := base64.RawURLEncoding.DecodeString(encPath)
+	if err != nil {
+		return "", "", false
+	}
+	return gotNonce, safeReturnPath(string(pathBytes)), true
 }
 
 func clearStateCookie(w http.ResponseWriter, secure bool) {
