@@ -100,3 +100,72 @@ func TestManifestKeysAreUnique(t *testing.T) {
 		seen[target.Key] = target.Table
 	}
 }
+
+// TestAdminTreeIsSeparate is the structural control behind the whole
+// cross-fleet API (risks.md R7, design §5.5).
+//
+// The admin API bypasses RequireSameFleet. That bypass is safe ONLY because it
+// lives in a parallel route tree rather than in a relaxed guard. Two ways that
+// could rot:
+//
+//   - someone "simplifies" an ordinary handler by short-circuiting
+//     RequireSameFleet when Identity.PlatformAdmin is true, which would make
+//     every ordinary endpoint cross-fleet capable for an admin;
+//   - someone adds RequireSameFleet inside /admin, which would silently break
+//     the console for every fleet the operator is not a member of and invite the
+//     first fix above.
+//
+// Two allowlists, both resting on the same rule: naming a guard is not calling
+// it. authz/scope.go DEFINES both guards; this file DEFINES the separation rule,
+// so it necessarily spells out the very identifiers it forbids — in the doc
+// comment above, in the search literals below, and in the failure messages.
+// Without the second allowlist the test fails on itself.
+func TestAdminTreeIsSeparate(t *testing.T) {
+	const internalRoot = ".."
+	const selfPath = "../admin/arch_test.go"
+	allowedPlatformAdminRefs := map[string]bool{
+		"../authz/scope.go":      true,
+		"../authz/scope_test.go": true,
+	}
+
+	err := filepath.WalkDir(internalRoot, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		slash := filepath.ToSlash(path)
+		if slash == selfPath {
+			return nil
+		}
+		inAdmin := strings.HasPrefix(slash, "../admin/")
+		src, rerr := os.ReadFile(path)
+		if rerr != nil {
+			return rerr
+		}
+		text := string(src)
+
+		if !inAdmin && !allowedPlatformAdminRefs[slash] {
+			for _, ref := range []string{"PlatformAdmin", "RequirePlatformAdmin"} {
+				if strings.Contains(text, ref) {
+					t.Errorf("%s references %s outside internal/admin — the platform tier must not "+
+						"leak into an ordinary handler; that is how RequireSameFleet gets relaxed", path, ref)
+				}
+			}
+		}
+		// Matched as a call (trailing "("), not a bare mention: this file's own
+		// doc comments and error strings name RequireSameFleet in prose (to
+		// describe the very thing being guarded against), and manifest.go's
+		// package doc does the same. Neither is a use.
+		if inAdmin && strings.Contains(text, "RequireSameFleet(") {
+			t.Errorf("%s calls RequireSameFleet inside internal/admin — the admin tree is "+
+				"deliberately fleet-agnostic; adding the guard here breaks every fleet the "+
+				"operator is not a member of", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", internalRoot, err)
+	}
+}

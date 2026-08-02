@@ -32,3 +32,20 @@ func RequireOwner(id auth.Identity) error {
 	}
 	return server.ErrForbidden
 }
+
+// RequirePlatformAdmin returns 403 when the caller is not a platform admin.
+//
+// 403, not 404: the existence of an admin API is not a secret, only the
+// authority to use it. That is the deliberate inverse of RequireSameFleet's
+// rule above, and the difference is intentional — RequireSameFleet hides other
+// tenants' resources; there is only one platform and everyone knows it exists.
+//
+// It deliberately ignores ActiveFleetID. An administrator with no fleet —
+// including one standing in the wreckage of the system purge they just ran —
+// must still reach every admin endpoint (FR-ADMIN-AUTH-9).
+func RequirePlatformAdmin(id auth.Identity) error {
+	if !id.PlatformAdmin {
+		return server.ErrForbidden
+	}
+	return nil
+}
