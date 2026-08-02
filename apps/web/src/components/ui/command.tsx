@@ -90,7 +90,20 @@ const CommandItem = React.forwardRef<
   <CommandPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none aria-selected:bg-accent aria-selected:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+      // `data-[disabled=true]`, NOT `data-[disabled]`. cmdk renders
+      // `data-disabled={!!props.disabled}` and React stringifies data-*
+      // values, so an ENABLED item still carries `data-disabled="false"` —
+      // the attribute is always present. Tailwind's `data-[disabled]:` variant
+      // compiles to the attribute-PRESENCE selector `[data-disabled]`, which
+      // therefore matched every item and gave the whole list
+      // `pointer-events: none`: hit-testing skipped each item and landed on its
+      // parent, so the onSelect handler bound to the item never fired and the
+      // picker could only be driven by keyboard.
+      //
+      // Radix's convention is the opposite (`data-disabled=""` when disabled,
+      // attribute absent otherwise), so `data-[disabled]:` is correct in
+      // select.tsx and must NOT be "fixed" to match this.
+      'relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none aria-selected:bg-accent aria-selected:text-accent-foreground data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50',
       className,
     )}
     {...props}

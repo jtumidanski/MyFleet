@@ -115,7 +115,27 @@ export const CategoryCombobox = forwardRef<HTMLButtonElement, CategoryComboboxPr
     };
 
     return (
-      <Popover open={open} onOpenChange={setOpen}>
+      /*
+       * `modal` is what makes the suggestion list SCROLLABLE, and every caller
+       * renders this inside a modal Dialog.
+       *
+       * The content is portaled to <body>, outside DialogContent. The dialog's
+       * react-remove-scroll lock cancels wheel events everywhere except its own
+       * container and the shards it declares; a non-modal Popover is neither,
+       * so the wheel does nothing over the list. `modal` gives the popover its
+       * own scroll lock (and dismissable layer), which takes over while it is
+       * open. Verified both ways in Chromium: without it the list's scrollTop
+       * stays at 0.
+       *
+       * It is NOT what makes items clickable — that was
+       * `data-[disabled]:pointer-events-none` in ui/command.tsx. The two bugs
+       * had one symptom between them.
+       *
+       * Trade-off: while the popover is open, Radix marks the rest of the page
+       * aria-hidden and traps focus. That is correct modal semantics, but it
+       * does mean the trigger is absent from the a11y tree during that window.
+       */
+      <Popover open={open} onOpenChange={setOpen} modal>
         <PopoverTrigger asChild>
           <Button
             ref={ref}
