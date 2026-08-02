@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 )
@@ -36,6 +37,11 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB, fleets FleetN
 	return func(r chi.Router) {
 		r.Get("/internal/invites/{inviteID}", func(w http.ResponseWriter, req *http.Request) {
 			inviteID := chi.URLParam(req, "inviteID")
+			// The caller is another service, which forwards the correlation id of
+			// the request that made it call. Without this field a failed invite
+			// email cannot be joined back to the create that triggered it — the
+			// whole reason the header is propagated.
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 			if inviteID == "" {
 				server.WriteError(w, server.ErrValidation)
 				return
@@ -50,7 +56,10 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB, fleets FleetN
 					server.WriteError(w, server.ErrNotFound)
 					return
 				}
-				log.WithError(err).WithField("invite_id", inviteID).Error("internal get invite")
+				log.WithError(err).WithFields(logrus.Fields{
+					"invite_id":      inviteID,
+					"correlation_id": correlationID,
+				}).Error("internal get invite")
 				server.WriteError(w, err)
 				return
 			}
@@ -61,8 +70,9 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB, fleets FleetN
 			f, err := fleets.GetByID(inv.FleetID())
 			if err != nil {
 				log.WithError(err).WithFields(logrus.Fields{
-					"invite_id": inviteID,
-					"fleet_id":  inv.FleetID(),
+					"invite_id":      inviteID,
+					"fleet_id":       inv.FleetID(),
+					"correlation_id": correlationID,
 				}).Warn("could not resolve fleet name for invite email")
 			} else {
 				fleetName = f.Name()

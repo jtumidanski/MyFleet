@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -17,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
+	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 )
 
 // inviteTestRouter mounts the real JWT-protected invite routes over an
@@ -381,5 +383,150 @@ func TestCreateInvite_unknownRoleIs422(t *testing.T) {
 	}
 	if n := countRows(t, db, &Entity{}); n != 0 {
 		t.Fatalf("an invite row was written for an unknown role (%d rows)", n)
+	}
+}
+
+// loggingRouter mounts the real routes with the correlation-id middleware in
+// front, and captures everything the handlers log as raw JSON.
+//
+// The buffer is scanned as TEXT rather than field-by-field on purpose. A
+// field-by-field assertion has to decide how to stringify each value, and any
+// value it does not know how to render — a struct, a fmt.Stringer — silently
+// reads as empty and the assertion passes vacuously. Scanning the serialized
+// output cannot be fooled that way: if the token reached the log at all, in any
+// field, of any type, it is in these bytes.
+func loggingRouter(t *testing.T, db *gorm.DB, limits Limits) (chi.Router, *bytes.Buffer) {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	log := logrus.New()
+	log.SetOutput(buf)
+	log.SetFormatter(&logrus.JSONFormatter{})
+	log.SetLevel(logrus.DebugLevel)
+
+	r := chi.NewRouter()
+	r.Use(telemetry.CorrelationID)
+	InitializeRoutes(log, db, stubOwnerChecker{}, nil, nil, nil, limits)(r)
+	InitializeInternalRoutes(log, db, stubFleetNamer{names: map[string]string{}})(r)
+	return r, buf
+}
+
+// TestInviteHandlers_neverLogTheTokenAndAlwaysCarryTheCorrelationID is the
+// standing guard for the two log disciplines this domain has to hold.
+//
+// The invite token is a bearer credential — it is the entire authority the
+// accept route checks — so it must never reach a log message or a log field,
+// however the surrounding code is rearranged. And every unexpected failure must
+// carry the correlation id, or an operator holding one end of a user report has
+// no way to find the other.
+//
+// Every route below is driven against a table that has been dropped out from
+// under it, which is what forces the unexpected-error branches to run.
+func TestInviteHandlers_neverLogTheTokenAndAlwaysCarryTheCorrelationID(t *testing.T) {
+	db := newInviteDB(t)
+	r, buf := loggingRouter(t, db, Limits{CreatePerWindow: 100, CreateWindow: time.Hour})
+
+	// A real invite, so the token under test is one the domain actually minted.
+	id := createInvite(t, r, "f1", "a@example.com", "member")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, ownerRequest(http.MethodGet, "/fleets/f1/invites", "f1", nil))
+	var list struct {
+		Data []struct {
+			Attributes struct {
+				Token string `json:"token"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list.Data) != 1 {
+		t.Fatalf("list invites to recover the token: %v (%s)", err, rec.Body.String())
+	}
+	token := list.Data[0].Attributes.Token
+	if token == "" {
+		t.Fatal("no token to test with")
+	}
+
+	// Pull the table out from under every handler so the unexpected-error
+	// branches — the ones that log — actually run.
+	if err := db.Exec("DROP TABLE fleet.fleet_invites").Error; err != nil {
+		t.Fatalf("drop table: %v", err)
+	}
+	buf.Reset()
+
+	requests := []*http.Request{
+		ownerRequest(http.MethodGet, "/fleets/f1/invites", "f1", nil),
+		ownerRequest(http.MethodDelete, "/invites/"+id, "f1", nil),
+		ownerRequest(http.MethodPost, "/fleets/f1/invites/"+id+"/resend", "f1", nil),
+		ownerRequest(http.MethodPost, "/fleets/f1/invites", "f1", createInviteBody("b@example.com", "member")),
+		httptest.NewRequest(http.MethodGet, "/internal/invites/"+id, nil),
+	}
+	for _, req := range requests {
+		r.ServeHTTP(httptest.NewRecorder(), req)
+	}
+	// The accept route, driven with the real token in the URL — the one place a
+	// careless log call would pick it up straight off the request.
+	postAccept(r, token, "a@example.com")
+
+	out := buf.String()
+	if out == "" {
+		t.Fatal("no log output at all; the assertions below would pass vacuously")
+	}
+	if strings.Contains(out, token) {
+		t.Fatalf("the invite token reached the logs:\n%s", out)
+	}
+
+	// Every line must be joinable to the request that produced it.
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("log line is not JSON: %q", line)
+		}
+		cid, ok := entry["correlation_id"].(string)
+		if !ok || cid == "" {
+			t.Fatalf("log line carries no correlation_id: %q", line)
+		}
+	}
+}
+
+// The accept route's own rejection lines are the ones most likely to grow an
+// address: they are about WHO the invite was for. Neither address may appear,
+// and the line must still be joinable to the request.
+func TestAcceptRoute_mismatchLogDisclosesNoAddressButKeepsTheCorrelationID(t *testing.T) {
+	db := newInviteTestDB(t)
+	inv := seedInvite("invited@example.com", time.Now().Add(time.Hour), nil)
+	if _, err := NewAdministrator(db).Insert(context.Background(), inv, "trace-test"); err != nil {
+		t.Fatalf("seed invite: %v", err)
+	}
+
+	buf := &bytes.Buffer{}
+	log := logrus.New()
+	log.SetOutput(buf)
+	log.SetFormatter(&logrus.JSONFormatter{})
+
+	r := chi.NewRouter()
+	r.Use(telemetry.CorrelationID)
+	InitializeRoutes(log, db, stubOwnerChecker{}, nil, nil, nil, Limits{CreatePerWindow: 100, CreateWindow: time.Hour})(r)
+
+	rec := postAccept(r, inv.Token(), "attacker@example.com")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+
+	out := buf.String()
+	if !strings.Contains(out, "email mismatch") {
+		t.Fatalf("the mismatch was not logged at all; operators need it greppable:\n%s", out)
+	}
+	for _, forbidden := range []string{inv.Token(), "invited@example.com", "attacker@example.com"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("log discloses %q:\n%s", forbidden, out)
+		}
+	}
+	var entry map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &entry); err != nil {
+		t.Fatalf("log line is not JSON: %v", err)
+	}
+	if cid, _ := entry["correlation_id"].(string); cid == "" {
+		t.Fatalf("mismatch log carries no correlation_id: %s", out)
+	}
+	if entry["invite_id"] != inv.ID() {
+		t.Fatalf("mismatch log invite_id = %v, want %q", entry["invite_id"], inv.ID())
 	}
 }

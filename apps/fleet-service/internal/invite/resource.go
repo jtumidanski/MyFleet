@@ -45,7 +45,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Post("/fleets/{id}/invites", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs CreateRequest) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
-			traceID := telemetry.CorrelationIDFromContext(req.Context())
+			// One id for both jobs: it is the log field an operator greps on and
+			// the trace id stamped on the outbox envelope, so a mail that never
+			// arrived can be walked back to the request that created it.
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
 			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
 				server.WriteError(w, err)
@@ -62,16 +65,16 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				// else is a DB fault an operator needs to see.
 				if !errors.Is(err, server.ErrForbidden) {
 					log.WithError(err).WithFields(logrus.Fields{
-						"fleet_id": fleetID,
-						"user_id":  identity.UserID,
-						"trace_id": traceID,
+						"fleet_id":       fleetID,
+						"user_id":        identity.UserID,
+						"correlation_id": correlationID,
 					}).Error("check invite owner")
 				}
 				server.WriteError(w, err)
 				return
 			}
 
-			created, err := proc.Create(req.Context(), fleetID, attrs.Email, attrs.Role, identity.UserID, traceID)
+			created, err := proc.Create(req.Context(), fleetID, attrs.Email, attrs.Role, identity.UserID, correlationID)
 			if err != nil {
 				// ErrValidation (bad role or address) and ErrTooManyRequests
 				// (the per-fleet window, FR-RATE-1) are routine client
@@ -79,8 +82,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				// source or the insert failing — an operator's problem.
 				if !errors.Is(err, server.ErrValidation) && !errors.Is(err, server.ErrTooManyRequests) {
 					log.WithError(err).WithFields(logrus.Fields{
-						"fleet_id": fleetID,
-						"trace_id": traceID,
+						"fleet_id":       fleetID,
+						"correlation_id": correlationID,
 					}).Error("create invite")
 				}
 				server.WriteError(w, err)
@@ -93,6 +96,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Get("/fleets/{id}/invites", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
 			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
 				server.WriteError(w, err)
@@ -100,7 +104,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 			ms, err := proc.ListByFleet(req.Context(), fleetID)
 			if err != nil {
-				log.WithError(err).WithField("fleet_id", fleetID).Error("list invites")
+				log.WithError(err).WithFields(logrus.Fields{
+					"fleet_id":       fleetID,
+					"correlation_id": correlationID,
+				}).Error("list invites")
 				server.WriteError(w, err)
 				return
 			}
@@ -125,11 +132,11 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		// /invites/{id} exists in the first place.
 		r.Get("/invites/pending", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
 			ms, err := proc.ListRedeemableForEmail(req.Context(), identity.Email)
 			if err != nil {
-				log.WithError(err).WithField("correlation_id",
-					telemetry.CorrelationIDFromContext(req.Context())).
+				log.WithError(err).WithField("correlation_id", correlationID).
 					Error("list pending invites")
 				server.WriteError(w, err)
 				return
@@ -144,8 +151,11 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				// the sake of one stale row.
 				f, ferr := fleets.GetByID(m.FleetID())
 				if ferr != nil {
-					log.WithError(ferr).WithField("fleet_id", m.FleetID()).
-						Warn("pending invite names a fleet that cannot be read; omitting it")
+					log.WithError(ferr).WithFields(logrus.Fields{
+						"invite_id":      m.ID(),
+						"fleet_id":       m.FleetID(),
+						"correlation_id": correlationID,
+					}).Warn("pending invite names a fleet that cannot be read; omitting it")
 					continue
 				}
 				out = append(out, TransformPending(m, f.Name()))
@@ -157,6 +167,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Delete("/invites/{id}", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
 			inv, err := proc.GetByID(req.Context(), id)
 			if err != nil {
@@ -164,7 +175,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 					server.WriteError(w, server.ErrNotFound)
 					return
 				}
-				log.WithError(err).WithField("invite_id", id).Error("get invite")
+				log.WithError(err).WithFields(logrus.Fields{
+					"invite_id":      id,
+					"correlation_id": correlationID,
+				}).Error("get invite")
 				server.WriteError(w, err)
 				return
 			}
@@ -182,9 +196,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			if err := ownerCheck.RequireOwnerInFleet(inv.FleetID(), identity.UserID); err != nil {
 				if !errors.Is(err, server.ErrForbidden) {
 					log.WithError(err).WithFields(logrus.Fields{
-						"invite_id": id,
-						"fleet_id":  inv.FleetID(),
-						"user_id":   identity.UserID,
+						"invite_id":      id,
+						"fleet_id":       inv.FleetID(),
+						"user_id":        identity.UserID,
+						"correlation_id": correlationID,
 					}).Error("check invite owner")
 				}
 				server.WriteError(w, err)
@@ -193,8 +208,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 
 			if err := proc.Delete(req.Context(), id); err != nil {
 				log.WithError(err).WithFields(logrus.Fields{
-					"invite_id": id,
-					"fleet_id":  inv.FleetID(),
+					"invite_id":      id,
+					"fleet_id":       inv.FleetID(),
+					"correlation_id": correlationID,
 				}).Error("delete invite")
 				server.WriteError(w, err)
 				return
@@ -210,14 +226,17 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "fleetId")
 			inviteID := chi.URLParam(req, "inviteId")
-			traceID := telemetry.CorrelationIDFromContext(req.Context())
+			// One id for both jobs: it is the log field an operator greps on and
+			// the trace id stamped on the outbox envelope, so a mail that never
+			// arrived can be walked back to the request that created it.
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
 			inv, err := proc.GetByID(req.Context(), inviteID)
 			if err != nil {
 				if !errors.Is(err, server.ErrNotFound) {
 					log.WithError(err).WithFields(logrus.Fields{
-						"invite_id": inviteID,
-						"trace_id":  traceID,
+						"invite_id":      inviteID,
+						"correlation_id": correlationID,
 					}).Error("get invite")
 				}
 				server.WriteError(w, err)
@@ -247,17 +266,17 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			if err := ownerCheck.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
 				if !errors.Is(err, server.ErrForbidden) {
 					log.WithError(err).WithFields(logrus.Fields{
-						"invite_id": inviteID,
-						"fleet_id":  fleetID,
-						"user_id":   identity.UserID,
-						"trace_id":  traceID,
+						"invite_id":      inviteID,
+						"fleet_id":       fleetID,
+						"user_id":        identity.UserID,
+						"correlation_id": correlationID,
 					}).Error("check invite owner")
 				}
 				server.WriteError(w, err)
 				return
 			}
 
-			updated, err := proc.Resend(req.Context(), inv, traceID)
+			updated, err := proc.Resend(req.Context(), inv, correlationID)
 			if err != nil {
 				// ErrConflict is either the already-accepted invariant
 				// (FR-RSND-3, checked before the cooldown so an accepted invite
@@ -267,9 +286,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				// the entropy source or the UPDATE failing.
 				if !errors.Is(err, server.ErrConflict) && !errors.Is(err, server.ErrTooManyRequests) {
 					log.WithError(err).WithFields(logrus.Fields{
-						"invite_id": inviteID,
-						"fleet_id":  fleetID,
-						"trace_id":  traceID,
+						"invite_id":      inviteID,
+						"fleet_id":       fleetID,
+						"correlation_id": correlationID,
 					}).Error("resend invite")
 				}
 				server.WriteError(w, err)
@@ -282,7 +301,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Post("/invites/{token}/accept", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			token := chi.URLParam(req, "token")
-			traceID := telemetry.CorrelationIDFromContext(req.Context())
+			// One id for both jobs: it is the log field an operator greps on and
+			// the trace id stamped on the outbox envelope, so a mail that never
+			// arrived can be walked back to the request that created it.
+			correlationID := telemetry.CorrelationIDFromContext(req.Context())
 
 			inv, err := proc.GetByToken(req.Context(), token)
 			if err != nil {
@@ -294,12 +316,12 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				// (PRD §8 Security) — this branch logs no identifying field at
 				// all, only the correlation id, since the lookup by definition
 				// failed to resolve one.
-				log.WithError(err).WithField("trace_id", traceID).Error("get invite by token")
+				log.WithError(err).WithField("correlation_id", correlationID).Error("get invite by token")
 				server.WriteError(w, err)
 				return
 			}
 
-			updated, err := proc.Accept(req.Context(), inv, identity.UserID, identity.Email, traceID)
+			updated, err := proc.Accept(req.Context(), inv, identity.UserID, identity.Email, correlationID)
 			if err != nil {
 				// Already-accepted and expired are ordinary user outcomes the
 				// response body explains; logging them adds noise. The next two
@@ -313,9 +335,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				// for an operator who already has database access, so the line
 				// itself discloses nothing.
 				fields := logrus.Fields{
-					"invite_id": inv.ID(),
-					"fleet_id":  inv.FleetID(),
-					"trace_id":  traceID,
+					"invite_id":      inv.ID(),
+					"fleet_id":       inv.FleetID(),
+					"correlation_id": correlationID,
 				}
 				switch {
 				case errors.Is(err, ErrEmailMismatch):
