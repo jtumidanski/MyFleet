@@ -45,6 +45,25 @@ else
   note "no placeholders"
 fi
 
+echo "==> main overlay must carry no local-only mail configuration"
+# SMTP_TLS_MODE=none permits an unauthenticated, unencrypted session. It is
+# legal ONLY for a plaintext local relay. The override lives in overlays/local,
+# so its appearance in main means the base was edited by mistake. kustomize
+# strips quotes from string values that don't need them (LOG_LEVEL: info,
+# KAFKA_BROKERS: redpanda:9092 render unquoted), so match the value with or
+# without surrounding quotes rather than assuming it stays quoted.
+if grep -Eq 'SMTP_TLS_MODE:[[:space:]]*"?none"?' /tmp/myfleet-main.yaml; then
+  bad "main renders SMTP_TLS_MODE=none (plaintext relay is local-only)"
+else
+  note "no plaintext SMTP mode"
+fi
+# Mailpit lives in infra-local, which overlays/main must never include.
+if grep -qi 'mailpit' /tmp/myfleet-main.yaml; then
+  bad "main renders mailpit (local-only dev mail sink)"
+else
+  note "no mailpit"
+fi
+
 echo "==> IngressRoute route-set parity (:80 vs :443)"
 python3 - <<'PY' || fail=1
 import json, sys

@@ -8,3 +8,24 @@ data:
   JWKS_URL: "http://auth-service:8080/.well-known/jwks.json"
   KAFKA_BROKERS: "redpanda:9092"
   FLEET_INTERNAL_URL: "http://fleet-service:8080"
+
+  # Invite email delivery (task-009).
+  #
+  # Ships DISABLED. Flip to "true" only after the out-of-repo prerequisite is
+  # done: a verified sending domain with SPF, DKIM and DMARC published for
+  # myfleet.tumidanski.com, and relay credentials applied out of band into
+  # notification-service-secret. Until then this is a deliberate no-op —
+  # invites are created and consumed, and skipped_disabled increments.
+  SMTP_ENABLED: "false"
+  # Provider-generic on purpose: moving from Resend to SES is a secret edit and
+  # a pod restart, not a code change.
+  SMTP_HOST: "smtp.resend.com"
+  SMTP_PORT: "587"
+  # One of starttls | tls | none. "none" is LOCAL-ONLY (Mailpit) and
+  # tools/check-manifests.sh fails the build if it ever renders into main.
+  SMTP_TLS_MODE: "starttls"
+  SMTP_FROM_ADDRESS: "invites@myfleet.tumidanski.com"
+  SMTP_FROM_NAME: "MyFleet"
+  # The accept link's origin. Configuration, never derived from an inbound
+  # request header (FR-TPL-2).
+  PUBLIC_WEB_URL: "https://myfleet.tumidanski.com"

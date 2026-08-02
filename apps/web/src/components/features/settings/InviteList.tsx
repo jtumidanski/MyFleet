@@ -1,18 +1,21 @@
 /**
- * InviteList — displays pending fleet invites with revoke button (owner-only).
+ * InviteList — pending fleet invites with the accept link, resend and revoke
+ * (owner-only).
  *
- * Each pending invite shows its accept link. Nothing delivers invites yet
- * (`task-009-smtp-invite-delivery` is specced but unimplemented), so this link
- * is the only way an invite reaches the person it names — without it, creating
- * an invite produced a row nobody could act on.
+ * Invites are delivered by email as of task-009, but the visible link and its
+ * copy button stay: they are the documented recovery path when a message is
+ * spam-filtered, or when a relay outage outlives the sender's bounded retry
+ * budget and the email is dropped (design §5.2). The token is already in the
+ * fleet-scoped list response, so this needs no API call.
  */
 import { useState } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { toast } from 'sonner';
 import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../ui/button';
-import { useInvites, useRevokeInvite } from '../../../lib/hooks/api/invites';
+import { useInvites, useResendInvite, useRevokeInvite } from '../../../lib/hooks/api/invites';
 import { inviteAcceptUrl } from '../../../lib/invites/acceptUrl';
+import { copyToClipboard } from '../../../lib/utils/clipboard';
 
 interface InviteListProps {
   fleetId: string;
@@ -22,20 +25,22 @@ interface InviteListProps {
 /**
  * The accept link plus a copy button.
  *
- * `navigator.clipboard` is undefined on insecure origins and can reject when
- * the document is not focused, so a failure keeps the URL on screen and says to
- * copy it by hand rather than leaving the owner believing they hold a link.
+ * Copying goes through `copyToClipboard`, not `navigator.clipboard` directly:
+ * that API is undefined on insecure origins, and local dev runs over plain HTTP
+ * on `myfleet.home` — the exact environment where this button is tried first.
+ * A failure keeps the URL on screen and says to copy it by hand rather than
+ * leaving the owner believing they hold a link.
  */
 function InviteLink({ token }: { token: string }) {
   const [copied, setCopied] = useState(false);
   const url = inviteAcceptUrl(token);
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url);
+    const ok = await copyToClipboard(url);
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
+    } else {
       toast.error('Could not copy the link — select it and copy manually.');
     }
   };
@@ -59,6 +64,7 @@ function InviteLink({ token }: { token: string }) {
 export function InviteList({ fleetId, isOwner }: InviteListProps) {
   const { data: invites, isLoading } = useInvites(fleetId);
   const revokeInvite = useRevokeInvite();
+  const resendInvite = useResendInvite(fleetId);
 
   if (isLoading) {
     return (
@@ -69,7 +75,8 @@ export function InviteList({ fleetId, isOwner }: InviteListProps) {
     );
   }
 
-  // Show only pending invites (not yet accepted)
+  // Show only pending invites (not yet accepted). This is also what satisfies
+  // FR-UI-3: an accepted invite never renders, so no control can appear on one.
   const pending = (invites ?? []).filter((inv) => !inv.attributes.acceptedAt);
 
   if (pending.length === 0) {
@@ -90,14 +97,24 @@ export function InviteList({ fleetId, isOwner }: InviteListProps) {
               </div>
             </div>
             {isOwner && (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={revokeInvite.isPending}
-                onClick={() => revokeInvite.mutate(inv.id)}
-              >
-                Revoke
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={resendInvite.isPending}
+                  onClick={() => resendInvite.mutate(inv.id)}
+                >
+                  Resend
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={revokeInvite.isPending}
+                  onClick={() => revokeInvite.mutate(inv.id)}
+                >
+                  Revoke
+                </Button>
+              </div>
             )}
           </div>
           <InviteLink token={inv.attributes.token} />

@@ -12,6 +12,7 @@ type Model struct {
 	expiresAt       time.Time
 	acceptedAt      *time.Time
 	invitedByUserID string
+	updatedAt       time.Time
 }
 
 func (m Model) ID() string              { return m.id }
@@ -22,3 +23,4 @@ func (m Model) Token() string           { return m.token }
 func (m Model) ExpiresAt() time.Time    { return m.expiresAt }
 func (m Model) AcceptedAt() *time.Time  { return m.acceptedAt }
 func (m Model) InvitedByUserID() string { return m.invitedByUserID }
+func (m Model) UpdatedAt() time.Time    { return m.updatedAt }

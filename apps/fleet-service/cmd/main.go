@@ -96,6 +96,10 @@ func main() {
 		return fleetevents.EmitMemberInvited(tx, fleetID, actorID, traceID,
 			dtoevents.MemberInvitedData{InviteID: inviteID, Email: email, Role: role})
 	}
+	emitInviteCreated := func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
+		return fleetevents.EmitInviteCreated(tx, fleetID, actorID, traceID,
+			dtoevents.InviteCreatedData{InviteID: inviteID, Email: email, Role: role})
+	}
 	emitMaintenanceCompleted := func(tx *gorm.DB, fleetID, actorID, traceID, scheduleID, vehicleID, recordID, categoryID string) error {
 		return fleetevents.EmitMaintenanceCompleted(tx, fleetID, actorID, traceID,
 			dtoevents.MaintenanceCompletedData{ScheduleID: scheduleID, VehicleID: vehicleID, MaintenanceRecord: recordID, CategoryID: categoryID})
@@ -173,18 +177,30 @@ func main() {
 	// internal-deny rule in the main overlay's ingressroute.
 	mediaClient := mediaclient.NewClient(config.Get("MEDIA_INTERNAL_URL", "http://media-service:8080"))
 
+	// Abuse control (FR-RATE-1…4). Twenty invites per fleet per day is roughly
+	// 3x the largest plausible household fleet, so it never obstructs real use
+	// while capping a compromised account's burn on the domain's sending
+	// reputation. Five minutes is longer than any mail delay a user would wait
+	// through before hitting resend again.
+	inviteLimits := invite.Limits{
+		CreatePerWindow: config.GetInt("INVITE_RATE_LIMIT_PER_DAY", 20),
+		CreateWindow:    24 * time.Hour,
+		ResendCooldown:  time.Duration(config.GetInt("INVITE_RESEND_COOLDOWN_SECONDS", 300)) * time.Second,
+	}
+
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
 		// Internal routes: no JWT, network-restricted (consumed by other services).
 		AddRouteInitializer(membership.InitializeInternalRoutes(log, db)).
 		AddRouteInitializer(maintenanceschedule.InitializeInternalRoutes(log, db)).
+		AddRouteInitializer(invite.InitializeInternalRoutes(log, db, fleet.NewProvider(db))).
 		// Protected routes: JWT required.
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
-				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited)(pr)
+				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited, emitInviteCreated, inviteLimits)(pr)
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)

@@ -12,6 +12,7 @@ var (
 	ErrRequestEntityTooLarge = errors.New("request entity too large") // 413
 	ErrUnsupportedMediaType  = errors.New("unsupported media type")   // 415
 	ErrValidation            = errors.New("validation")               // 422
+	ErrTooManyRequests       = errors.New("too many requests")        // 429
 )
 
 func StatusFor(err error) int {
@@ -34,6 +35,8 @@ func StatusFor(err error) int {
 		return 415
 	case errors.Is(err, ErrValidation):
 		return 422
+	case errors.Is(err, ErrTooManyRequests):
+		return 429
 	default:
 		return 500
 	}
