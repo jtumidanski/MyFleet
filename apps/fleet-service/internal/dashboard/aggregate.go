@@ -141,9 +141,11 @@ func (p *dbAggregateProvider) MileageTrends(vehicleID string, from, to time.Time
 		Mileage    int
 		Source     string
 	}
+	// deleted_at IS NULL is hand-written here because this query bypasses the
+	// mileage provider entirely (design §9).
 	q := p.db.Table("fleet.mileage_records").
 		Select("recorded_at, mileage, source").
-		Where("vehicle_id = ?", vehicleID)
+		Where("vehicle_id = ? AND deleted_at IS NULL", vehicleID)
 	if !from.IsZero() {
 		q = q.Where("recorded_at >= ?", from)
 	}

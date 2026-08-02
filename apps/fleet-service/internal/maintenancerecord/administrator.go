@@ -64,7 +64,7 @@ func (a *dbAdministrator) Update(m Model) (Model, error) {
 		return Model{}, err
 	}
 	var docs []DocumentEntity
-	if err := a.db.Where("maintenance_record_id = ?", e.ID).Find(&docs).Error; err != nil {
+	if err := a.db.Where("maintenance_record_id = ? AND deleted_at IS NULL", e.ID).Find(&docs).Error; err != nil {
 		return Model{}, err
 	}
 	return Make(e, docs), nil
