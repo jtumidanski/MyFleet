@@ -35,11 +35,12 @@ export function VehicleMileageSection({
   canWrite,
 }: VehicleMileageSectionProps) {
   const [showForm, setShowForm] = useState(false);
-  const { data: records, isLoading } = useMileageRecords({ vehicleId });
+  const { data, isLoading } = useMileageRecords({ vehicleId });
+  const records = data?.rows ?? [];
   const createRecord = useCreateMileageRecord(vehicleId);
 
   // Auto-fill: prefer latest logged record; fallback to vehicle.currentMileage.
-  const latestLogged = records ? getLatestMileage(records) : undefined;
+  const latestLogged = getLatestMileage(records);
   const autoFillMileage = latestLogged ?? currentMileage;
 
   const handleSubmit = async (values: MileageFormInput) => {
@@ -82,7 +83,7 @@ export function VehicleMileageSection({
             <Skeleton className="h-12 w-full" />
             <Skeleton className="h-12 w-full" />
           </div>
-        ) : !records || records.length === 0 ? (
+        ) : records.length === 0 ? (
           <p className="text-sm text-muted-foreground">No mileage records yet.</p>
         ) : (
           <>

@@ -1,8 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { maintenanceRecordService } from '../../../services/api/MaintenanceRecordService';
 import { maintenanceScheduleService } from '../../../services/api/MaintenanceScheduleService';
 import { maintenanceCategoryService } from '../../../services/api/MaintenanceCategoryService';
 import { vehicleKeys } from './vehicles';
+import { RECORD_PAGE_SIZE } from './pageSize';
 import type { CreateMaintenanceRecordAttributes } from '../../../types/models/maintenanceRecord';
 import type {
   CreateMaintenanceScheduleAttributes,
@@ -109,18 +110,35 @@ export function useCreateMaintenanceCategory() {
 // Maintenance record queries
 // ---------------------------------------------------------------------------
 
-/** GET /api/fleet/vehicles/{vehicleId}/maintenance-records[?kind=…] */
+/**
+ * GET /api/fleet/vehicles/{vehicleId}/maintenance-records[?kind=…]
+ *
+ * Infinite rather than single-page: the unified records feed merges this with
+ * two other independently-paginated sources, and a merge over sources that
+ * REPLACE their rows on page advance would drop the newest rows from view.
+ * Pages accumulate; `rows` is every page fetched so far.
+ */
 export function useMaintenanceRecords(
   vehicleId: string | null | undefined,
   kind?: MaintenanceCategoryKind,
 ) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: maintenanceRecordKeys.list({ vehicleId: vehicleId ?? '', kind }),
-    queryFn: () => maintenanceRecordService.listByVehicle(vehicleId as string, kind),
+    queryFn: ({ pageParam }) =>
+      maintenanceRecordService.listByVehicle(vehicleId as string, kind, {
+        page: pageParam,
+        pageSize: RECORD_PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) =>
+      allPages.length < (lastPage.meta?.totalPages ?? 1) ? allPages.length + 1 : undefined,
     enabled: !!vehicleId,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    select: (result) => result.data,
+    select: (data) => ({
+      rows: data.pages.flatMap((p) => p.data),
+      total: data.pages[0]?.meta?.total ?? 0,
+    }),
   });
 }
 

@@ -29,12 +29,14 @@ export function VehicleFuelSection({
 }: VehicleFuelSectionProps) {
   const [showForm, setShowForm] = useState(false);
 
-  const { data: logs, isLoading: logsLoading } = useFuelLogs(vehicleId);
-  const { data: mileageRecords } = useMileageRecords({ vehicleId });
+  const { data: logsData, isLoading: logsLoading } = useFuelLogs(vehicleId);
+  const logs = logsData?.rows;
+  const { data: mileageData } = useMileageRecords({ vehicleId });
+  const mileageRecords = mileageData?.rows ?? [];
   const createLog = useCreateFuelLog(vehicleId);
 
   // Auto-fill mileage: prefer latest logged mileage record; fallback to vehicle.currentMileage.
-  const latestLogged = mileageRecords ? getLatestMileage(mileageRecords) : undefined;
+  const latestLogged = getLatestMileage(mileageRecords);
   const autoFillMileage = latestLogged ?? currentMileage;
 
   const handleCreate = async (values: FuelFormInput) => {

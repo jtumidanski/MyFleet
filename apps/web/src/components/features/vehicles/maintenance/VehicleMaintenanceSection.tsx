@@ -52,12 +52,14 @@ export function VehicleMaintenanceSection({
   const [completingId, setCompletingId] = useState<string | null>(null);
 
   const { data: categories, isLoading: categoriesLoading } = useMaintenanceCategories();
-  const { data: records, isLoading: recordsLoading } = useMaintenanceRecords(
+  const { data: recordsData, isLoading: recordsLoading } = useMaintenanceRecords(
     vehicleId,
     historyKind,
   );
+  const records = recordsData?.rows;
   const { data: schedules, isLoading: schedulesLoading } = useMaintenanceSchedules(vehicleId);
-  const { data: mileageRecords } = useMileageRecords({ vehicleId });
+  const { data: mileageData } = useMileageRecords({ vehicleId });
+  const mileageRecords = mileageData?.rows ?? [];
 
   // Resolve categoryId → category once. The full list is already cached for ten
   // minutes, so every badge, group header and filter label reads from this map
@@ -79,7 +81,7 @@ export function VehicleMaintenanceSection({
   const completeSchedule = useCompleteMaintenanceSchedule(vehicleId);
 
   // Auto-fill mileage: prefer latest logged mileage record; fallback to vehicle.currentMileage.
-  const latestLogged = mileageRecords ? getLatestMileage(mileageRecords) : undefined;
+  const latestLogged = getLatestMileage(mileageRecords);
   const autoFillMileage = latestLogged ?? currentMileage;
 
   const handleCreateRecord = async (

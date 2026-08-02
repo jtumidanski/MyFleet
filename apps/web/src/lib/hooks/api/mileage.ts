@@ -1,5 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { mileageService } from '../../../services/api/MileageService';
+import { RECORD_PAGE_SIZE } from './pageSize';
 import type { CreateMileageAttributes, MileageRecord } from '../../../types/models/mileage';
 
 // Hierarchical query-key factory mirroring vehicleKeys.
@@ -43,16 +44,33 @@ export interface UseMileageParams {
 /**
  * GET /api/fleet/vehicles/{vehicleId}/mileage — list mileage records.
  * Records come back chronological from the backend. Supports optional date filters.
+ *
+ * Infinite rather than single-page: the unified records feed merges this with
+ * two other independently-paginated sources, and a merge over sources that
+ * REPLACE their rows on page advance would drop the newest rows from view.
+ * Pages accumulate; `rows` is every page fetched so far.
  */
 export function useMileageRecords(params: UseMileageParams | null | undefined) {
   const { vehicleId = '', from, to } = params ?? {};
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: mileageKeys.list({ vehicleId, from, to }),
-    queryFn: () => mileageService.listByVehicle(vehicleId, { from, to }),
+    queryFn: ({ pageParam }) =>
+      mileageService.listByVehicle(vehicleId, {
+        from,
+        to,
+        page: pageParam,
+        pageSize: RECORD_PAGE_SIZE,
+      }),
+    initialPageParam: 1,
+    getNextPageParam: (lastPage, allPages) =>
+      allPages.length < (lastPage.meta?.totalPages ?? 1) ? allPages.length + 1 : undefined,
     enabled: !!vehicleId,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
-    select: (result) => result.data,
+    select: (data) => ({
+      rows: data.pages.flatMap((p) => p.data),
+      total: data.pages[0]?.meta?.total ?? 0,
+    }),
   });
 }
 
