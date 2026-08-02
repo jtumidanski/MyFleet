@@ -94,14 +94,18 @@ func TestSelectNextDue(t *testing.T) {
 			wantMiles: intPtr(500),
 		},
 		{
+			// Equal urgency and equal axis, so only the schedule-ID tiebreak can
+			// decide. The magnitudes differ ONLY so the winner is observable:
+			// NextDue carries no schedule ID, so identical breaches would make
+			// this case pass even with the tiebreak removed entirely.
 			name: "lowest schedule id breaks a tie on equal urgency and axis",
 			dues: []ScheduleDue{
 				{ScheduleID: "s-b", State: "overdue", Breaches: []Breach{mileageBreach(700, 2.4)}},
-				{ScheduleID: "s-a", State: "overdue", Breaches: []Breach{mileageBreach(700, 2.4)}},
+				{ScheduleID: "s-a", State: "overdue", Breaches: []Breach{mileageBreach(650, 2.4)}},
 			},
 			wantState: "overdue",
 			wantAxis:  "mileage",
-			wantMiles: intPtr(700),
+			wantMiles: intPtr(650),
 		},
 		{
 			name: "most imminent upcoming wins",
