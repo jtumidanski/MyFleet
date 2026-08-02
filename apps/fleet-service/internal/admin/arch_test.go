@@ -115,14 +115,23 @@ func TestManifestKeysAreUnique(t *testing.T) {
 //     the console for every fleet the operator is not a member of and invite the
 //     first fix above.
 //
-// Two allowlists, both resting on the same rule: naming a guard is not calling
-// it. authz/scope.go DEFINES both guards; this file DEFINES the separation rule,
-// so it necessarily spells out the very identifiers it forbids — in the doc
-// comment above, in the search literals below, and in the failure messages.
-// Without the second allowlist the test fails on itself.
+// "The admin tier" is internal/admin AND internal/adminclient. The latter is not
+// a second home for the privilege — it holds no handlers at all, only the HTTP
+// clients for the other services' internal admin routes, including the
+// IsPlatformAdmin re-verification the purge path calls before doing anything
+// irreversible (FR-ADMIN-AUTH-7). It exists solely to serve the console, so
+// naming the privilege there is the package doing its job. Anywhere else, it is
+// the leak this test exists to catch.
+//
+// Two allowlists on top of that, both resting on the same rule: naming a guard
+// is not calling it. authz/scope.go DEFINES both guards; this file DEFINES the
+// separation rule, so it necessarily spells out the very identifiers it forbids
+// — in the doc comment above, in the search literals below, and in the failure
+// messages. Without the self-exclusion the test fails on itself.
 func TestAdminTreeIsSeparate(t *testing.T) {
 	const internalRoot = ".."
 	const selfPath = "../admin/arch_test.go"
+	adminTier := []string{"../admin/", "../adminclient/"}
 	allowedPlatformAdminRefs := map[string]bool{
 		"../authz/scope.go":      true,
 		"../authz/scope_test.go": true,
@@ -139,7 +148,13 @@ func TestAdminTreeIsSeparate(t *testing.T) {
 		if slash == selfPath {
 			return nil
 		}
-		inAdmin := strings.HasPrefix(slash, "../admin/")
+		inAdmin := false
+		for _, prefix := range adminTier {
+			if strings.HasPrefix(slash, prefix) {
+				inAdmin = true
+				break
+			}
+		}
 		src, rerr := os.ReadFile(path)
 		if rerr != nil {
 			return rerr
@@ -149,7 +164,7 @@ func TestAdminTreeIsSeparate(t *testing.T) {
 		if !inAdmin && !allowedPlatformAdminRefs[slash] {
 			for _, ref := range []string{"PlatformAdmin", "RequirePlatformAdmin"} {
 				if strings.Contains(text, ref) {
-					t.Errorf("%s references %s outside internal/admin — the platform tier must not "+
+					t.Errorf("%s references %s outside the admin tier (internal/admin, internal/adminclient) — the platform tier must not "+
 						"leak into an ordinary handler; that is how RequireSameFleet gets relaxed", path, ref)
 				}
 			}
@@ -159,7 +174,7 @@ func TestAdminTreeIsSeparate(t *testing.T) {
 		// describe the very thing being guarded against), and manifest.go's
 		// package doc does the same. Neither is a use.
 		if inAdmin && strings.Contains(text, "RequireSameFleet(") {
-			t.Errorf("%s calls RequireSameFleet inside internal/admin — the admin tree is "+
+			t.Errorf("%s calls RequireSameFleet inside the admin tier — the admin tree is "+
 				"deliberately fleet-agnostic; adding the guard here breaks every fleet the "+
 				"operator is not a member of", path)
 		}
