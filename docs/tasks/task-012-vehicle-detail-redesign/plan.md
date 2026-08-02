@@ -1670,12 +1670,27 @@ Adapts the three API shapes into `VehicleRecordRow`s and drives page loading.
 export function useVehicleRecords(vehicleId: string, categories: MaintenanceCategory[]): {
   rows: VehicleRecordRow[];
   withheldCount: number;
-  total: number;          // sum of per-source totals
-  isLoading: boolean;
+  total: number;              // sum of per-source totals
+  isLoading: boolean;         // true until the categories query settles too
+  isFetchingNextPage: boolean;
   hasMore: boolean;
-  loadMore: () => void;
+  loadMore: () => void;       // useCallback — Task 17 passes it as a prop
 }
 ```
+
+Two constraints the reference code above does not express:
+
+- **Categories are part of this hook's loading state.** A maintenance record stores
+  no kind; the category supplies it. `useMaintenanceCategories` is a separate query,
+  so on a cold mount the record queries can resolve first and every modification row
+  renders as `maintenance`, titled with a raw category UUID, invisible to the "Mods"
+  chip. Worse, if that query *fails*, `categories` stays `[]` and the misfiling is
+  permanent and silent. Fold "categories not yet settled" into `isLoading` and expose
+  the error rather than treating an empty list as authoritative.
+- **`isFetchingNextPage` is required.** `fetchNextPage` runs with
+  `cancelRefetch: true`, so a second Load More click cancels the in-flight request and
+  reissues it. Without this flag the button cannot be disabled, and sustained clicking
+  starves the fetch so rows never arrive.
 
 - [ ] **Step 1: Implement the hook**
 
