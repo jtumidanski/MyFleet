@@ -45,15 +45,16 @@ describe('VehiclePhotoThumbnail', () => {
     expect(img).toHaveAttribute('src', expect.stringContaining('blob:'));
   });
 
-  it('requests the thumbnail variant, not the original', async () => {
+  it('requests the card variant, not the original', async () => {
     // The whole point of the backend half of this task: a card must cost
-    // kilobytes, not the full-size upload.
+    // kilobytes, not the full-size upload — and at a resolution that matches the
+    // 16:9 hero it is rendered into, which `thumbnail` (320px) did not.
     vi.mocked(mediaService.getContentBlob).mockResolvedValue(new Blob(['x']));
 
     renderWithProviders(<VehiclePhotoThumbnail mediaId="m1" vehicleLabel="2019 Honda Civic" />);
 
     await waitFor(() => {
-      expect(mediaService.getContentBlob).toHaveBeenCalledWith('m1', 'thumbnail');
+      expect(mediaService.getContentBlob).toHaveBeenCalledWith('m1', 'card');
     });
   });
 

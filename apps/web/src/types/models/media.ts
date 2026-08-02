@@ -12,10 +12,14 @@ export type MediaStatus = 'uploaded' | 'processing' | 'ready' | 'failed';
 /**
  * Renditions served by GET /api/media/{id}/content?variant=…
  * (apps/media-service/internal/mediaobject/contentvariant.go). Omitting the
- * parameter means 'original'; the list view asks for 'thumbnail' so a card
- * costs kilobytes rather than the full-size upload.
+ * parameter means 'original'.
+ *
+ * Sizes are 320 (thumbnail), 768 (card) and 1280 (display) on the longest edge.
+ * The vehicles list asks for 'card': its hero is a full-width 16:9 box, which a
+ * 320px thumbnail visibly softens, while the full-size upload would cost
+ * megabytes per card.
  */
-export type MediaVariant = 'original' | 'thumbnail' | 'display';
+export type MediaVariant = 'original' | 'thumbnail' | 'display' | 'card';
 
 /**
  * Mirrors apps/media-service/internal/mediaobject/rest.go Attributes.

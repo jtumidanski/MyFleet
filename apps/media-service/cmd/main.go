@@ -25,6 +25,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processedevents"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processing"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/storage"
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailures"
 )
 
 func main() {
@@ -37,6 +38,7 @@ func main() {
 		mediaobject.Migration,
 		mediavariant.Migration,
 		processedevents.Migration,
+		variantfailures.Migration,
 		events.MigrateOutbox,
 	))
 	if err != nil {
@@ -91,6 +93,20 @@ func main() {
 	// ceiling, so the edge is not the first thing a user discovers.
 	maxUploadBytes := int64(config.GetInt("MEDIA_MAX_UPLOAD_BYTES", 26214400))
 
+	// Lazy card-variant generation (task-013). 0 disables it entirely and
+	// negatives clamp to 0 inside NewCardGenerator — this feature schedules work
+	// in response to request traffic, so an operator who sees it misbehave needs
+	// an off switch that is not a rollback. With it off, a missing card is still
+	// served as a thumbnail; that is simply the pre-task behaviour.
+	cardGen := processing.NewCardGenerator(
+		ctx,
+		log,
+		store,
+		mediavariant.NewAdministrator(db),
+		variantfailures.New(log, db),
+		config.GetInt("MEDIA_LAZY_VARIANT_CONCURRENCY", 4),
+	)
+
 	// The allowlist is a security control (PRD FR-MEDIA-1). Fatal on a parse
 	// error: a malformed list must not boot into "allow nothing" or "allow
 	// everything".
@@ -135,7 +151,11 @@ func main() {
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
-				mediaobject.InitializeRoutes(log, db, store, variantLookup{p: mediavariant.NewProvider(db)}, maxUploadBytes, allow)(pr)
+				mediaobject.InitializeRoutes(log, db, store,
+					variantLookup{p: mediavariant.NewProvider(db)},
+					maxUploadBytes, allow,
+					mediaobject.WithCardGenerator(cardGenerator{g: cardGen}),
+				)(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {
@@ -186,6 +206,22 @@ func (v variantLookup) Lookup(ctx context.Context, mediaObjectID, variant string
 		return mediaobject.VariantRef{}, false, err
 	}
 	return mediaobject.VariantRef{ObjectKey: m.ObjectKey(), ContentType: m.ContentType()}, true, nil
+}
+
+// cardGenerator adapts processing.CardGenerator to mediaobject.CardGenerator.
+//
+// It lives here, in the composition root — the one place that already imports
+// both packages — so that mediaobject never imports processing and the two
+// sibling packages stay independent, exactly as variantLookup does above.
+type cardGenerator struct{ g *processing.CardGenerator }
+
+func (c cardGenerator) Generate(src mediaobject.CardSource) {
+	c.g.Generate(processing.Source{
+		MediaObjectID: src.MediaObjectID,
+		FleetID:       src.FleetID,
+		ObjectKey:     src.ObjectKey,
+		ContentType:   src.ContentType,
+	})
 }
 
 // mustJWKSKeyfunc builds the JWKS keyfunc, retrying up to maxAttempts times with
