@@ -104,11 +104,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `make fe-test`, not `npm run -w @myfleet/web test`. The Makefile target
+      # covers every JS workspace that has tests — apps/web plus
+      # packages/shared-ts and packages/ui-components. shared-ts owns
+      # fetchAuthenticated, the single 401-refresh path every SPA call goes
+      # through; running only the web workspace here left it ungated on PRs,
+      # which is the gap the Makefile comment says it closed.
       - name: Test
-        run: npm run -w @myfleet/web test
+        run: make fe-test
 
       - name: Build
-        run: npm run -w @myfleet/web build
+        run: make fe-build
 
   containers:
     runs-on: ubuntu-latest
@@ -143,6 +149,14 @@ jobs:
 
       - name: Check manifests
         run: make manifests
+
+      # Lives here rather than in its own job: it needs only bash and PyYAML,
+      # both already present, and one of the three files it compares is
+      # deploy/k8s/base/web/configmap.yaml. Before this it ran in no workflow at
+      # all — `make ci` was its only caller, so drift between the TS default,
+      # the served config.json and the ConfigMap would have reached a cluster.
+      - name: Check Carfax URL template
+        run: make carfax-template
 
   gitleaks:
     runs-on: ubuntu-latest
