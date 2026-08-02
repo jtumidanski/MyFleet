@@ -20,7 +20,7 @@ export function SettingsPage() {
   if (!activeFleetId) {
     return (
       <div className="space-y-6 max-w-2xl">
-        <PageHeader title="Fleet Settings" />
+        <PageHeader title="Settings" />
         <p className="text-sm text-muted-foreground">
           No fleet selected. Complete onboarding to get started.
         </p>
@@ -30,7 +30,7 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <PageHeader title="Fleet Settings" />
+      <PageHeader title="Settings" />
 
       {/* Fleet name — owner-only */}
       {isOwner && (
