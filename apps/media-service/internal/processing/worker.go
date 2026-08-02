@@ -77,6 +77,22 @@ type ObjectStore interface {
 	PutObject(ctx context.Context, key string, r io.Reader, size int64, contentType string) error
 }
 
+// Source is everything needed to derive a variant from an original: which media
+// object it belongs to, where its bytes live, and what they are.
+//
+// It exists so decodeOriginal and buildVariant need no mediaobject.Model. The
+// worker builds one from the Model it already loaded; the lazy card generator
+// receives one across a port from the composition root. Both therefore run the
+// exact same decode, resize, encode, key-naming and ErrPermanent-wrapping code,
+// which is what makes the lazy path's bytes identical to the upload path's by
+// construction rather than by review.
+type Source struct {
+	MediaObjectID string
+	FleetID       string
+	ObjectKey     string
+	ContentType   string
+}
+
 // Worker generates image variants in response to media.uploaded events.
 type Worker struct {
 	log         logrus.FieldLogger
@@ -160,13 +176,22 @@ func (w *Worker) handle(ctx context.Context, e events.Envelope) error {
 		return nil
 	}
 
-	// Step 4 — generate and persist variants, then transition to ready.
-	src, err := w.decodeOriginal(ctx, obj.ObjectKey())
+	// Step 4 — generate and persist variants, then transition to ready. The
+	// original is decoded ONCE and the decoded image is shared across every
+	// spec entry, so adding a variant costs one scale + encode + PUT, not a
+	// second decode.
+	s := Source{
+		MediaObjectID: obj.ID(),
+		FleetID:       obj.FleetID(),
+		ObjectKey:     obj.ObjectKey(),
+		ContentType:   obj.ContentType(),
+	}
+	img, err := decodeOriginal(ctx, w.store, s.ObjectKey)
 	if err != nil {
 		if errors.Is(err, ErrPermanent) {
 			return w.failPermanently(e, obj, err)
 		}
-		return fmt.Errorf("decode original %s: %w", obj.ObjectKey(), err)
+		return fmt.Errorf("decode original %s: %w", s.ObjectKey, err)
 	}
 
 	built := make([]mediavariant.Model, 0, 3)
@@ -178,7 +203,7 @@ func (w *Worker) handle(ctx context.Context, e events.Envelope) error {
 		{mediavariant.VariantCard, cardMaxEdge},
 		{mediavariant.VariantDisplay, displayMaxEdge},
 	} {
-		v, err := w.generateVariant(ctx, obj, src, spec.kind, spec.maxEdge)
+		v, err := buildVariant(ctx, w.store, s, img, spec.kind, spec.maxEdge)
 		if err != nil {
 			return fmt.Errorf("generate %s variant: %w", spec.kind, err)
 		}
@@ -218,8 +243,8 @@ func (w *Worker) handle(ctx context.Context, e events.Envelope) error {
 // will not start decoding, and an original that was never stored will not
 // appear. Everything else (a transport error from the store, for instance)
 // passes through unwrapped and stays retryable.
-func (w *Worker) decodeOriginal(ctx context.Context, key string) (image.Image, error) {
-	rc, err := w.store.GetObject(ctx, key)
+func decodeOriginal(ctx context.Context, store ObjectStore, key string) (image.Image, error) {
+	rc, err := store.GetObject(ctx, key)
 	if err != nil {
 		if errors.Is(err, storage.ErrObjectNotFound) {
 			return nil, fmt.Errorf("%w: original bytes were never stored: %w", ErrPermanent, err)
@@ -234,29 +259,30 @@ func (w *Worker) decodeOriginal(ctx context.Context, key string) (image.Image, e
 	return img, nil
 }
 
-// generateVariant scales src to the variant's max edge (never upscaling),
-// encodes it, uploads it to MinIO under a variant-suffixed key, and returns the
-// variant model.
-func (w *Worker) generateVariant(ctx context.Context, obj mediaobject.Model, src image.Image, kind mediavariant.Variant, maxEdge int) (mediavariant.Model, error) {
-	b := src.Bounds()
+// buildVariant scales img to the variant's max edge (never upscaling), encodes
+// it, uploads it to MinIO under a variant-suffixed key, and returns the variant
+// model. The key's discriminator is the variant name, so thumbnail, card and
+// display cannot collide.
+func buildVariant(ctx context.Context, store ObjectStore, s Source, img image.Image, kind mediavariant.Variant, maxEdge int) (mediavariant.Model, error) {
+	b := img.Bounds()
 	tw, th := ResizeDims(b.Dx(), b.Dy(), maxEdge)
 
 	dst := image.NewRGBA(image.Rect(0, 0, tw, th))
-	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, xdraw.Over, nil)
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), img, b, xdraw.Over, nil)
 
-	contentType, ext := variantEncoding(obj.ContentType())
+	contentType, ext := variantEncoding(s.ContentType)
 	var buf bytes.Buffer
 	if err := encode(&buf, dst, contentType); err != nil {
 		return mediavariant.Model{}, err
 	}
 
-	key := storage.ObjectKey(obj.FleetID(), obj.ID(), string(kind)+ext)
-	if err := w.store.PutObject(ctx, key, bytes.NewReader(buf.Bytes()), int64(buf.Len()), contentType); err != nil {
+	key := storage.ObjectKey(s.FleetID, s.MediaObjectID, string(kind)+ext)
+	if err := store.PutObject(ctx, key, bytes.NewReader(buf.Bytes()), int64(buf.Len()), contentType); err != nil {
 		return mediavariant.Model{}, err
 	}
 
 	return mediavariant.NewBuilder().
-		SetMediaObjectID(obj.ID()).
+		SetMediaObjectID(s.MediaObjectID).
 		SetVariant(kind).
 		SetObjectKey(key).
 		SetWidth(tw).
