@@ -1,9 +1,6 @@
 import { ApiClient } from '@myfleet/shared-ts';
-import { getAccessToken, setAccessToken, clearAccessToken } from './token';
-
-interface RefreshResponse {
-  data?: { attributes?: { accessToken?: string } };
-}
+import { getAccessToken } from './token';
+import { refreshAccessToken } from './refresh';
 
 /**
  * Singleton API client wired to the MyFleet auth contract.
@@ -14,36 +11,11 @@ interface RefreshResponse {
  *   segment); fleet-service and notification-service still have their full
  *   `/api/<service>` prefix stripped.
  * - getAccessToken reads the bearer token from localStorage.
- * - onRefresh POSTs to /api/auth/refresh with `credentials: 'include'` so the
- *   browser attaches the HttpOnly refresh cookie; the new access token comes
- *   back at `data.attributes.accessToken`. On failure we clear the token
- *   (effective logout) and return null so the original request fails as 401.
+ * - onRefresh delegates to refreshAccessToken (see lib/api/refresh.ts), which
+ *   returns null on failure so the original request fails as 401.
  */
 export const apiClient = new ApiClient({
   baseUrl: '',
   getAccessToken,
-  onRefresh: async () => {
-    try {
-      const res = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/vnd.api+json' },
-      });
-      if (!res.ok) {
-        clearAccessToken();
-        return null;
-      }
-      const body = (await res.json().catch(() => null)) as RefreshResponse | null;
-      const token = body?.data?.attributes?.accessToken;
-      if (!token) {
-        clearAccessToken();
-        return null;
-      }
-      setAccessToken(token);
-      return token;
-    } catch {
-      clearAccessToken();
-      return null;
-    }
-  },
+  onRefresh: refreshAccessToken,
 });

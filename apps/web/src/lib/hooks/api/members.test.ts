@@ -19,6 +19,9 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { memberKeys, useRemoveMember } from './members';
+import { authKeys } from './auth';
+import { mintAccessToken } from '../../api/refresh';
+import { toast } from 'sonner';
 import { inviteKeys, useCreateInvite, useRevokeInvite, useAcceptInvite } from './invites';
 import { fleetKeys } from './fleets';
 import { useRenameFleet } from './fleetSettings';
@@ -62,6 +65,13 @@ vi.mock('../../../services/api/InviteService', () => ({
     revokeInvite: vi.fn().mockResolvedValue(undefined),
     acceptInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
   },
+}));
+
+// Both exports: the API client imports refreshAccessToken from this module, so
+// a partial mock would break its import.
+vi.mock('../../api/refresh', () => ({
+  mintAccessToken: vi.fn().mockResolvedValue('fresh-token'),
+  refreshAccessToken: vi.fn().mockResolvedValue('fresh-token'),
 }));
 
 vi.mock('../../../services/api/FleetSettingsService', () => ({
@@ -219,5 +229,69 @@ describe('mutation invalidation contracts — real hooks', () => {
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.all }));
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.all }));
+  });
+
+  // The JWT still carries the pre-accept active_fleet_id claim (empty for a
+  // first-time invitee), and /auth/me reports that claim. Without a fresh token
+  // the new member is bounced back to onboarding by RequireAuth.
+  //
+  // This asserts the mint COMPLETES before the identity refetch starts, not
+  // merely that it was called first: invocationCallOrder records call time, so
+  // an un-awaited mint would satisfy an ordering-only assertion while still
+  // racing /auth/me against the token write.
+  it('useAcceptInvite waits for the fresh token before refetching identity', async () => {
+    let releaseMint: ((token: string) => void) | undefined;
+    vi.mocked(mintAccessToken).mockImplementationOnce(
+      () =>
+        new Promise<string | null>((resolve) => {
+          releaseMint = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useAcceptInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('tok-abc');
+    });
+
+    await waitFor(() => expect(mintAccessToken).toHaveBeenCalledTimes(1));
+
+    const authInvalidations = () =>
+      (invalidateSpy.mock.calls as Array<[{ queryKey?: unknown }]>).filter(
+        (c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(authKeys.all),
+      ).length;
+
+    // Mint is still pending: identity must not have been refetched yet.
+    expect(authInvalidations()).toBe(0);
+
+    await act(async () => {
+      releaseMint?.('fresh-token');
+    });
+
+    await waitFor(() => expect(authInvalidations()).toBe(1));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  // A failed mint means stale claims, not a dead session — the invite is
+  // already spent server-side. Clearing the still-valid token here (which
+  // refreshAccessToken would do) logs the user out on the success path.
+  it('useAcceptInvite still succeeds, without refetching identity, when the mint fails', async () => {
+    vi.mocked(mintAccessToken).mockResolvedValueOnce(null);
+
+    const { result } = renderHook(() => useAcceptInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('tok-abc');
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+    expect(toast.error).toHaveBeenCalled();
   });
 });
