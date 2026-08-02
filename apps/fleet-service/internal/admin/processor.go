@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -264,4 +265,162 @@ func targetTypeFor(in CreateInput) string {
 		return "fleet"
 	}
 	return in.TargetType
+}
+
+// Actor is who is performing a lifecycle action, for the audit row.
+type Actor struct {
+	UserID        string
+	Email         string
+	CorrelationID string
+}
+
+// Cancel restores every row the operation stamped and, once every service has
+// restored, marks it cancelled (FR-ADMIN-RESTORE-1).
+//
+// It deliberately performs NO platform-admin re-verification. Applied literally,
+// FR-ADMIN-AUTH-7 would include this endpoint — the recovery path. If
+// auth-service is unreachable, failing closed here would block the one action
+// that undoes a mistake, during the window when undoing it is still possible.
+// The caller has already passed RequirePlatformAdmin on a valid token; that is
+// the right amount of authority for a REVERSIBLE action (design §5.4).
+func (p *Processor) Cancel(ctx context.Context, opID string, actor Actor) (Operation, error) {
+	now := p.d.Now()
+	op, err := p.d.Provider.GetOperation(opID)
+	if err != nil {
+		return Operation{}, err
+	}
+	switch op.Status() {
+	case StatusReaped:
+		// Irreversible, and the API says so rather than pretending to succeed.
+		return Operation{}, server.Detailed(server.ErrConflict,
+			"this operation has been reaped; its data is permanently deleted")
+	case StatusCancelled:
+		// Already done. Idempotent success rather than a confusing 409: the
+		// console offers restore on a list that may be a few seconds stale.
+		return op, nil
+	}
+
+	// Local restore first and unconditionally: a downstream failure must not
+	// hold the product's own data hostage.
+	if err := p.d.DB.Transaction(func(tx *gorm.DB) error { return Restore(tx, opID) }); err != nil {
+		p.log.WithError(err).WithField("operation_id", opID).Error("local restore")
+		return Operation{}, err
+	}
+
+	var failed []string
+	for _, d := range p.d.Downstream {
+		if _, rerr := d.Restore(ctx, opID); rerr != nil {
+			p.log.WithError(rerr).WithFields(logrus.Fields{
+				"operation_id": opID, "service": d.Name(),
+			}).Warn("downstream restore failed; operation stays cancellable")
+			failed = append(failed, d.Name())
+		}
+	}
+
+	// cancelled only when EVERY service has restored. Restore is idempotent, so
+	// the correct user action for a partial cancel is to press it again.
+	status := StatusCancelled
+	if len(failed) > 0 {
+		status = StatusPartial
+	}
+	if err := p.d.Administrator.SetStatus(p.d.DB, opID, status, failed, now); err != nil {
+		return Operation{}, err
+	}
+	if err := p.d.Administrator.InsertAudit(p.d.DB, AuditEvent{
+		ID:               uuid.NewString(),
+		ActorUserID:      actor.UserID,
+		ActorEmail:       actor.Email,
+		Action:           ActionPurgeCancelled,
+		Scope:            string(op.Scope()),
+		TargetType:       op.TargetType(),
+		TargetID:         op.TargetID(),
+		TargetLabel:      op.TargetLabel(),
+		PurgeOperationID: opID,
+		AffectedCounts:   op.AffectedCounts(),
+		CorrelationID:    actor.CorrelationID,
+		CreatedAt:        now,
+	}); err != nil {
+		p.log.WithError(err).WithField("operation_id", opID).Error("write cancel audit row")
+	}
+
+	p.log.WithFields(logrus.Fields{
+		"operation_id": opID, "status": status, "failed_services": failed,
+		"actor": actor.UserID, "correlation_id": actor.CorrelationID,
+	}).Info("admin purge cancelled")
+
+	return p.d.Provider.GetOperation(opID)
+}
+
+// Retry re-attempts the downstream stamps for a partial operation
+// (FR-ADMIN-PURGE-9). Every downstream stamp is idempotent on
+// purge_operation_id, so this is safe to run repeatedly — which is exactly how
+// the console presents it.
+//
+// It DOES re-verify the platform-admin privilege: unlike cancel, this
+// re-attempts a destructive write.
+func (p *Processor) Retry(ctx context.Context, opID string, actor Actor) (Operation, error) {
+	now := p.d.Now()
+	ok, err := p.d.Auth.IsPlatformAdmin(ctx, actor.UserID)
+	if err != nil {
+		p.log.WithError(err).Error("platform-admin re-verification failed; refusing the retry")
+		return Operation{}, err
+	}
+	if !ok {
+		return Operation{}, server.ErrForbidden
+	}
+
+	op, err := p.d.Provider.GetOperation(opID)
+	if err != nil {
+		return Operation{}, err
+	}
+	if op.Status() == StatusReaped || op.Status() == StatusCancelled {
+		return Operation{}, server.Detailed(server.ErrConflict,
+			"only a pending or partial operation can be retried")
+	}
+
+	// Re-resolve the media ids for a record purge. The target rows are
+	// soft-deleted, not gone, so the resolver still finds them.
+	_, mediaIDs, rerr := p.targets.Resolve(op.Root())
+	if rerr != nil && !errors.Is(rerr, server.ErrNotFound) {
+		return Operation{}, rerr
+	}
+
+	counts, failed := p.fanOutPurge(ctx, op, mediaIDs)
+	affected := op.AffectedCounts()
+	for k, v := range counts {
+		affected[k] = v
+	}
+	status := StatusPending
+	if len(failed) > 0 {
+		status = StatusPartial
+	}
+	if err := p.d.Administrator.SetAffected(p.d.DB, opID, affected); err != nil {
+		return Operation{}, err
+	}
+	if err := p.d.Administrator.SetStatus(p.d.DB, opID, status, failed, now); err != nil {
+		return Operation{}, err
+	}
+	if err := p.d.Administrator.InsertAudit(p.d.DB, AuditEvent{
+		ID:               uuid.NewString(),
+		ActorUserID:      actor.UserID,
+		ActorEmail:       actor.Email,
+		Action:           ActionPurgeRetried,
+		Scope:            string(op.Scope()),
+		TargetType:       op.TargetType(),
+		TargetID:         op.TargetID(),
+		TargetLabel:      op.TargetLabel(),
+		PurgeOperationID: opID,
+		AffectedCounts:   affected,
+		CorrelationID:    actor.CorrelationID,
+		CreatedAt:        now,
+	}); err != nil {
+		p.log.WithError(err).WithField("operation_id", opID).Error("write retry audit row")
+	}
+
+	p.log.WithFields(logrus.Fields{
+		"operation_id": opID, "status": status, "failed_services": failed,
+		"actor": actor.UserID, "correlation_id": actor.CorrelationID,
+	}).Info("admin purge retried")
+
+	return p.d.Provider.GetOperation(opID)
 }

@@ -237,3 +237,176 @@ func TestCreate_systemScope(t *testing.T) {
 		t.Errorf("maintenance categories must survive a system purge, got %d", got)
 	}
 }
+
+type failingRestore struct {
+	stubDownstream
+	failRestore bool
+}
+
+func (f *failingRestore) Restore(ctx context.Context, opID string) (map[string]int, error) {
+	if f.failRestore {
+		return nil, errors.New("connection refused")
+	}
+	return f.stubDownstream.Restore(ctx, opID)
+}
+
+func TestCancel_restoresEverywhereAndMarksCancelled(t *testing.T) {
+	db := admintest.NewDB(t)
+	admintest.SeedFleet(t, db, "fleet-1")
+	media := &stubDownstream{name: "media"}
+	proc := newProcessor(t, db, stubAuth{admin: true}, media)
+
+	op, err := proc.Create(context.Background(), fleetInput())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := proc.Cancel(context.Background(), op.ID(),
+		admin.Actor{UserID: "admin-1", Email: "admin@example.com"})
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if got.Status() != admin.StatusCancelled {
+		t.Errorf("status = %q, want cancelled", got.Status())
+	}
+	if got.CancelledAt() == nil {
+		t.Error("cancelled_at must be stamped")
+	}
+	if media.restored != 1 {
+		t.Errorf("media restore called %d times, want 1", media.restored)
+	}
+	for _, table := range []string{"fleet.fleets", "fleet.vehicles", "fleet.fleet_memberships"} {
+		if admintest.CountLive(t, db, table) == 0 {
+			t.Errorf("%s was not restored", table)
+		}
+	}
+
+	var audits int64
+	db.Raw(`SELECT count(*) FROM fleet.admin_audit_events WHERE action = ?`,
+		admin.ActionPurgeCancelled).Scan(&audits)
+	if audits != 1 {
+		t.Errorf("want one purge.cancelled audit row, got %d", audits)
+	}
+}
+
+// design §5.4: cancel must work even when auth-service is down. It is the
+// recovery path; blocking it during the window when recovery is still possible
+// is the worst available outcome.
+func TestCancel_worksWhenAuthServiceIsUnreachable(t *testing.T) {
+	db := admintest.NewDB(t)
+	admintest.SeedFleet(t, db, "fleet-1")
+	proc := newProcessor(t, db, stubAuth{admin: true}, &stubDownstream{name: "media"})
+	op, err := proc.Create(context.Background(), fleetInput())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Auth-service falls over between the create and the cancel.
+	broken := newProcessor(t, db, stubAuth{err: errors.New("connection refused")},
+		&stubDownstream{name: "media"})
+	if _, cerr := broken.Cancel(context.Background(), op.ID(),
+		admin.Actor{UserID: "admin-1", Email: "admin@example.com"}); cerr != nil {
+		t.Fatalf("cancel must not depend on auth-service: %v", cerr)
+	}
+	if admintest.CountLive(t, db, "fleet.vehicles") != 2 {
+		t.Error("cancel did not restore the vehicles")
+	}
+}
+
+// A downstream restore that fails leaves the operation PARTIAL and still
+// cancellable — restore is idempotent, so pressing it again is the fix.
+func TestCancel_downstreamFailureStaysCancellable(t *testing.T) {
+	db := admintest.NewDB(t)
+	admintest.SeedFleet(t, db, "fleet-1")
+	media := &failingRestore{stubDownstream: stubDownstream{name: "media"}, failRestore: true}
+	proc := newProcessor(t, db, stubAuth{admin: true}, media)
+	op, _ := proc.Create(context.Background(), fleetInput())
+
+	got, err := proc.Cancel(context.Background(), op.ID(), admin.Actor{UserID: "a", Email: "a@x"})
+	if err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if got.Status() != admin.StatusPartial {
+		t.Errorf("status = %q, want partial while a service has not restored", got.Status())
+	}
+	// Local rows come back regardless: a downstream failure must not hold the
+	// product hostage.
+	if admintest.CountLive(t, db, "fleet.vehicles") != 2 {
+		t.Error("local restore must run even when a downstream restore fails")
+	}
+	// And a second cancel completes it.
+	media.failRestore = false
+	got, err = proc.Cancel(context.Background(), op.ID(), admin.Actor{UserID: "a", Email: "a@x"})
+	if err != nil {
+		t.Fatalf("second cancel: %v", err)
+	}
+	if got.Status() != admin.StatusCancelled {
+		t.Errorf("a repeated cancel must complete the operation, got %q", got.Status())
+	}
+}
+
+// FR-ADMIN-RESTORE-2: reaping is irreversible and the API says so.
+func TestCancel_onAReapedOperationIs409(t *testing.T) {
+	db := admintest.NewDB(t)
+	admintest.SeedFleet(t, db, "fleet-1")
+	proc := newProcessor(t, db, stubAuth{admin: true}, &stubDownstream{name: "media"})
+	op, _ := proc.Create(context.Background(), fleetInput())
+	if err := admin.NewAdministrator(db).SetStatus(db, op.ID(), admin.StatusReaped, nil, testNow); err != nil {
+		t.Fatalf("mark reaped: %v", err)
+	}
+
+	if _, err := proc.Cancel(context.Background(), op.ID(),
+		admin.Actor{UserID: "a", Email: "a@x"}); !errors.Is(err, server.ErrConflict) {
+		t.Errorf("want 409, got %v", err)
+	}
+}
+
+// FR-ADMIN-PURGE-9: retry re-attempts the failed downstream stamps without
+// double-stamping, and clears the failure once they succeed.
+func TestRetry_completesAPartialOperation(t *testing.T) {
+	db := admintest.NewDB(t)
+	admintest.SeedFleet(t, db, "fleet-1")
+	media := &stubDownstream{name: "media", purgeErr: errors.New("connection refused")}
+	proc := newProcessor(t, db, stubAuth{admin: true}, media)
+
+	op, err := proc.Create(context.Background(), fleetInput())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if op.Status() != admin.StatusPartial {
+		t.Fatalf("fixture expected a partial operation, got %q", op.Status())
+	}
+
+	media.purgeErr = nil
+	got, err := proc.Retry(context.Background(), op.ID(), admin.Actor{UserID: "a", Email: "a@x"})
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if got.Status() != admin.StatusPending {
+		t.Errorf("status = %q, want pending once every service has stamped", got.Status())
+	}
+	if len(got.FailedServices()) != 0 {
+		t.Errorf("failed services must clear on a successful retry, got %v", got.FailedServices())
+	}
+	if got.AffectedCounts()["media_rows"] != 7 {
+		t.Errorf("retry must record the downstream counts: %v", got.AffectedCounts())
+	}
+	// Local rows are untouched by a retry — the local stamp already succeeded.
+	if admintest.CountLive(t, db, "fleet.vehicles") != 0 {
+		t.Error("retry must not disturb the local stamp")
+	}
+}
+
+func TestRetry_onACancelledOperationIs409(t *testing.T) {
+	db := admintest.NewDB(t)
+	admintest.SeedFleet(t, db, "fleet-1")
+	proc := newProcessor(t, db, stubAuth{admin: true}, &stubDownstream{name: "media"})
+	op, _ := proc.Create(context.Background(), fleetInput())
+	if _, err := proc.Cancel(context.Background(), op.ID(), admin.Actor{UserID: "a", Email: "a@x"}); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if _, err := proc.Retry(context.Background(), op.ID(),
+		admin.Actor{UserID: "a", Email: "a@x"}); !errors.Is(err, server.ErrConflict) {
+		t.Errorf("want 409 retrying a cancelled operation, got %v", err)
+	}
+}
