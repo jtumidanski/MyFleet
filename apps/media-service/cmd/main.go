@@ -25,6 +25,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processedevents"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processing"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/storage"
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailures"
 )
 
 func main() {
@@ -37,6 +38,7 @@ func main() {
 		mediaobject.Migration,
 		mediavariant.Migration,
 		processedevents.Migration,
+		variantfailures.Migration,
 		events.MigrateOutbox,
 	))
 	if err != nil {
