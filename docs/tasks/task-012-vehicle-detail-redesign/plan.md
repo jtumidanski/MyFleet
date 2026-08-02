@@ -2498,6 +2498,8 @@ Import `UpdateMaintenanceRecordAttributes` from `../../../types/models/maintenan
 Create `VehicleRecordDrawer.tsx`. It renders a `Sheet` with `side="right"`, open whenever `row != null`. The body switches on `row.kind`:
 
 - **maintenance / modification** — fetches the full record with `useMaintenanceRecord(row.sourceId)` and shows performed date, odometer, cost, vendor, notes, and `RecordAttachmentList` for `documentMediaIds`. Actions when `canWrite`: Edit (swaps the body for `MaintenanceRecordForm` in edit mode, submitting through `useUpdateMaintenanceRecord`) and Delete (through `useDeleteMaintenanceRecord`, closing the drawer on success).
+
+  **Pass `kind` explicitly** — derive it from the row (`row.kind === 'modification' ? 'modification' : 'maintenance'`), never omit it. Task 5 made the prop required precisely so this cannot be forgotten: an unfiltered picker would let a user editing a modification record create a category written as `maintenance`, which then disappears from the modification picker and cannot be corrected from the UI.
 - **fuel** — fetches with `useFuelLog(row.sourceId)` and shows date, gallons, price per gallon, total, odometer. Actions when `canWrite`: Edit via `FuelForm` + `useUpdateFuelLog`, Delete via `useDeleteFuelLog`.
 - **mileage** — read-only: date, mileage, source, and the flagged marker. **Render no Edit or Delete button.** No update or delete endpoint exists for mileage records; offering either would produce a 404 or 405.
 
