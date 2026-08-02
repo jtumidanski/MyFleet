@@ -8,6 +8,17 @@
 // opt-in would be absent exactly where it is needed. One Analyze call per
 // service covers every package under that service's internal/ tree, including
 // packages that do not exist yet.
+//
+// Two known boundaries, both deliberate:
+//
+//   - It enforces the column layer only. A `gorm:"<-:create"` tag alone
+//     satisfies the check, even if ToEntity() leaves the field unassigned — so
+//     Make(e) after an update can still return a Model carrying a zero value
+//     for that field (auth-service/internal/user relies on exactly this).
+//   - It recognises `.Save(` call sites only. A full-column write issued as
+//     `db.Clauses(clause.OnConflict{UpdateAll: true}).Create(&e)` would
+//     reintroduce this defect class undetected; no such call site exists
+//     today.
 package entityguard
 
 import (
@@ -218,12 +229,13 @@ func findSaveCall(fset *token.FileSet, files []*ast.File) string {
 
 // findToEntity locates `func (…) ToEntity() T` and returns T plus the set of
 // field names its returned composite literal assigns. ok is false when the
-// method's shape defeats analysis — either the result type does not resolve to
-// a plain, same-package struct name (a pointer or a qualified type), or the
-// body is not a single return of a composite literal. detail is non-empty only
-// when it must override analyzeDir's generic composite-literal message with a
-// more specific one; a silent skip here would violate this guard's own
-// invariant that an undecidable package is a finding, not a pass.
+// method's shape defeats analysis — the result list is not exactly one value,
+// the result type does not resolve to a plain, same-package struct name (a
+// pointer or a qualified type), or the body is not a single return of a
+// composite literal. detail is non-empty only when it must override
+// analyzeDir's generic composite-literal message with a more specific one; a
+// silent skip here would violate this guard's own invariant that an
+// undecidable package is a finding, not a pass.
 func findToEntity(files []*ast.File) (entityName string, assigned map[string]bool, ok bool, detail string) {
 	for _, f := range files {
 		for _, decl := range f.Decls {
@@ -232,7 +244,12 @@ func findToEntity(files []*ast.File) (entityName string, assigned map[string]boo
 				continue
 			}
 			if fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
-				continue
+				// Multiple results (or zero) is the same failure mode as an
+				// unresolvable result type: a real ToEntity method this guard
+				// cannot reduce to a single Entity value, reported rather than
+				// silently treated as "no ToEntity here at all".
+				return "ToEntity", nil, false,
+					"ToEntity() does not return exactly one result, so this guard cannot resolve its Entity type"
 			}
 			resultType := fn.Type.Results.List[0].Type
 			ident, isIdent := resultType.(*ast.Ident)

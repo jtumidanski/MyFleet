@@ -209,3 +209,43 @@ func TestAnalyze_pointerResultToEntityIsAFinding(t *testing.T) {
 		t.Fatalf("message must name the unresolved result type; got:\n%s", got[0].String())
 	}
 }
+
+// A qualified result type (pkg.Entity) shares resultTypeString's rendering
+// path with the pointer case above but exercises the SelectorExpr branch
+// directly, so it needs its own coverage rather than relying on the pointer
+// test to stand in for it.
+func TestAnalyze_qualifiedResultToEntityIsAFinding(t *testing.T) {
+	src := strings.Replace(lossySrc, "ToEntity() Entity {", "ToEntity() pkg.Entity {", 1)
+	src = strings.Replace(src, "return Entity{ID: m.id, Name: m.name}", "return pkg.Entity{ID: m.id, Name: m.name}", 1)
+	got, err := Analyze(writeFixture(t, "widget", src))
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(got) != 1 || got[0].Reason != ReasonUnverifiable {
+		t.Fatalf("want exactly one %q finding, got %v", ReasonUnverifiable, got)
+	}
+	if !strings.Contains(got[0].String(), "pkg.Entity") {
+		t.Fatalf("message must name the unresolved result type; got:\n%s", got[0].String())
+	}
+}
+
+// FR-GUARD-2 for the arity case: a Save call site plus a ToEntity() that
+// returns two results (e.g. after a routine validation refactor) is the same
+// failure mode as an unresolvable result type — the guard must report it
+// rather than silently pass the package as clean.
+func TestAnalyze_twoResultToEntityIsAFinding(t *testing.T) {
+	src := strings.Replace(lossySrc, "ToEntity() Entity {", "ToEntity() (Entity, error) {", 1)
+	src = strings.Replace(src,
+		"return Entity{ID: m.id, Name: m.name}",
+		"return Entity{ID: m.id, Name: m.name}, nil", 1)
+	got, err := Analyze(writeFixture(t, "widget", src))
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(got) != 1 || got[0].Reason != ReasonUnverifiable {
+		t.Fatalf("want exactly one %q finding, got %v", ReasonUnverifiable, got)
+	}
+	if !strings.Contains(got[0].String(), "exactly one result") {
+		t.Fatalf("message must say why the arity defeats analysis; got:\n%s", got[0].String())
+	}
+}
