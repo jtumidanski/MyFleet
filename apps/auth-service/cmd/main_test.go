@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -73,31 +74,47 @@ func fleetServing(t *testing.T, status int, body string) *membership.Client {
 // TestNewPrincipalResolver_fillsEveryField is the core guarantee: this closure
 // is the only place a session.Principal is built, so if it fills every field,
 // every token this service mints on either path carries a complete claim set.
+//
+// Table-driven over both true AND false admin answers (not just true): a
+// version of this test that only ever fed the provider `true` would stay green
+// even if newPrincipalResolver dropped the `isAdmin` variable entirely and
+// hardcoded `PlatformAdmin: true` — minting the platform tier for every user
+// on the system. This is the only place that decides the value, so it is the
+// only place that can catch that regression; the mint layer
+// (session.TestMintAccess_setsPlatformAdminClaimAsBoolean) and the middleware
+// (TestJWT_parsesPlatformAdminClaim) both already cover true and false, but
+// neither of them can see whether the VALUE fed into them was ever computed
+// correctly in the first place.
 func TestNewPrincipalResolver_fillsEveryField(t *testing.T) {
-	resolve := newPrincipalResolver(
-		usersWith("user-1", "a@b.com"),
-		fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
-		&fakeAdmins{isAdmin: true},
-	)
+	for _, isAdmin := range []bool{true, false} {
+		t.Run(fmt.Sprintf("isAdmin=%v", isAdmin), func(t *testing.T) {
+			resolve := newPrincipalResolver(
+				usersWith("user-1", "a@b.com"),
+				fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
+				&fakeAdmins{isAdmin: isAdmin},
+			)
 
-	p, err := resolve(context.Background(), "user-1")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if p.UserID != "user-1" {
-		t.Fatalf("UserID = %q, want user-1", p.UserID)
-	}
-	if p.Email != "a@b.com" {
-		t.Fatalf("Email = %q, want a@b.com — this is the field the refresh path used to drop", p.Email)
-	}
-	if p.ActiveFleetID != "fleet-9" {
-		t.Fatalf("ActiveFleetID = %q, want fleet-9", p.ActiveFleetID)
-	}
-	if p.Role != "owner" {
-		t.Fatalf("Role = %q, want owner", p.Role)
-	}
-	if !p.PlatformAdmin {
-		t.Fatalf("PlatformAdmin = %v, want true", p.PlatformAdmin)
+			p, err := resolve(context.Background(), "user-1")
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if p.UserID != "user-1" {
+				t.Fatalf("UserID = %q, want user-1", p.UserID)
+			}
+			if p.Email != "a@b.com" {
+				t.Fatalf("Email = %q, want a@b.com — this is the field the refresh path used to drop", p.Email)
+			}
+			if p.ActiveFleetID != "fleet-9" {
+				t.Fatalf("ActiveFleetID = %q, want fleet-9", p.ActiveFleetID)
+			}
+			if p.Role != "owner" {
+				t.Fatalf("Role = %q, want owner", p.Role)
+			}
+			if p.PlatformAdmin != isAdmin {
+				t.Fatalf("PlatformAdmin = %v, want %v — the resolver must carry the provider's "+
+					"exact answer, not a hardcoded value", p.PlatformAdmin, isAdmin)
+			}
+		})
 	}
 }
 
