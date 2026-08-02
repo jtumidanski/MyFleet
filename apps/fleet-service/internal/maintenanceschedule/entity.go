@@ -23,6 +23,8 @@ type Entity struct {
 	Active               bool   `gorm:"not null;default:true"`
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
+	DeletedAt            *time.Time `gorm:"index"`
+	PurgeOperationID     *string    `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.maintenance_schedules" }

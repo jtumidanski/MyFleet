@@ -8,13 +8,14 @@ import (
 
 // Entity maps to fleet.vehicle_media (PRD §6, design §8.3).
 type Entity struct {
-	ID        string `gorm:"type:uuid;primaryKey"`
-	VehicleID string `gorm:"type:uuid;not null;index"`
-	MediaID   string `gorm:"not null"`
-	IsPrimary bool   `gorm:"not null;default:false"`
-	SortOrder int    `gorm:"not null;default:0"`
-	CreatedAt time.Time
-	DeletedAt *time.Time `gorm:"index"`
+	ID               string `gorm:"type:uuid;primaryKey"`
+	VehicleID        string `gorm:"type:uuid;not null;index"`
+	MediaID          string `gorm:"not null"`
+	IsPrimary        bool   `gorm:"not null;default:false"`
+	SortOrder        int    `gorm:"not null;default:0"`
+	CreatedAt        time.Time
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeOperationID *string    `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.vehicle_media" }

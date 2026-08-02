@@ -31,21 +31,26 @@ func newCompletionDB(t *testing.T) *gorm.DB {
 			id TEXT PRIMARY KEY, fleet_id TEXT, nickname TEXT, make TEXT, model TEXT,
 			trim TEXT, year INTEGER, vin TEXT, current_mileage INTEGER,
 			primary_image_media_id TEXT, notes TEXT, created_at DATETIME,
-			updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME)`,
+			updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME,
+			purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.mileage_records (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, mileage INTEGER, recorded_at DATETIME,
-			source TEXT, source_ref_id TEXT, created_by_user_id TEXT, created_at DATETIME)`,
+			source TEXT, source_ref_id TEXT, created_by_user_id TEXT, created_at DATETIME,
+			deleted_at DATETIME, purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.maintenance_records (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, category_id TEXT, description TEXT,
 			performed_at DATETIME, mileage INTEGER, cost REAL, vendor TEXT, notes TEXT,
-			created_by_user_id TEXT, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME)`,
+			created_by_user_id TEXT, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME,
+			purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.maintenance_record_documents (
-			id TEXT PRIMARY KEY, maintenance_record_id TEXT, media_id TEXT)`,
+			id TEXT PRIMARY KEY, maintenance_record_id TEXT, media_id TEXT,
+			deleted_at DATETIME, purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.maintenance_schedules (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, category_id TEXT, recurrence_type TEXT,
 			interval_months INTEGER, interval_miles INTEGER, last_completed_date DATETIME,
 			last_completed_mileage INTEGER, next_due_date DATETIME, next_due_mileage INTEGER,
-			status TEXT, severity TEXT, active INTEGER, created_at DATETIME, updated_at DATETIME)`,
+			status TEXT, severity TEXT, active INTEGER, created_at DATETIME, updated_at DATETIME,
+			deleted_at DATETIME, purge_operation_id TEXT)`,
 	}
 	for _, stmt := range ddl {
 		if err := db.Exec(stmt).Error; err != nil {

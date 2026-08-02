@@ -8,14 +8,16 @@ import (
 
 // Entity maps to fleet.mileage_records (PRD §6, plan Task 8.1).
 type Entity struct {
-	ID              string    `gorm:"type:uuid;primaryKey"`
-	VehicleID       string    `gorm:"type:uuid;not null;index"`
-	Mileage         int       `gorm:"not null"`
-	RecordedAt      time.Time `gorm:"not null;index"`
-	Source          string    `gorm:"not null"` // fuel | maintenance | manual
-	SourceRefID     string
-	CreatedByUserID string
-	CreatedAt       time.Time
+	ID               string    `gorm:"type:uuid;primaryKey"`
+	VehicleID        string    `gorm:"type:uuid;not null;index"`
+	Mileage          int       `gorm:"not null"`
+	RecordedAt       time.Time `gorm:"not null;index"`
+	Source           string    `gorm:"not null"` // fuel | maintenance | manual
+	SourceRefID      string
+	CreatedByUserID  string
+	CreatedAt        time.Time
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeOperationID *string    `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.mileage_records" }

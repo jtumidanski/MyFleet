@@ -8,19 +8,20 @@ import (
 
 // Entity maps to fleet.maintenance_records (PRD §6, design §8.2).
 type Entity struct {
-	ID              string    `gorm:"type:uuid;primaryKey"`
-	VehicleID       string    `gorm:"type:uuid;not null;index"`
-	CategoryID      string    `gorm:"type:uuid;not null"`
-	Description     string    `gorm:"type:varchar(200)"`
-	PerformedAt     time.Time `gorm:"not null"`
-	Mileage         int
-	Cost            float64
-	Vendor          string
-	Notes           string
-	CreatedByUserID string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       *time.Time `gorm:"index"`
+	ID               string    `gorm:"type:uuid;primaryKey"`
+	VehicleID        string    `gorm:"type:uuid;not null;index"`
+	CategoryID       string    `gorm:"type:uuid;not null"`
+	Description      string    `gorm:"type:varchar(200)"`
+	PerformedAt      time.Time `gorm:"not null"`
+	Mileage          int
+	Cost             float64
+	Vendor           string
+	Notes            string
+	CreatedByUserID  string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeOperationID *string    `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.maintenance_records" }
@@ -28,9 +29,11 @@ func (Entity) TableName() string { return "fleet.maintenance_records" }
 // DocumentEntity maps to fleet.maintenance_record_documents — attached media
 // references for a maintenance record (receipts, photos, etc.).
 type DocumentEntity struct {
-	ID                  string `gorm:"type:uuid;primaryKey"`
-	MaintenanceRecordID string `gorm:"type:uuid;not null;index"`
-	MediaID             string `gorm:"type:uuid;not null"`
+	ID                  string     `gorm:"type:uuid;primaryKey"`
+	MaintenanceRecordID string     `gorm:"type:uuid;not null;index"`
+	MediaID             string     `gorm:"type:uuid;not null"`
+	DeletedAt           *time.Time `gorm:"index"`
+	PurgeOperationID    *string    `gorm:"type:uuid;index"`
 }
 
 func (DocumentEntity) TableName() string { return "fleet.maintenance_record_documents" }

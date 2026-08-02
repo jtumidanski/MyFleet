@@ -49,15 +49,17 @@ func newFuelDB(t *testing.T) *gorm.DB {
 			id TEXT PRIMARY KEY, fleet_id TEXT, nickname TEXT, make TEXT, model TEXT,
 			trim TEXT, year INTEGER, vin TEXT, current_mileage INTEGER,
 			primary_image_media_id TEXT, notes TEXT, created_at DATETIME,
-			updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME)`,
+			updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME,
+			purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.mileage_records (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, mileage INTEGER, recorded_at DATETIME,
-			source TEXT, source_ref_id TEXT, created_by_user_id TEXT, created_at DATETIME)`,
+			source TEXT, source_ref_id TEXT, created_by_user_id TEXT, created_at DATETIME,
+			deleted_at DATETIME, purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.fuel_logs (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, date DATETIME, mileage INTEGER,
 			gallons REAL, total_cost REAL, price_per_gallon REAL,
 			created_by_user_id TEXT, created_at DATETIME, updated_at DATETIME,
-			deleted_at DATETIME)`,
+			deleted_at DATETIME, purge_operation_id TEXT)`,
 		`CREATE TABLE outbox (
 			event_id TEXT PRIMARY KEY, type TEXT, payload BLOB,
 			occurred_at DATETIME, sent_at DATETIME)`,
