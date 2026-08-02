@@ -1,0 +1,87 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { LoginErrorCode } from './loginError';
+
+/**
+ * The module memoises its read at module scope (design §4.1), so every case
+ * needs a fresh module instance. `vi.resetModules()` clears the source-module
+ * registry; node_modules stay externalised, so this is cheap.
+ */
+async function freshModule(url: string) {
+  window.history.replaceState(null, '', url);
+  vi.resetModules();
+  return import('./loginError');
+}
+
+describe('consumeLoginError', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/login');
+  });
+
+  it.each<LoginErrorCode>(['cancelled', 'invalid_state', 'auth_failed', 'server_error'])(
+    'parses the %s code',
+    async (code) => {
+      const { consumeLoginError } = await freshModule(`/login#error=${code}`);
+      expect(consumeLoginError()).toBe(code);
+    },
+  );
+
+  // FR-STATE-6: anything outside the closed set is a generic failure, and the
+  // supplied string is discarded at the parser so nothing downstream can render
+  // it.
+  it.each([
+    ['an unknown code', '/login#error=totally_made_up'],
+    ['an empty value', '/login#error='],
+    ['a malformed percent-encoding', '/login#error=%zz'],
+    ['an injected string', '/login#error=%3Cscript%3Ealert(1)%3C%2Fscript%3E'],
+  ])('normalises %s to server_error', async (_name, url) => {
+    const { consumeLoginError } = await freshModule(url);
+    expect(consumeLoginError()).toBe('server_error');
+  });
+
+  it('returns null when the hash carries no error key', async () => {
+    const { consumeLoginError } = await freshModule('/login');
+    expect(consumeLoginError()).toBeNull();
+  });
+
+  // FR-STATE-8: the two fragment consumers are mutually exclusive. Reading the
+  // error must not eat the token AuthProvider is about to capture.
+  it('ignores and preserves an access_token fragment', async () => {
+    const { consumeLoginError } = await freshModule('/login#access_token=jwt-value');
+    expect(consumeLoginError()).toBeNull();
+    expect(window.location.hash).toBe('#access_token=jwt-value');
+  });
+
+  // FR-STATE-7: a reload or a shared URL must not resurrect a stale message.
+  it('strips the fragment while preserving path and query', async () => {
+    const { consumeLoginError } = await freshModule('/login?next=%2Fvehicles#error=auth_failed');
+    consumeLoginError();
+    expect(window.location.hash).toBe('');
+    expect(window.location.pathname).toBe('/login');
+    expect(window.location.search).toBe('?next=%2Fvehicles');
+  });
+
+  it('memoises so a second call survives the strip', async () => {
+    const { consumeLoginError } = await freshModule('/login#error=cancelled');
+    expect(consumeLoginError()).toBe('cancelled');
+    expect(consumeLoginError()).toBe('cancelled');
+  });
+});
+
+describe('noticeFor', () => {
+  it('presents a cancellation neutrally', async () => {
+    const { noticeFor } = await freshModule('/login');
+    expect(noticeFor('cancelled')).toEqual({ tone: 'neutral', message: 'Sign-in cancelled.' });
+  });
+
+  it.each<LoginErrorCode>(['invalid_state', 'auth_failed', 'server_error'])(
+    'presents %s as a danger with the shared copy',
+    async (code) => {
+      const { noticeFor } = await freshModule('/login');
+      expect(noticeFor(code)).toEqual({
+        tone: 'danger',
+        message:
+          "Sign-in didn't complete. Nothing was saved — try again, or use a different Google account.",
+      });
+    },
+  );
+});
