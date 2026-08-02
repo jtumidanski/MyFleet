@@ -48,8 +48,24 @@ type Deps struct {
 	Administrator Administrator
 	Auth          AuthVerifier
 	Downstream    []Downstream
+	// StatsSources are the remote counts /admin/stats fans out to. Separate
+	// from Downstream because the sets differ: auth-service contributes a count
+	// but is never purged.
+	StatsSources []StatsSource
+	// AuthUsers resolves member ids to email and display name for the fleet
+	// detail view. A failure here is a warning, not an error (FR-ADMIN-FLEET-5).
+	AuthUsers UserResolver
+	// VehicleStatus derives a vehicle's status in the fleet detail view. Nil
+	// simply omits status; the list view never uses it at all.
+	VehicleStatus VehicleStatusDeriver
 	Window        time.Duration
 	Now           func() time.Time
+}
+
+// UserResolver is the slice of adminclient.AuthClient the browse endpoints need.
+type UserResolver interface {
+	Users(ctx context.Context, ids []string) (map[string]adminclient.User, error)
+	ListUsers(ctx context.Context, page server.Page) ([]adminclient.User, int, error)
 }
 
 // Processor owns the purge lifecycle.
