@@ -2,6 +2,8 @@ package invite
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"net/mail"
 	"strings"
@@ -10,16 +12,49 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 )
 
+// defaultExpiry is how long a freshly minted or freshly rotated invite lives.
+const defaultExpiry = 7 * 24 * time.Hour
+
+// Limits carries the abuse-control knobs (FR-RATE-1…4). All three are enforced
+// server-side, here in the domain layer; the UI disabling a button is a
+// convenience, not the control.
+type Limits struct {
+	CreatePerWindow int
+	CreateWindow    time.Duration
+	ResendCooldown  time.Duration
+}
+
 // Processor contains invite business logic.
+//
+// The read path (Provider) is required. The write path (Administrator) and the
+// rate-limit knobs are injected through the With* chain because the internal,
+// read-only route (internal.go) needs neither — the same optional-collaborator
+// shape dbAdministrator uses for its emitters.
 type Processor struct {
-	log logrus.FieldLogger
-	p   Provider
+	log    logrus.FieldLogger
+	p      Provider
+	adm    Administrator
+	limits Limits
 }
 
 func NewProcessor(log logrus.FieldLogger, p Provider) *Processor {
 	return &Processor{log: log, p: p}
+}
+
+// WithAdministrator injects the write path. Required for Create/Resend/Accept/Delete.
+func (pr *Processor) WithAdministrator(adm Administrator) *Processor {
+	pr.adm = adm
+	return pr
+}
+
+// WithLimits injects the abuse-control knobs. Required for Create/Resend.
+func (pr *Processor) WithLimits(l Limits) *Processor {
+	pr.limits = l
+	return pr
 }
 
 // ListByFleet returns all invites for a fleet.
@@ -162,4 +197,117 @@ func (pr *Processor) CheckResendCooldown(inv Model, cooldown time.Duration, now 
 		return server.ErrTooManyRequests
 	}
 	return nil
+}
+
+// Create mints an invite: it validates the role and the address, enforces the
+// per-fleet creation window, generates the token, computes the expiry, builds
+// the model and hands it to the administrator, which writes the row and the
+// invite.created outbox event in one transaction.
+//
+// The caller (the HTTP handler) has already established that the requester may
+// invite into fleetID; authorization is not this function's job. Everything
+// after that is.
+//
+// Order is preserved from the handler this replaced: role, then address, then
+// the rate limit — checked BEFORE minting a token, so a throttled request costs
+// no entropy and no database write. Role and address both return
+// server.ErrValidation, so their relative order is not observable.
+func (pr *Processor) Create(ctx context.Context, fleetID, email, role, invitedByUserID, traceID string) (Model, error) {
+	// Role is copied verbatim onto the membership created at accept time, so an
+	// unrecognised value would mint a membership whose role no authz gate
+	// understands. Validate against the vocabulary membership owns.
+	if !membership.IsValidRole(role) {
+		return Model{}, server.ErrValidation
+	}
+	// A newline in an address must fail HERE, not be discovered by the SMTP
+	// layer hours later (PRD §8 Security).
+	if err := ValidateInviteEmail(email); err != nil {
+		return Model{}, err
+	}
+
+	now := time.Now()
+	if err := pr.CheckCreateLimit(ctx, fleetID, pr.limits.CreatePerWindow, pr.limits.CreateWindow, now); err != nil {
+		return Model{}, err
+	}
+
+	token, err := generateToken()
+	if err != nil {
+		return Model{}, err
+	}
+
+	m, err := NewBuilder().
+		SetFleetID(fleetID).
+		SetEmail(email).
+		SetRole(role).
+		SetToken(token).
+		SetExpiresAt(now.Add(defaultExpiry)).
+		SetInvitedByUserID(invitedByUserID).
+		Build()
+	if err != nil {
+		return Model{}, err
+	}
+	return pr.adm.Insert(ctx, m, traceID)
+}
+
+// Resend rotates inv's token and resets its expiry (FR-RSND-1…5). Resend is
+// used when the previous link never arrived or expired, so invalidating it costs
+// nothing and bounds the lifetime of a token that leaked into a mailbox.
+//
+// inv is supplied by the caller rather than re-read here: the handler must read
+// it first anyway to authorize the request against the invite's own fleet, and
+// re-reading would double the query for no gain. The administrator's UPDATE is
+// guarded by `accepted_at IS NULL` and checks RowsAffected, so the staleness of
+// inv cannot be exploited.
+//
+// now is computed once and used for BOTH the cooldown comparison and the
+// persisted updated_at, and is handed to the administrator explicitly. That is
+// what makes the updated_at on the returned Model provably the value written —
+// which is precisely what the next CheckResendCooldown reads.
+func (pr *Processor) Resend(ctx context.Context, inv Model, traceID string) (Model, error) {
+	// Accepted BEFORE cooldown, so an accepted invite never reports a cooldown
+	// it could never satisfy (FR-RSND-3).
+	if inv.AcceptedAt() != nil {
+		return Model{}, server.ErrConflict
+	}
+	now := time.Now()
+	if err := pr.CheckResendCooldown(inv, pr.limits.ResendCooldown, now); err != nil {
+		return Model{}, err
+	}
+	token, err := generateToken()
+	if err != nil {
+		return Model{}, err
+	}
+	return pr.adm.Resend(ctx, inv, token, now.Add(defaultExpiry), now, traceID)
+}
+
+// Accept enforces the accept preconditions and, if they hold, stamps
+// accepted_at and mints the membership in one transaction.
+//
+// The sentinel ValidateAccept returns reaches the caller unchanged, so a handler
+// can still tell an ordinary already-accepted/expired outcome apart from an
+// email mismatch or a corrupt row.
+func (pr *Processor) Accept(ctx context.Context, inv Model, userID, authedEmail, traceID string) (Model, error) {
+	if err := pr.ValidateAccept(inv, authedEmail); err != nil {
+		return Model{}, err
+	}
+	return pr.adm.Accept(ctx, inv, userID, traceID)
+}
+
+// Delete removes an invite. Authorization is the handler's; the write is not.
+func (pr *Processor) Delete(ctx context.Context, id string) error {
+	return pr.adm.Delete(ctx, id)
+}
+
+// generateToken returns a cryptographically random 32-byte hex string.
+//
+// The result is a BEARER CREDENTIAL: it is the whole of the authority the accept
+// route checks. It must never reach a log message, a log field or an error
+// string — see the sentinel comments above, which is why no error returned from
+// this file's operations carries one.
+func generateToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

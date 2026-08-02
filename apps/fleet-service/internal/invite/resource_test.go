@@ -342,3 +342,44 @@ func TestAcceptRoute_mismatchDetailDisclosesNeitherAddress(t *testing.T) {
 		t.Fatalf("409 body echoes the authenticated address: %s", body)
 	}
 }
+
+// TestResendInvite_acceptedIs409EvenInsideTheCooldown pins FR-RSND-3's
+// ordering at the HTTP layer. The invite was just created, so its updated_at is
+// well inside the one-hour cooldown and a naive implementation would answer
+// 429. It must answer 409: an accepted invite can never satisfy a cooldown, so
+// reporting one would tell the caller to come back later for something that
+// will never work.
+func TestResendInvite_acceptedIs409EvenInsideTheCooldown(t *testing.T) {
+	db := newInviteDB(t)
+	r := inviteTestRouter(t, db, Limits{CreatePerWindow: 100, CreateWindow: time.Hour, ResendCooldown: time.Hour})
+
+	id := createInvite(t, r, "f1", "a@example.com", "member")
+	accepted := time.Now().UTC()
+	if err := db.Model(&Entity{}).Where("id = ?", id).Update("accepted_at", &accepted).Error; err != nil {
+		t.Fatalf("stamp accepted_at: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, ownerRequest(http.MethodPost, "/fleets/f1/invites/"+id+"/resend", "f1", nil))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("resend of an accepted invite status = %d, want 409 (not the 429 the "+
+			"fresh updated_at would produce); body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestCreateInvite_unknownRoleIs422 pins the role-vocabulary check, which moved
+// from the handler into Processor.Create. An unrecognised role would otherwise
+// be copied verbatim onto the membership minted at accept time.
+func TestCreateInvite_unknownRoleIs422(t *testing.T) {
+	db := newInviteDB(t)
+	r := inviteTestRouter(t, db, Limits{CreatePerWindow: 100, CreateWindow: time.Hour})
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, ownerRequest(http.MethodPost, "/fleets/f1/invites", "f1", createInviteBody("a@example.com", "wizard")))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unknown role status = %d, want 422; body: %s", rec.Code, rec.Body.String())
+	}
+	if n := countRows(t, db, &Entity{}); n != 0 {
+		t.Fatalf("an invite row was written for an unknown role (%d rows)", n)
+	}
+}

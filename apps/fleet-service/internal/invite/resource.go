@@ -1,11 +1,8 @@
 package invite
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sirupsen/logrus"
@@ -17,19 +14,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
-	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 )
-
-const defaultExpiry = 7 * 24 * time.Hour
-
-// Limits carries the abuse-control knobs (FR-RATE-1…4). Both are enforced
-// server-side in the domain layer; the UI disabling a button is a convenience,
-// not the control.
-type Limits struct {
-	CreatePerWindow int
-	CreateWindow    time.Duration
-	ResendCooldown  time.Duration
-}
 
 // OwnerChecker performs the authoritative DB-level owner check (stale-claim guard,
 // design §9). Satisfied by *membership.Processor.
@@ -39,10 +24,18 @@ type OwnerChecker interface {
 
 // InitializeRoutes wires the JWT-protected invite endpoints.
 // ownerCheck is injected for the authoritative DB owner recheck on mutations.
+//
+// The handlers below authorize, call ONE domain operation and render. Token
+// minting, expiry computation, model construction, the rate limits and the
+// accept/resend invariants all live in the processor; the administrator is
+// reachable only through it.
 func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, record ActivityRecorder, emit InvitedEmitter, emitCreated CreatedEmitter, limits Limits) func(chi.Router) {
-	prov := NewProvider(db)
-	adm := NewAdministrator(db).WithActivityRecorder(record).WithEmitter(emit).WithCreatedEmitter(emitCreated)
-	proc := NewProcessor(log, prov)
+	proc := NewProcessor(log, NewProvider(db)).
+		WithAdministrator(NewAdministrator(db).
+			WithActivityRecorder(record).
+			WithEmitter(emit).
+			WithCreatedEmitter(emitCreated)).
+		WithLimits(limits)
 	// Read-only, and only to name the fleet an invitee is being asked to join
 	// — they hold no membership yet, so they cannot resolve the id themselves.
 	fleets := fleet.NewProvider(db)
@@ -78,65 +71,18 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			// Role is copied verbatim onto the membership created at accept
-			// time, so an unrecognised value would mint a membership whose
-			// role no authz gate understands. Validate against the vocabulary
-			// membership owns.
-			if !membership.IsValidRole(attrs.Role) {
-				server.WriteError(w, server.ErrValidation)
-				return
-			}
-			// A newline in an address must fail HERE, not be discovered by the
-			// SMTP layer hours later (PRD §8 Security).
-			if err := ValidateInviteEmail(attrs.Email); err != nil {
-				server.WriteError(w, err)
-				return
-			}
-
-			// Per-fleet creation window (FR-RATE-1). Checked before minting a
-			// token so a throttled request costs no entropy and no DB write.
-			if err := proc.CheckCreateLimit(req.Context(), fleetID, limits.CreatePerWindow, limits.CreateWindow, time.Now()); err != nil {
-				// ErrTooManyRequests is the routine rate-limit outcome; anything
-				// else means the count query itself failed.
-				if !errors.Is(err, server.ErrTooManyRequests) {
+			created, err := proc.Create(req.Context(), fleetID, attrs.Email, attrs.Role, identity.UserID, traceID)
+			if err != nil {
+				// ErrValidation (bad role or address) and ErrTooManyRequests
+				// (the per-fleet window, FR-RATE-1) are routine client
+				// outcomes. Anything else is the count query, the entropy
+				// source or the insert failing — an operator's problem.
+				if !errors.Is(err, server.ErrValidation) && !errors.Is(err, server.ErrTooManyRequests) {
 					log.WithError(err).WithFields(logrus.Fields{
 						"fleet_id": fleetID,
 						"trace_id": traceID,
-					}).Error("check invite create limit")
+					}).Error("create invite")
 				}
-				server.WriteError(w, err)
-				return
-			}
-
-			token, err := generateToken()
-			if err != nil {
-				log.WithError(err).WithFields(logrus.Fields{
-					"fleet_id": fleetID,
-					"trace_id": traceID,
-				}).Error("generate invite token")
-				server.WriteError(w, err)
-				return
-			}
-
-			m, err := NewBuilder().
-				SetFleetID(fleetID).
-				SetEmail(attrs.Email).
-				SetRole(attrs.Role).
-				SetToken(token).
-				SetExpiresAt(time.Now().Add(defaultExpiry)).
-				SetInvitedByUserID(identity.UserID).
-				Build()
-			if err != nil {
-				server.WriteError(w, err)
-				return
-			}
-
-			created, err := adm.Insert(req.Context(), m, traceID)
-			if err != nil {
-				log.WithError(err).WithFields(logrus.Fields{
-					"fleet_id": fleetID,
-					"trace_id": traceID,
-				}).Error("create invite")
 				server.WriteError(w, err)
 				return
 			}
@@ -245,7 +191,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			if err := adm.Delete(req.Context(), id); err != nil {
+			if err := proc.Delete(req.Context(), id); err != nil {
 				log.WithError(err).WithFields(logrus.Fields{
 					"invite_id": id,
 					"fleet_id":  inv.FleetID(),
@@ -311,34 +257,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			// Accepted BEFORE cooldown, so an accepted invite never reports a
-			// cooldown it could never satisfy (FR-RSND-3).
-			if inv.AcceptedAt() != nil {
-				server.WriteError(w, server.ErrConflict)
-				return
-			}
-			now := time.Now()
-			if err := proc.CheckResendCooldown(inv, limits.ResendCooldown, now); err != nil {
-				server.WriteError(w, err)
-				return
-			}
-
-			token, err := generateToken()
+			updated, err := proc.Resend(req.Context(), inv, traceID)
 			if err != nil {
-				log.WithError(err).WithFields(logrus.Fields{
-					"invite_id": inviteID,
-					"fleet_id":  fleetID,
-					"trace_id":  traceID,
-				}).Error("generate invite token")
-				server.WriteError(w, err)
-				return
-			}
-			updated, err := adm.Resend(req.Context(), inv, token, now.Add(defaultExpiry), now, traceID)
-			if err != nil {
-				// ErrConflict here is the TOCTOU race (deleted/accepted
-				// concurrently, see administrator.go Resend) — a routine
-				// outcome the caller already handles, not an operator fault.
-				if !errors.Is(err, server.ErrConflict) {
+				// ErrConflict is either the already-accepted invariant
+				// (FR-RSND-3, checked before the cooldown so an accepted invite
+				// never reports a cooldown it could never satisfy) or the TOCTOU
+				// race the administrator's UPDATE catches; ErrTooManyRequests is
+				// the cooldown itself (FR-RATE-2). All routine. Anything else is
+				// the entropy source or the UPDATE failing.
+				if !errors.Is(err, server.ErrConflict) && !errors.Is(err, server.ErrTooManyRequests) {
 					log.WithError(err).WithFields(logrus.Fields{
 						"invite_id": inviteID,
 						"fleet_id":  fleetID,
@@ -372,51 +299,39 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			if err := proc.ValidateAccept(inv, identity.Email); err != nil {
+			updated, err := proc.Accept(req.Context(), inv, identity.UserID, identity.Email, traceID)
+			if err != nil {
 				// Already-accepted and expired are ordinary user outcomes the
-				// response body now explains; logging them adds noise. The other
-				// two are worth being greppable: a mismatch is either a genuine
+				// response body explains; logging them adds noise. The next two
+				// are worth being greppable: a mismatch is either a genuine
 				// wrong-account attempt or a regression of the empty-email-claim
 				// defect, and an unusable invite is a corrupt row an operator
-				// should chase. Invite id and correlation id only: never
-				// inv.Email(), never identity.Email (PRD FR-10/§8). The invite id
-				// joins to the row for an operator who already has database
-				// access, so the line itself discloses nothing.
+				// should chase. Anything else is the accept transaction failing.
+				//
+				// Invite id and correlation id only: never inv.Email(), never
+				// identity.Email (PRD FR-10/§8). The invite id joins to the row
+				// for an operator who already has database access, so the line
+				// itself discloses nothing.
 				fields := logrus.Fields{
-					"invite_id":      inv.ID(),
-					"correlation_id": telemetry.CorrelationIDFromContext(req.Context()),
+					"invite_id": inv.ID(),
+					"fleet_id":  inv.FleetID(),
+					"trace_id":  traceID,
 				}
 				switch {
 				case errors.Is(err, ErrEmailMismatch):
 					log.WithFields(fields).Warn("invite accept rejected: email mismatch")
 				case errors.Is(err, ErrInviteUnusable):
 					log.WithFields(fields).Error("invite accept rejected: invite row has no email address")
+				case errors.Is(err, ErrAlreadyAccepted), errors.Is(err, ErrInviteExpired):
+					// Routine; the 409 body says which.
+				default:
+					log.WithError(err).WithFields(fields).
+						WithField("user_id", identity.UserID).Error("accept invite")
 				}
-				server.WriteError(w, err)
-				return
-			}
-
-			updated, err := adm.Accept(req.Context(), inv, identity.UserID, traceID)
-			if err != nil {
-				log.WithError(err).WithFields(logrus.Fields{
-					"invite_id": inv.ID(),
-					"fleet_id":  inv.FleetID(),
-					"user_id":   identity.UserID,
-					"trace_id":  traceID,
-				}).Error("accept invite")
 				server.WriteError(w, err)
 				return
 			}
 			server.WriteJSON(w, http.StatusOK, server.Document{Data: Transform(updated)})
 		})
 	}
-}
-
-// generateToken returns a cryptographically random 32-byte hex string.
-func generateToken() (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
 }

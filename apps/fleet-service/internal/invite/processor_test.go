@@ -347,3 +347,267 @@ func TestListRedeemableForEmail_queriesWithTheAuthenticatedAddress(t *testing.T)
 		t.Fatalf("provider queried with %q, want the authenticated address", stub.redeemableCalls)
 	}
 }
+
+// stubAdministrator records what the processor handed the write layer, so the
+// tests below can assert on the values the domain COMPUTED rather than on
+// whatever ended up in a database.
+type stubAdministrator struct {
+	inserted  []Model
+	insertErr error
+
+	resendCalls []struct {
+		inv            Model
+		token          string
+		expiresAt, now time.Time
+		traceID        string
+	}
+	accepted []Model
+	deleted  []string
+}
+
+func (s *stubAdministrator) Insert(_ context.Context, m Model, _ string) (Model, error) {
+	if s.insertErr != nil {
+		return Model{}, s.insertErr
+	}
+	s.inserted = append(s.inserted, m)
+	return m, nil
+}
+
+func (s *stubAdministrator) Resend(_ context.Context, inv Model, newToken string, expiresAt, now time.Time, traceID string) (Model, error) {
+	s.resendCalls = append(s.resendCalls, struct {
+		inv            Model
+		token          string
+		expiresAt, now time.Time
+		traceID        string
+	}{inv, newToken, expiresAt, now, traceID})
+	e := inv.ToEntity()
+	e.Token, e.ExpiresAt, e.UpdatedAt = newToken, expiresAt, now
+	return Make(e), nil
+}
+
+func (s *stubAdministrator) Delete(_ context.Context, id string) error {
+	s.deleted = append(s.deleted, id)
+	return nil
+}
+
+func (s *stubAdministrator) Accept(_ context.Context, inv Model, _, _ string) (Model, error) {
+	s.accepted = append(s.accepted, inv)
+	return inv, nil
+}
+
+func newWritingProcessor(limits Limits) (*Processor, *stubAdministrator) {
+	adm := &stubAdministrator{}
+	return NewProcessor(logrus.New(), &stubProvider{}).WithAdministrator(adm).WithLimits(limits), adm
+}
+
+// Create owns the role vocabulary check that used to sit in the HTTP handler.
+// It must reject before anything is written.
+func TestProcessorCreate_rejectsAnUnknownRoleBeforeWriting(t *testing.T) {
+	p, adm := newWritingProcessor(Limits{CreatePerWindow: 10, CreateWindow: time.Hour})
+
+	_, err := p.Create(context.Background(), "f1", "a@b.com", "wizard", "owner-1", "trace-1")
+	if !errors.Is(err, server.ErrValidation) {
+		t.Fatalf("err = %v, want server.ErrValidation", err)
+	}
+	if len(adm.inserted) != 0 {
+		t.Fatalf("an invite was written for an unknown role: %+v", adm.inserted)
+	}
+}
+
+// Create owns the address check too, and must reject before writing.
+func TestProcessorCreate_rejectsAMalformedAddressBeforeWriting(t *testing.T) {
+	p, adm := newWritingProcessor(Limits{CreatePerWindow: 10, CreateWindow: time.Hour})
+
+	_, err := p.Create(context.Background(), "f1", "Bob <b@x.com>", "member", "owner-1", "trace-1")
+	if !errors.Is(err, server.ErrValidation) {
+		t.Fatalf("err = %v, want server.ErrValidation", err)
+	}
+	if len(adm.inserted) != 0 {
+		t.Fatalf("an invite was written for a malformed address: %+v", adm.inserted)
+	}
+}
+
+// Token minting and expiry computation moved out of the handler; this pins that
+// the processor actually does both, and that two invites never share a token.
+func TestProcessorCreate_mintsAFreshTokenAndAnExpiry(t *testing.T) {
+	p, adm := newWritingProcessor(Limits{CreatePerWindow: 10, CreateWindow: time.Hour})
+
+	before := time.Now()
+	first, err := p.Create(context.Background(), "f1", "a@b.com", "member", "owner-1", "trace-1")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	second, err := p.Create(context.Background(), "f1", "b@b.com", "member", "owner-1", "trace-1")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if first.Token() == "" || first.Token() == second.Token() {
+		t.Fatal("Create must mint a distinct, non-empty token per invite")
+	}
+	if len(first.Token()) != 64 {
+		t.Fatalf("token is %d hex chars, want 64 (32 random bytes)", len(first.Token()))
+	}
+	if got := first.ExpiresAt(); got.Before(before.Add(defaultExpiry)) || got.After(time.Now().Add(defaultExpiry)) {
+		t.Fatalf("expires_at = %v, want ~now+%v", got, defaultExpiry)
+	}
+	if first.FleetID() != "f1" || first.Email() != "a@b.com" ||
+		first.Role() != "member" || first.InvitedByUserID() != "owner-1" {
+		t.Fatalf("Create lost a field: %+v", first)
+	}
+	// The administrator, not the handler, is what receives the built model.
+	if len(adm.inserted) != 2 {
+		t.Fatalf("administrator saw %d inserts, want 2", len(adm.inserted))
+	}
+	if adm.inserted[0].Token() != first.Token() {
+		t.Fatal("the model handed to the administrator is not the one returned")
+	}
+}
+
+// The rate limit is checked BEFORE a token is minted, so a throttled request
+// costs no entropy and no write (FR-RATE-1).
+func TestProcessorCreate_overTheWindowLimitWritesNothing(t *testing.T) {
+	adm := &stubAdministrator{}
+	prov := &stubProvider{countByFleet: map[string]int64{"f1": 20}}
+	p := NewProcessor(logrus.New(), prov).WithAdministrator(adm).
+		WithLimits(Limits{CreatePerWindow: 20, CreateWindow: 24 * time.Hour})
+
+	_, err := p.Create(context.Background(), "f1", "a@b.com", "member", "owner-1", "trace-1")
+	if !errors.Is(err, server.ErrTooManyRequests) {
+		t.Fatalf("err = %v, want server.ErrTooManyRequests", err)
+	}
+	if len(adm.inserted) != 0 {
+		t.Fatalf("a throttled request still wrote: %+v", adm.inserted)
+	}
+}
+
+// FR-RSND-3, moved out of the handler: the accepted check runs BEFORE the
+// cooldown, so an accepted invite never reports a cooldown it could never
+// satisfy. updated_at here is old enough that the cooldown would otherwise
+// pass — proving the order, not just the outcome.
+func TestProcessorResend_reportsAcceptedBeforeCooldown(t *testing.T) {
+	accepted := time.Now().Add(-time.Hour)
+	inv := Make(Entity{
+		ID: "i1", FleetID: "f1", Email: "a@b.com", Role: "member", Token: "tok-1",
+		ExpiresAt: time.Now().Add(time.Hour), AcceptedAt: &accepted,
+		InvitedByUserID: "owner-1", UpdatedAt: time.Now(),
+	})
+	p, adm := newWritingProcessor(Limits{ResendCooldown: time.Hour})
+
+	if _, err := p.Resend(context.Background(), inv, "trace-1"); !errors.Is(err, server.ErrConflict) {
+		t.Fatalf("err = %v, want server.ErrConflict (409), not the 429 the fresh updated_at would give", err)
+	}
+	if len(adm.resendCalls) != 0 {
+		t.Fatalf("an accepted invite reached the administrator: %+v", adm.resendCalls)
+	}
+}
+
+func TestProcessorResend_insideTheCooldownWritesNothing(t *testing.T) {
+	inv := Make(Entity{
+		ID: "i1", FleetID: "f1", Email: "a@b.com", Role: "member", Token: "tok-1",
+		ExpiresAt: time.Now().Add(time.Hour), InvitedByUserID: "owner-1",
+		UpdatedAt: time.Now().Add(-time.Minute),
+	})
+	p, adm := newWritingProcessor(Limits{ResendCooldown: time.Hour})
+
+	if _, err := p.Resend(context.Background(), inv, "trace-1"); !errors.Is(err, server.ErrTooManyRequests) {
+		t.Fatalf("err = %v, want server.ErrTooManyRequests", err)
+	}
+	if len(adm.resendCalls) != 0 {
+		t.Fatalf("a throttled resend reached the administrator: %+v", adm.resendCalls)
+	}
+}
+
+// The property the resend flow is built around: ONE `now` is computed, used as
+// the cooldown clock, handed to the administrator as the value to persist in
+// updated_at, and used as the base for the new expiry. The next
+// CheckResendCooldown reads exactly that persisted value, so the returned
+// updated_at must be provably the one written — not a second time.Now().
+func TestProcessorResend_passesOneNowForBothUpdatedAtAndExpiry(t *testing.T) {
+	inv := Make(Entity{
+		ID: "i1", FleetID: "f1", Email: "a@b.com", Role: "member", Token: "tok-1",
+		ExpiresAt: time.Now().Add(time.Hour), InvitedByUserID: "owner-1",
+		UpdatedAt: time.Now().Add(-2 * time.Hour),
+	})
+	p, adm := newWritingProcessor(Limits{ResendCooldown: time.Minute})
+
+	updated, err := p.Resend(context.Background(), inv, "trace-1")
+	if err != nil {
+		t.Fatalf("Resend: %v", err)
+	}
+	if len(adm.resendCalls) != 1 {
+		t.Fatalf("administrator called %d times, want 1", len(adm.resendCalls))
+	}
+	call := adm.resendCalls[0]
+	if !call.expiresAt.Equal(call.now.Add(defaultExpiry)) {
+		t.Fatalf("expires_at %v is not now(%v)+%v — a second time.Now() crept in",
+			call.expiresAt, call.now, defaultExpiry)
+	}
+	if !updated.UpdatedAt().Equal(call.now) {
+		t.Fatalf("returned updated_at %v is not the value handed to the administrator (%v); "+
+			"the cooldown reads the persisted one, so they must be identical",
+			updated.UpdatedAt(), call.now)
+	}
+	if call.token == "" || call.token == inv.Token() {
+		t.Fatalf("Resend must mint a fresh token, got %q", call.token)
+	}
+	if call.traceID != "trace-1" {
+		t.Fatalf("traceID = %q, want trace-1", call.traceID)
+	}
+}
+
+// Accept enforces the preconditions before writing, and passes the sentinel
+// through unchanged so the handler can still tell the cases apart.
+func TestProcessorAccept_rejectsAMismatchWithoutWriting(t *testing.T) {
+	inv := mk("invited@b.com", time.Now().Add(time.Hour), nil)
+	p, adm := newWritingProcessor(Limits{})
+
+	_, err := p.Accept(context.Background(), inv, "user-1", "other@b.com", "trace-1")
+	if !errors.Is(err, ErrEmailMismatch) {
+		t.Fatalf("err = %v, want ErrEmailMismatch", err)
+	}
+	if len(adm.accepted) != 0 {
+		t.Fatalf("a rejected accept still wrote: %+v", adm.accepted)
+	}
+}
+
+func TestProcessorAccept_writesWhenThePreconditionsHold(t *testing.T) {
+	inv := mk("a@b.com", time.Now().Add(time.Hour), nil)
+	p, adm := newWritingProcessor(Limits{})
+
+	if _, err := p.Accept(context.Background(), inv, "user-1", "a@b.com", "trace-1"); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if len(adm.accepted) != 1 {
+		t.Fatalf("administrator saw %d accepts, want 1", len(adm.accepted))
+	}
+}
+
+// The invite token is a bearer credential: no error the domain returns may
+// carry it, or it lands in whatever the caller logs.
+func TestProcessorErrors_neverCarryTheToken(t *testing.T) {
+	tok := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	inv := Make(Entity{
+		ID: "i1", FleetID: "f1", Email: "invited@b.com", Role: "member", Token: tok,
+		ExpiresAt: time.Now().Add(time.Hour), InvitedByUserID: "owner-1",
+		UpdatedAt: time.Now(),
+	})
+	p, _ := newWritingProcessor(Limits{ResendCooldown: time.Hour, CreateWindow: time.Hour})
+
+	var errs []error
+	_, err := p.Resend(context.Background(), inv, "trace-1")
+	errs = append(errs, err)
+	_, err = p.Accept(context.Background(), inv, "user-1", "other@b.com", "trace-1")
+	errs = append(errs, err)
+	_, err = p.Create(context.Background(), "f1", "a@b.com", "member", "owner-1", "trace-1")
+	errs = append(errs, err)
+
+	for _, e := range errs {
+		if e == nil {
+			t.Fatal("expected every call above to fail")
+		}
+		if strings.Contains(e.Error(), tok) {
+			t.Fatalf("error text carries the invite token: %v", e)
+		}
+	}
+}
