@@ -284,3 +284,37 @@ describe('VehiclesPage — locked while the create request is in flight', () => 
     ).toBeDisabled();
   });
 });
+
+describe('VehiclesPage — focus after the empty state unmounts', () => {
+  it('leaves focus on the header trigger after creating from the empty state', async () => {
+    vi.mocked(vehicleService.listByFleet)
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValue({ data: [makeVehicle()] });
+
+    renderWithProviders(<VehiclesPage />);
+    await waitFor(() => expect(triggers()).toHaveLength(2));
+
+    await userEvent.click(triggers()[1]);
+    await fillRequired();
+    await userEvent.click(submitButton());
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // The empty-state button is gone with the empty state, so the default
+    // restoration would have dropped focus on <body>.
+    await waitFor(() => expect(document.activeElement).toBe(headerTrigger()));
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it('returns focus to the empty-state trigger when the create is abandoned', async () => {
+    // Cancelling leaves the empty state standing, so the redirect must not fire
+    // and the button the user actually came from keeps its focus.
+    renderWithProviders(<VehiclesPage />);
+    await waitFor(() => expect(triggers()).toHaveLength(2));
+
+    const emptyTrigger = triggers()[1];
+    await userEvent.click(emptyTrigger);
+    await userEvent.keyboard('{Escape}');
+
+    await waitFor(() => expect(document.activeElement).toBe(emptyTrigger));
+  });
+});

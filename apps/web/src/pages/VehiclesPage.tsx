@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { useAuth } from '../context/AuthContext';
@@ -36,6 +36,18 @@ export function VehiclesPage() {
   const createVehicle = useCreateVehicle(activeFleetId ?? '');
   const [open, setOpen] = useState(false);
 
+  // Refs, not state: nothing renders from these, they are read only inside
+  // onCloseAutoFocus, and making them state would re-render for nothing.
+  const openedFromRef = useRef<'header' | 'empty'>('header');
+  const createdRef = useRef(false);
+  const headerButtonRef = useRef<HTMLButtonElement>(null);
+
+  const openFrom = (source: 'header' | 'empty') => {
+    openedFromRef.current = source;
+    createdRef.current = false;
+    setOpen(true);
+  };
+
   // Viewers are read-only; only members/owners can add vehicles.
   const canWrite = role === 'owner' || role === 'member';
 
@@ -43,6 +55,7 @@ export function VehiclesPage() {
     try {
       await createVehicle.mutateAsync(toCreateAttributes(values));
       toast.success('Vehicle added');
+      createdRef.current = true;
       setOpen(false);
     } catch (err) {
       // Leave the dialog open so the typed values survive for a retry.
@@ -56,7 +69,7 @@ export function VehiclesPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Vehicles</h1>
         {canWrite && (
-          <Button type="button" onClick={() => setOpen(true)}>
+          <Button type="button" ref={headerButtonRef} onClick={() => openFrom('header')}>
             Add Vehicle
           </Button>
         )}
@@ -75,7 +88,18 @@ export function VehiclesPage() {
         >
           {/* Unmounted on close, which is what discards the form state — do not
               add forceMount. */}
-          <DialogContent dismissible={!createVehicle.isPending}>
+          <DialogContent
+            dismissible={!createVehicle.isPending}
+            onCloseAutoFocus={(event) => {
+              // The empty-state button unmounts with the empty state once the
+              // first vehicle exists, so the opener we would restore to is
+              // about to be detached. Send focus to the header trigger instead.
+              if (openedFromRef.current === 'empty' && createdRef.current) {
+                event.preventDefault();
+                headerButtonRef.current?.focus();
+              }
+            }}
+          >
             <DialogHeader>
               <DialogTitle>Add Vehicle</DialogTitle>
               <DialogDescription>Make, model, and year are required.</DialogDescription>
@@ -96,7 +120,7 @@ export function VehiclesPage() {
           isLoading={isLoading}
           emptyAction={
             canWrite ? (
-              <Button type="button" onClick={() => setOpen(true)}>
+              <Button type="button" onClick={() => openFrom('empty')}>
                 Add Vehicle
               </Button>
             ) : undefined
