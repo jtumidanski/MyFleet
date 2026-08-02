@@ -88,6 +88,19 @@ describe('RequireAuth', () => {
     expect(screen.queryByText('protected content')).not.toBeInTheDocument();
   });
 
+  // Defence in depth for the fleetless-onboarding bug. Every other test in this
+  // file mocks `activeFleetId: null` — a shape the backend did not actually
+  // produce, which is why they stayed green while production stranded users.
+  // The guard must agree with the pages, which all test `!activeFleetId`; if it
+  // only recognises `null`, an empty string means "has a fleet" here and "has
+  // none" there, and the user lands on "No fleet selected" with no way forward.
+  it('treats an empty activeFleetId as no fleet, exactly as the pages do', () => {
+    mockAuth.mockReturnValue(baseAuth({ isAuthenticated: true, activeFleetId: '' }));
+    renderGuarded('/');
+    expect(screen.getByText('onboarding screen')).toBeInTheDocument();
+    expect(screen.queryByText('protected content')).not.toBeInTheDocument();
+  });
+
   // An invitee has no fleet until the invite is accepted, so the onboarding
   // bounce must not swallow the accept route — it would make invites for new
   // users unacceptable.

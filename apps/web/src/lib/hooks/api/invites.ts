@@ -32,6 +32,7 @@ export const inviteKeys = {
   all: ['invites'] as const,
   lists: () => [...inviteKeys.all, 'list'] as const,
   list: (params: { fleetId: string }) => [...inviteKeys.lists(), params] as const,
+  pending: () => [...inviteKeys.all, 'pending'] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -48,6 +49,27 @@ export function useInvites(fleetId: string | null | undefined) {
     enabled: !!fleetId,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
+    select: (result) => result.data,
+  });
+}
+
+/**
+ * GET /api/fleet/invites/pending — invites waiting for the signed-in user.
+ *
+ * Unlike every other invite query this one is not fleet-scoped, and it is meant
+ * to run for a user who has no fleet at all: it is what makes an invite
+ * discoverable to someone who was invited before they had an account and never
+ * received the link.
+ *
+ * `staleTime: 0` — the invitee may be looking at this page precisely because
+ * someone just invited them, and a cached "nothing waiting" is the failure this
+ * hook exists to prevent.
+ */
+export function usePendingInvites() {
+  return useQuery({
+    queryKey: inviteKeys.pending(),
+    queryFn: () => inviteService.listPending(),
+    staleTime: 0,
     select: (result) => result.data,
   });
 }
