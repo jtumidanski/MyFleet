@@ -9,7 +9,10 @@ import type {
   UpdateMaintenanceScheduleAttributes,
   CompleteMaintenanceScheduleAttributes,
 } from '../../../types/models/maintenanceSchedule';
-import type { MaintenanceCategoryKind } from '../../../types/models/maintenanceCategory';
+import type {
+  CreateMaintenanceCategoryAttributes,
+  MaintenanceCategoryKind,
+} from '../../../types/models/maintenanceCategory';
 
 // ---------------------------------------------------------------------------
 // Query key factories
@@ -77,6 +80,28 @@ export function useMaintenanceCategories(kind?: MaintenanceCategoryKind) {
     staleTime: 10 * 60 * 1000, // Categories are relatively static
     gcTime: 30 * 60 * 1000,
     select: (result) => result.data,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Category mutations
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/fleet/maintenance-categories — create a free-form category.
+ *
+ * The server is idempotent on case-insensitive name, so a "create" may return
+ * a pre-existing system or fleet row. Callers must use the returned resource's
+ * id rather than assuming a new one was minted.
+ */
+export function useCreateMaintenanceCategory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (attrs: CreateMaintenanceCategoryAttributes) =>
+      maintenanceCategoryService.create(attrs),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: maintenanceCategoryKeys.all });
+    },
   });
 }
 
