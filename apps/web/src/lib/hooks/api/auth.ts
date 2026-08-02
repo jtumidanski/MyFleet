@@ -15,13 +15,28 @@ export interface MeResult {
   role: AuthMeta['role'];
 }
 
+/**
+ * Collapses an absent value to `null`.
+ *
+ * "No active fleet" has exactly one representation in this app: `null`. It must
+ * not also be expressible as `""`, because `??` passes an empty string straight
+ * through — so `RequireAuth`'s `activeFleetId === null` saw a fleet while every
+ * page's `!activeFleetId` saw none, and fleetless users sat on "No fleet
+ * selected" with onboarding unreachable. auth-service now sends null (see
+ * nullIfEmpty in apps/auth-service/internal/user/resource.go); this is the
+ * boundary that guarantees it regardless of what arrives.
+ */
+function absentAsNull<T extends string>(value: T | null | undefined): T | null {
+  return value === undefined || value === null || value === '' ? null : value;
+}
+
 // `GET /api/auth/me` → user resource + meta:{ activeFleetId, role }.
 async function fetchMe(): Promise<MeResult> {
   const doc = await apiClient.request<JsonApiDocument<User> & { meta?: AuthMeta }>('/api/auth/me');
   return {
     user: doc.data,
-    activeFleetId: doc.meta?.activeFleetId ?? null,
-    role: doc.meta?.role ?? null,
+    activeFleetId: absentAsNull(doc.meta?.activeFleetId),
+    role: absentAsNull(doc.meta?.role),
   };
 }
 

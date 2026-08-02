@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../../../test/renderWithProviders';
 import { stubObjectUrl, unstubObjectUrl } from '../../../test/objectUrl';
 import { mediaService } from '../../../services/api/MediaService';
 import { DEFAULT_RUNTIME_CONFIG, loadRuntimeConfig } from '../../../lib/config/runtimeConfig';
-import { VehicleCard } from './VehicleCard';
+import { VehicleCard, VehicleCardSkeleton } from './VehicleCard';
 import type { Vehicle } from '../../../types/models/vehicle';
 
 vi.mock('../../../services/api/MediaService', () => ({
@@ -52,43 +54,259 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe('VehicleCard', () => {
+/**
+ * Renders the router's current pathname so a test can assert navigation.
+ *
+ * Assert on `.textContent` with `toBe`, never `toHaveTextContent('/')` — that
+ * matcher does a substring match, and '/vehicles/v1' contains '/', so the
+ * "did NOT navigate" assertion would pass even when the bug is present.
+ */
+function LocationProbe() {
+  return <span data-testid="pathname">{useLocation().pathname}</span>;
+}
+
+describe('VehicleCard — photo', () => {
   it('renders the vehicle photo when one is set', async () => {
     renderWithProviders(<VehicleCard vehicle={makeVehicle({ primaryImageMediaId: 'm1' })} />);
     expect(await screen.findByAltText('Photo of 2019 Honda Civic')).toBeInTheDocument();
   });
 
-  it('renders the placeholder when no photo is set', () => {
+  it('renders the hero at a 16:9 aspect ratio', async () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ primaryImageMediaId: 'm1' })} />);
+    expect(await screen.findByAltText('Photo of 2019 Honda Civic')).toHaveClass(
+      'aspect-[16/9]',
+      'w-full',
+    );
+  });
+
+  it('renders the placeholder at identical dimensions when no photo is set', () => {
     renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
-    expect(screen.getByRole('img', { name: 'No photo' })).toBeInTheDocument();
+    const placeholder = screen.getByRole('img', { name: 'No photo' });
+    expect(placeholder).toHaveClass('aspect-[16/9]', 'w-full');
     expect(mediaService.getContentBlob).not.toHaveBeenCalled();
   });
 
-  it('navigates to the detail page through a real anchor named for the vehicle', () => {
-    // A real <a href> is what preserves middle-click and cmd/ctrl-click; an
-    // onClick handler on a <button> would not. And the label must name the
-    // vehicle — a grid of "Open details" buttons is unusable with a screen
-    // reader.
-    renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
+  it('renders the placeholder with no error tile and no toast when the photo fails', async () => {
+    vi.mocked(mediaService.getContentBlob).mockRejectedValue(new Error('nope'));
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ primaryImageMediaId: 'm1' })} />);
 
-    const link = screen.getByRole('link', { name: 'Open details for 2019 Honda Civic' });
+    expect(await screen.findByRole('img', { name: 'Photo unavailable' })).toBeInTheDocument();
+    expect(screen.queryByText(/failed/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('VehicleCard — banner', () => {
+  const banner = () => screen.getByTestId('vehicle-card-banner');
+
+  it('tints an overdue vehicle in danger and states the overrun', () => {
+    renderWithProviders(
+      <VehicleCard
+        vehicle={makeVehicle({
+          status: 'Overdue',
+          nextDue: { state: 'overdue', axis: 'mileage', miles: 1120 },
+        })}
+      />,
+    );
+    expect(screen.getByText('Service overdue by 1,120 mi')).toBeInTheDocument();
+    expect(banner()).toHaveClass('bg-danger-subtle', 'text-danger-subtle-foreground');
+  });
+
+  it('tints an upcoming vehicle in warning and states the remaining distance', () => {
+    renderWithProviders(
+      <VehicleCard
+        vehicle={makeVehicle({
+          status: 'Upcoming Maintenance',
+          nextDue: { state: 'upcoming', axis: 'mileage', miles: 310 },
+        })}
+      />,
+    );
+    expect(screen.getByText('Service due in 310 mi')).toBeInTheDocument();
+    expect(banner()).toHaveClass('bg-warning-subtle', 'text-warning-subtle-foreground');
+  });
+
+  it('leaves a healthy vehicle untinted', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ status: 'Healthy' })} />);
+    expect(screen.getByText('Up to date')).toBeInTheDocument();
+    expect(banner()).toHaveClass('text-muted-foreground');
+    expect(banner().className).not.toMatch(/bg-(danger|warning|success)-subtle/);
+  });
+
+  it('leaves an inactive vehicle untinted and states the dormancy', () => {
+    const longAgo = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000).toISOString();
+    renderWithProviders(
+      <VehicleCard vehicle={makeVehicle({ status: 'Inactive', lastActivityAt: longAgo })} />,
+    );
+    expect(screen.getByText(/No activity in \d+ months/)).toBeInTheDocument();
+    expect(banner().className).not.toMatch(/bg-(danger|warning|success)-subtle/);
+  });
+
+  it('renders a time-axis schedule as a day count, never as mileage', () => {
+    renderWithProviders(
+      <VehicleCard
+        vehicle={makeVehicle({
+          status: 'Overdue',
+          nextDue: { state: 'overdue', axis: 'time', days: 12 },
+        })}
+      />,
+    );
+    expect(screen.getByText('Service overdue by 12 days')).toBeInTheDocument();
+    expect(screen.queryByText(/mi$/)).not.toBeInTheDocument();
+  });
+
+  it('renders the quiet banner when status is absent', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
+    expect(screen.getByText('Status unavailable')).toBeInTheDocument();
+    expect(banner().className).not.toMatch(/bg-(danger|warning)-subtle/);
+  });
+
+  it('renders the quiet banner for an unrecognised status rather than crashing', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ status: 'Exploded' })} />);
+    expect(screen.getByText('Status unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('Exploded')).not.toBeInTheDocument();
+  });
+
+  it('stays tinted with generic copy when an overdue vehicle has no due detail', () => {
+    // Urgency has to survive missing detail — this is the case a naive
+    // "render nothing without nextDue" would get silently wrong.
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ status: 'Overdue' })} />);
+    expect(screen.getByText('Maintenance overdue')).toBeInTheDocument();
+    expect(banner()).toHaveClass('bg-danger-subtle');
+  });
+
+  it('carries an icon alongside the text so colour is never the only signal', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ status: 'Overdue' })} />);
+    expect(banner().querySelector('svg')).toBeInTheDocument();
+  });
+
+  it('truncates long banner text instead of wrapping', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ status: 'Healthy' })} />);
+    expect(screen.getByText('Up to date')).toHaveClass('truncate');
+  });
+
+  it('does not render a StatusBadge anywhere on the card', () => {
+    // The banner replaces it. A badge alongside would restate the status without
+    // the reason and reintroduce colour on healthy cards.
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ status: 'Healthy' })} />);
+    expect(screen.queryByText('Healthy')).not.toBeInTheDocument();
+  });
+});
+
+describe('VehicleCard — stat strip', () => {
+  it('shows odometer and last activity with tabular figures', () => {
+    const sixDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+    renderWithProviders(
+      <VehicleCard vehicle={makeVehicle({ currentMileage: 42000, lastActivityAt: sixDaysAgo })} />,
+    );
+    expect(screen.getByText('Odometer')).toBeInTheDocument();
+    expect(screen.getByText('Last activity')).toBeInTheDocument();
+
+    const odometer = screen.getByText('42,000 mi');
+    expect(odometer).toHaveClass('tabular-nums');
+    expect(screen.getByText('6 days ago')).toBeInTheDocument();
+  });
+
+  it('renders an em-dash and keeps the slot when mileage is missing', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ lastActivityAt: undefined })} />);
+    expect(screen.getByText('Odometer')).toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(2);
+  });
+
+  it('renders an em-dash when last activity is missing', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ currentMileage: 42000 })} />);
+    expect(screen.getByText('42,000 mi')).toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(1);
+  });
+
+  it('renders an em-dash when last activity is unparseable', () => {
+    renderWithProviders(
+      <VehicleCard vehicle={makeVehicle({ currentMileage: 1, lastActivityAt: 'nope' })} />,
+    );
+    expect(screen.getAllByText('—')).toHaveLength(1);
+  });
+
+  it('does not show a next-service figure in the strip', () => {
+    // The banner already states it where it matters; a third slot would read
+    // "—" on every healthy card.
+    renderWithProviders(
+      <VehicleCard
+        vehicle={makeVehicle({
+          status: 'Overdue',
+          nextDue: { state: 'overdue', axis: 'mileage', miles: 1120 },
+        })}
+      />,
+    );
+    expect(screen.queryByText('Next service')).not.toBeInTheDocument();
+  });
+});
+
+describe('VehicleCard — navigation', () => {
+  it('makes the title a real anchor to the detail page', () => {
+    // A real <a href> is what preserves middle-click, cmd/ctrl-click, and the
+    // link context menu; an onClick handler on a div would not.
+    renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
+    const link = screen.getByRole('link', { name: '2019 Honda Civic' });
     expect(link).toHaveAttribute('href', '/vehicles/v1');
   });
 
-  it('uses the nickname in the labels when the vehicle has one', () => {
+  it('names the card link with the nickname when the vehicle has one', () => {
     renderWithProviders(<VehicleCard vehicle={makeVehicle({ nickname: 'Daily Driver' })} />);
-    expect(screen.getByRole('link', { name: 'Open details for Daily Driver' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Daily Driver' })).toBeInTheDocument();
   });
 
-  it('does not make the card body or the thumbnail clickable', () => {
+  it('spans the whole card with an overlay pseudo-element rather than wrapping it', () => {
+    // FR-6.1/6.2: the anchor must never be a DOM ancestor of another interactive
+    // element. The overlay is what makes the whole card clickable without that.
     renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
-
-    // Exactly one link: the detail button. No wrapping card link, and no VIN so
-    // no Carfax link either.
-    expect(screen.getAllByRole('link')).toHaveLength(1);
+    const link = screen.getByRole('link', { name: '2019 Honda Civic' });
+    expect(link.className).toContain('after:absolute');
+    expect(link.className).toContain('after:inset-0');
     expect(screen.getByRole('img', { name: 'No photo' }).closest('a')).toBeNull();
   });
 
+  it('navigates to the detail page when the card link is activated', async () => {
+    renderWithProviders(
+      <>
+        <VehicleCard vehicle={makeVehicle()} />
+        <LocationProbe />
+      </>,
+    );
+    expect(screen.getByTestId('pathname').textContent).toBe('/');
+
+    await userEvent.click(screen.getByRole('link', { name: '2019 Honda Civic' }));
+    expect(screen.getByTestId('pathname').textContent).toBe('/vehicles/v1');
+  });
+
+  it('no longer renders a separate chevron detail button', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
+    expect(screen.queryByRole('link', { name: /Open details/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+  });
+
+  it('puts the card link before Carfax in DOM order', () => {
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
+    const links = screen.getAllByRole('link');
+    expect(links).toHaveLength(2);
+    expect(links[0]).toHaveAttribute('href', '/vehicles/v1');
+    expect(links[1]).toHaveAttribute('href', expect.stringContaining('carfax.com'));
+  });
+
+  it('anchors the overlay to the card root and does not clip its focus ring', () => {
+    // The overlay's after:inset-0 resolves against the nearest positioned
+    // ancestor, so `relative` on the root is load-bearing: without it the
+    // overlay silently re-anchors further up the page and the card stops being
+    // clickable where it looks clickable. `isolate` keeps the z-indices inside
+    // from leaking. `overflow-hidden` must NOT be here — on the root it clips
+    // the card link's focus ring; it belongs on the photo wrapper only.
+    renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
+    const root = screen.getByRole('link', { name: '2019 Honda Civic' }).closest('div.relative');
+
+    expect(root).not.toBeNull();
+    expect(root).toHaveClass('relative', 'isolate');
+    expect(root!.className).not.toContain('overflow-hidden');
+  });
+});
+
+describe('VehicleCard — Carfax', () => {
   it('renders a Carfax link with the VIN substituted when a VIN is present', () => {
     renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
 
@@ -106,8 +324,6 @@ describe('VehicleCard', () => {
   });
 
   it('omits the Carfax button entirely when there is no VIN', () => {
-    // Omitted, not disabled: a disabled button would occupy space and attract
-    // focus for no reason.
     renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '   ' })} />);
     expect(screen.queryByRole('link', { name: /Carfax/ })).not.toBeInTheDocument();
     expect(screen.getAllByRole('link')).toHaveLength(1);
@@ -115,19 +331,16 @@ describe('VehicleCard', () => {
 
   it('omits the Carfax button when the configured template ignores the VIN', async () => {
     await latchConfig('https://www.carfax.com/');
-
     renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
     expect(screen.queryByRole('link', { name: /Carfax/ })).not.toBeInTheDocument();
   });
 
   it('picks up a runtime config that arrives AFTER the card has mounted', async () => {
-    // main.tsx no longer blocks the mount on the config fetch, so this is the
+    // main.tsx does not block the mount on the config fetch, so this is the
     // ordering that actually happens in production. If the card read the module
-    // getter directly instead of subscribing, it would keep the compiled-in
-    // default forever and a ConfigMap override would silently never take effect
-    // — a quieter and worse bug than the blank page that change removed.
+    // getter directly instead of subscribing, a ConfigMap override would
+    // silently never take effect.
     renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
-
     expect(screen.getByRole('link', { name: /Carfax/ })).toHaveAttribute(
       'href',
       'https://www.carfax.com/VehicleHistory/p/Report.cfx?vin=1HGCM82633A004352',
@@ -144,9 +357,6 @@ describe('VehicleCard', () => {
   });
 
   it('drops the Carfax button when a late config makes the template unusable', async () => {
-    // The subscription has to work in both directions: a ConfigMap that removes
-    // {vin} must remove the button from cards already on screen, not leave a
-    // stale link pointing at the old template.
     renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
     expect(screen.getByRole('link', { name: /Carfax/ })).toBeInTheDocument();
 
@@ -157,27 +367,41 @@ describe('VehicleCard', () => {
     expect(screen.queryByRole('link', { name: /Carfax/ })).not.toBeInTheDocument();
   });
 
-  it('keeps the detail button first and in the same place with or without a VIN', () => {
-    const { unmount } = renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
-    expect(screen.getAllByRole('link')[0]).toHaveAttribute('href', '/vehicles/v1');
-    unmount();
+  it('is not nested inside the card link and sits above the overlay', () => {
+    // The FR-6.6 regression this layout risks. Two structural guards: the
+    // Carfax anchor has no ancestor anchor (so a click can never be the card
+    // link's), and its wrapper is lifted above the overlay pseudo-element.
+    //
+    // jsdom does no layout, so it cannot prove the stacking actually works —
+    // that check lives in manual-verification.md. What it CAN prove is that the
+    // two structural preconditions are in place.
+    renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />);
+    const carfax = screen.getByRole('link', { name: /Carfax/ });
 
-    renderWithProviders(<VehicleCard vehicle={makeVehicle({ vin: 'ABC' })} />);
-    const links = screen.getAllByRole('link');
-    expect(links).toHaveLength(2);
-    expect(links[0]).toHaveAttribute('href', '/vehicles/v1');
-    expect(links[1]).toHaveAttribute('href', expect.stringContaining('carfax.com'));
+    expect(carfax.parentElement?.closest('a')).toBeNull();
+    expect(carfax.className).toContain('z-10');
   });
 
-  it('still shows the title, subtitle, status, and mileage', () => {
+  it('does not navigate to the detail page when Carfax is clicked', async () => {
     renderWithProviders(
-      <VehicleCard
-        vehicle={makeVehicle({ trim: 'Sport', currentMileage: 42000, status: 'Healthy' })}
-      />,
+      <>
+        <VehicleCard vehicle={makeVehicle({ vin: '1HGCM82633A004352' })} />
+        <LocationProbe />
+      </>,
     );
 
-    expect(screen.getByText('2019 Honda Civic Sport')).toBeInTheDocument();
-    expect(screen.getByText('Healthy')).toBeInTheDocument();
-    expect(screen.getByText(/42,000/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('link', { name: /Carfax/ }));
+    expect(screen.getByTestId('pathname').textContent).toBe('/');
+  });
+});
+
+describe('VehicleCardSkeleton', () => {
+  it('mirrors the card structure rather than a single fixed-height block', () => {
+    // A structural skeleton cannot drift from the card the way a magic number
+    // does — the two live in the same file.
+    const { container } = renderWithProviders(<VehicleCardSkeleton />);
+    expect(container.querySelector('.aspect-\\[16\\/9\\]')).toBeInTheDocument();
+    // Photo, banner, title, subtitle, two stat slots, footer.
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThanOrEqual(6);
   });
 });

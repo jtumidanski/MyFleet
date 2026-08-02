@@ -13,6 +13,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+          cache: false          # see main.yml's backend job for why
+
+      # Same key prefix as main.yml's backend job, deliberately: a PR run should
+      # restore the cache main last built for identical work.
+      - name: Cache Go build and module caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-
 
       - name: Vet
         run: make vet
@@ -35,6 +48,21 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+          cache: false          # see main.yml's backend job for why
+
+      # golangci-lint type-checks every package, so it wants a Go build cache
+      # too — but its own, under a distinct prefix. Sharing one with the test
+      # jobs means whichever finishes first decides whether the cache holds
+      # -race objects or lint objects.
+      - name: Cache Go build and module caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-lint-${{ runner.os }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-lint-${{ runner.os }}-
 
       - name: Cache lint tooling
         uses: actions/cache@v4
@@ -71,15 +99,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
+      # `make fe-test`, not `npm run -w @myfleet/web test`. The Makefile target
+      # covers every JS workspace that has tests — apps/web plus
+      # packages/shared-ts and packages/ui-components. shared-ts owns
+      # fetchAuthenticated, the single 401-refresh path every SPA call goes
+      # through; running only the web workspace here left it ungated on PRs,
+      # which is the gap the Makefile comment says it closed.
       - name: Test
-        run: npm run -w @myfleet/web test
+        run: make fe-test
 
       - name: Build
-        run: npm run -w @myfleet/web build
+        run: make fe-build
 
   containers:
     runs-on: ubuntu-latest
@@ -114,6 +149,14 @@ jobs:
 
       - name: Check manifests
         run: make manifests
+
+      # Lives here rather than in its own job: it needs only bash and PyYAML,
+      # both already present, and one of the three files it compares is
+      # deploy/k8s/base/web/configmap.yaml. Before this it ran in no workflow at
+      # all — `make ci` was its only caller, so drift between the TS default,
+      # the served config.json and the ConfigMap would have reached a cluster.
+      - name: Check Carfax URL template
+        run: make carfax-template
 
   gitleaks:
     runs-on: ubuntu-latest

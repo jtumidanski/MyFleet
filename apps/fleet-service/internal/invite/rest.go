@@ -7,8 +7,15 @@ import (
 )
 
 // Attributes is the JSON:API attributes payload for an invite.
+//
+// FleetName is populated only by the pending listing (TransformPending). An
+// invitee has no membership anywhere yet, so they cannot read /fleets/{id} to
+// resolve the id themselves — without the name they would be asked to accept an
+// invitation to a bare uuid. It is `omitempty` so the owner-facing listing,
+// where the fleet is already the page context, is unchanged.
 type Attributes struct {
 	FleetID         string  `json:"fleetId"`
+	FleetName       string  `json:"fleetName,omitempty"`
 	Email           string  `json:"email"`
 	Role            string  `json:"role"`
 	Token           string  `json:"token"`
@@ -36,6 +43,16 @@ func Transform(m Model) server.Resource {
 		ID:         m.ID(),
 		Attributes: attrs,
 	}
+}
+
+// TransformPending renders an invite for its recipient, naming the fleet they
+// are being asked to join.
+func TransformPending(m Model, fleetName string) server.Resource {
+	res := Transform(m)
+	attrs, _ := res.Attributes.(Attributes)
+	attrs.FleetName = fleetName
+	res.Attributes = attrs
+	return res
 }
 
 // TransformSlice converts a slice of Models to JSON:API Resources.

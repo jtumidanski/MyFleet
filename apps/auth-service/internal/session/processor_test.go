@@ -3,6 +3,7 @@ package session
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"reflect"
 	"testing"
 	"time"
 
@@ -235,5 +236,58 @@ func TestLogout_revokesFamily(t *testing.T) {
 	}
 	if len(store.revokedFamilies) != 1 {
 		t.Fatalf("unknown-token logout must not revoke any family; calls = %v", store.revokedFamilies)
+	}
+}
+
+// TestMintAccess_mapsEveryPrincipalField fails when a field is added to
+// Principal but not wired into MintAccess's claim map. It deliberately names no
+// field: TestMintAccess_setsRequiredClaims above enumerates the four we have
+// today, and an enumerating test is one somebody has to remember to update.
+//
+// The scenario: someone adds Principal.TenantID, wires it in
+// newPrincipalResolver, and forgets MintAccess. Every other test stays green
+// and the claim is silently absent — the same shape as the defect this task
+// fixed.
+func TestMintAccess_mapsEveryPrincipalField(t *testing.T) {
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+	ks := jwks.NewKeySet(priv, "kid-1")
+	p := NewProcessor(logrus.New(), ks, "myfleet-auth", "myfleet")
+
+	v := reflect.New(reflect.TypeOf(Principal{})).Elem()
+	want := map[string]string{}
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Type().Field(i)
+		if f.Type.Kind() != reflect.String {
+			// Not a skip: a non-string field means this test's sentinel scheme
+			// no longer holds, and it must say so rather than quietly cover less.
+			t.Fatalf("Principal.%s is a %s, not a string — extend this test's sentinel scheme", f.Name, f.Type.Kind())
+		}
+		sentinel := "sentinel-" + f.Name
+		v.Field(i).SetString(sentinel)
+		want[f.Name] = sentinel
+	}
+
+	tokenStr, err := p.MintAccess(v.Interface().(Principal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := jwt.MapClaims{}
+	if _, perr := jwt.ParseWithClaims(tokenStr, claims, func(*jwt.Token) (any, error) {
+		return &priv.PublicKey, nil
+	}); perr != nil {
+		t.Fatal(perr)
+	}
+
+	got := map[string]bool{}
+	for _, cv := range claims {
+		if s, ok := cv.(string); ok {
+			got[s] = true
+		}
+	}
+	for field, sentinel := range want {
+		if !got[sentinel] {
+			t.Errorf("Principal.%s never reaches a claim — MintAccess drops it. "+
+				"Every Principal field must appear in MintAccess's claim map.", field)
+		}
 	}
 }

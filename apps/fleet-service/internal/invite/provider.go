@@ -14,6 +14,7 @@ type Provider interface {
 	GetByID(id string) (Model, error)
 	GetByToken(token string) (Model, error)
 	ListByFleetID(fleetID string) ([]Model, error)
+	ListRedeemableByEmail(email string, now time.Time) ([]Model, error)
 	// CountByFleetSince backs the per-fleet creation rate limit. It is a query,
 	// not an in-process counter, because fleet-service runs multiple replicas
 	// and a per-pod limiter enforces nothing (FR-RATE-1).
@@ -45,6 +46,32 @@ func (p *dbProvider) GetByToken(token string) (Model, error) {
 		return Model{}, err
 	}
 	return Make(e), nil
+}
+
+// ListRedeemableByEmail returns the invites addressed to email that an accept
+// call would actually honour: not yet accepted, not yet expired.
+//
+// The comparison is LOWER()-folded to match Processor.ValidateAccept, which
+// uses strings.EqualFold. A case-sensitive lookup here would hide an invite the
+// accept route would gladly redeem, telling the invitee nothing is waiting.
+//
+// A blank email is rejected by the caller (Processor.ListRedeemableForEmail),
+// not here, so this stays a plain query.
+func (p *dbProvider) ListRedeemableByEmail(email string, now time.Time) ([]Model, error) {
+	var es []Entity
+	err := p.db.
+		Where("LOWER(email) = LOWER(?)", email).
+		Where("accepted_at IS NULL").
+		Where("expires_at > ?", now).
+		Find(&es).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Model, 0, len(es))
+	for _, e := range es {
+		out = append(out, Make(e))
+	}
+	return out, nil
 }
 
 func (p *dbProvider) ListByFleetID(fleetID string) ([]Model, error) {

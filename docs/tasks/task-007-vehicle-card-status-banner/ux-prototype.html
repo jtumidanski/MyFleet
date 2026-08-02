@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MyFleet — Status banner card, refined</title>
+<style>
+:root {
+  --background: 0 0% 100%; --foreground: 222.2 84% 4.9%; --card: 0 0% 100%;
+  --muted: 210 40% 96.1%; --muted-foreground: 215.4 16.3% 46.9%; --accent: 210 40% 96.1%;
+  --border: 214.3 31.8% 91.4%;
+  --success: 142.4 71.8% 29.2%; --success-subtle: 140.6 84.2% 92.5%; --success-subtle-foreground: 142.8 64.2% 24.1%; --success-border: 141 78.9% 85.1%;
+  --warning: 26 90.5% 37.1%; --warning-subtle: 48 96.5% 88.8%; --warning-subtle-foreground: 22.7 82.5% 31.4%; --warning-border: 48 96.6% 76.7%;
+  --danger: 0 72.2% 41.1%; --danger-subtle: 0 93.3% 94.1%; --danger-subtle-foreground: 0 70% 35.3%; --danger-border: 0 96.3% 89.4%;
+  --info: 224.3 76.3% 48%; --info-subtle: 214.3 94.6% 92.7%; --info-subtle-foreground: 226 70.7% 40.2%; --info-border: 213.3 96.9% 87.3%;
+  --radius: 0.5rem;
+  --shadow: 0 1px 2px 0 hsl(222 47% 11% / .05);
+  --shadow-lift: 0 8px 24px -8px hsl(222 47% 11% / .18), 0 2px 6px -2px hsl(222 47% 11% / .08);
+}
+html[data-theme="dark"] {
+  --background: 222.2 84% 4.9%; --foreground: 210 40% 98%; --card: 222.2 84% 4.9%;
+  --muted: 217.2 32.6% 17.5%; --muted-foreground: 215 20.2% 65.1%; --accent: 217.2 32.6% 17.5%;
+  --border: 217.2 32.6% 17.5%;
+  --success: 141.7 76.6% 73.1%; --success-subtle: 142 40% 14%; --success-subtle-foreground: 142 70% 78%; --success-border: 142 35% 24%;
+  --warning: 43.3 96.4% 56.3%; --warning-subtle: 30 45% 14%; --warning-subtle-foreground: 43 90% 76%; --warning-border: 32 40% 25%;
+  --danger: 0 90.6% 70.8%; --danger-subtle: 0 45% 15%; --danger-subtle-foreground: 0 90% 80%; --danger-border: 0 40% 26%;
+  --info: 213.1 93.9% 67.8%; --info-subtle: 217 45% 17%; --info-subtle-foreground: 213 92% 80%; --info-border: 217 40% 28%;
+  --shadow: 0 1px 2px 0 hsl(0 0% 0% / .4);
+  --shadow-lift: 0 8px 24px -8px hsl(0 0% 0% / .7), 0 2px 6px -2px hsl(0 0% 0% / .4);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: hsl(var(--background)); color: hsl(var(--foreground));
+  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 40px 24px 96px; }
+.pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.pagehead h1 { font-size: 28px; font-weight: 650; letter-spacing: -.02em; }
+.pagehead p { color: hsl(var(--muted-foreground)); margin-top: 8px; max-width: 64ch; font-size: 14px; }
+.toggle { border: 1px solid hsl(var(--border)); background: hsl(var(--card)); color: hsl(var(--foreground));
+  border-radius: calc(var(--radius) - 2px); padding: 8px 14px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; }
+.toggle:hover { background: hsl(var(--accent)); }
+section { margin-top: 52px; }
+.sechead { border-top: 1px solid hsl(var(--border)); padding-top: 20px; margin-bottom: 20px; }
+.kicker { font-size: 12px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.sechead h2 { font-size: 20px; font-weight: 620; margin-top: 6px; letter-spacing: -.01em; }
+.why { margin-top: 10px; font-size: 14px; color: hsl(var(--muted-foreground)); max-width: 80ch; }
+.why b { color: hsl(var(--foreground)); font-weight: 600; }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+.tag { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; border: 1px solid hsl(var(--border)); color: hsl(var(--muted-foreground)); }
+.tag.ok { background: hsl(var(--success-subtle)); color: hsl(var(--success-subtle-foreground)); border-color: hsl(var(--success-border)); }
+.tag.new { background: hsl(var(--info-subtle)); color: hsl(var(--info-subtle-foreground)); border-color: transparent; }
+.tag.warn { background: hsl(var(--warning-subtle)); color: hsl(var(--warning-subtle-foreground)); border-color: hsl(var(--warning-border)); }
+.grid { display: grid; gap: 16px; grid-template-columns: repeat(1, minmax(0,1fr)); }
+@media (min-width: 640px) { .grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+@media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
+.note { margin-top: 16px; font-size: 12.5px; color: hsl(var(--muted-foreground)); border-left: 2px solid hsl(var(--border)); padding-left: 12px; }
+.note b { color: hsl(var(--foreground)); font-weight: 600; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em;
+  background: hsl(var(--muted)); padding: 1px 5px; border-radius: 3px; }
+
+.badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 4px; padding: 2px 8px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+.badge.healthy { background: hsl(var(--success-subtle)); color: hsl(var(--success-subtle-foreground)); }
+.badge.upcoming { background: hsl(var(--warning-subtle)); color: hsl(var(--warning-subtle-foreground)); }
+.badge.overdue { background: hsl(var(--danger-subtle)); color: hsl(var(--danger-subtle-foreground)); }
+.badge.inactive { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); }
+.dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; flex: none; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mono { font-variant-numeric: tabular-nums; }
+.iconbtn { width: 32px; height: 32px; display: grid; place-items: center; border-radius: calc(var(--radius) - 2px);
+  border: 0; background: transparent; color: hsl(var(--muted-foreground)); cursor: pointer; }
+.iconbtn:hover { background: hsl(var(--accent)); color: hsl(var(--foreground)); }
+.iconbtn svg { width: 17px; height: 17px; }
+
+.photo { background: hsl(var(--muted)); display: grid; place-items: center; overflow: hidden; position: relative; flex: none; }
+.photo svg { width: 30%; height: 30%; color: hsl(var(--muted-foreground)); opacity: .5; }
+.photo.p1 { background: linear-gradient(140deg, hsl(215 30% 62%), hsl(220 25% 34%)); }
+.photo.p2 { background: linear-gradient(140deg, hsl(28 55% 62%), hsl(20 40% 30%)); }
+.photo.p3 { background: linear-gradient(140deg, hsl(150 25% 55%), hsl(165 30% 26%)); }
+.photo.p4 { background: linear-gradient(140deg, hsl(0 0% 82%), hsl(220 12% 42%)); }
+.photo.p5 { background: linear-gradient(140deg, hsl(255 30% 62%), hsl(265 30% 32%)); }
+.photo.p6 { background: linear-gradient(140deg, hsl(345 40% 62%), hsl(350 35% 32%)); }
+.photo.p1 svg,.photo.p2 svg,.photo.p3 svg,.photo.p4 svg,.photo.p5 svg,.photo.p6 svg { color: #fff; opacity: .32; }
+
+.hero { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius);
+  overflow: hidden; box-shadow: var(--shadow); cursor: pointer; display: flex; flex-direction: column;
+  transition: box-shadow .16s ease, transform .16s ease, border-color .16s ease; }
+.hero:hover { box-shadow: var(--shadow-lift); transform: translateY(-2px); border-color: hsl(var(--muted-foreground) / .35); }
+.hero-photo { aspect-ratio: 16/9; width: 100%; }
+.hero-body { padding: 13px 15px 0; }
+.hero-title { font-weight: 600; font-size: 15.5px; letter-spacing: -.01em; }
+.hero-sub { font-size: 13px; color: hsl(var(--muted-foreground)); margin-top: 2px; }
+.strip { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px 15px;
+  margin-top: 12px; border-top: 1px solid hsl(var(--border)); }
+.k { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: hsl(var(--muted-foreground)); }
+.v { font-size: 14.5px; font-weight: 600; letter-spacing: -.01em; margin-top: 1px; }
+.v.warn { color: hsl(var(--warning)); }
+.v.bad { color: hsl(var(--danger)); }
+.v.mute { color: hsl(var(--muted-foreground)); font-weight: 500; }
+
+.banner { display: flex; align-items: center; gap: 8px; padding: 7px 15px; font-size: 12.5px; font-weight: 550;
+  border-bottom: 1px solid transparent; }
+.banner svg { width: 15px; height: 15px; flex: none; }
+.banner.healthy { background: hsl(var(--success-subtle)); color: hsl(var(--success-subtle-foreground)); border-color: hsl(var(--success-border)); }
+.banner.upcoming { background: hsl(var(--warning-subtle)); color: hsl(var(--warning-subtle-foreground)); border-color: hsl(var(--warning-border)); }
+.banner.overdue { background: hsl(var(--danger-subtle)); color: hsl(var(--danger-subtle-foreground)); border-color: hsl(var(--danger-border)); }
+.banner.inactive { background: hsl(var(--muted)); color: hsl(var(--muted-foreground)); border-color: hsl(var(--border)); }
+.quietrow { display: flex; align-items: center; gap: 8px; padding: 7px 15px; font-size: 12.5px;
+  color: hsl(var(--muted-foreground)); border-bottom: 1px solid hsl(var(--border)); }
+.quietrow svg { width: 15px; height: 15px; flex: none; opacity: .8; }
+.foot { display: flex; justify-content: flex-end; padding: 0 9px 6px; margin-top: -4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="pagehead">
+  <div>
+    <h1>Status banner — refined</h1>
+    <p>Variant 3, with the two open questions resolved: how loud the banner should be when nothing is wrong, and what it can actually say without new backend work.</p>
+  </div>
+  <button class="toggle" id="themeBtn" type="button">◐ Toggle theme</button>
+</div>
+
+<section>
+  <div class="sechead">
+    <div class="kicker">Question 1 · Option A</div>
+    <h2>Always-on banner</h2>
+    <div class="why">Every card gets a tinted band. Perfectly consistent — the band is always in the same place, so your eye learns one position. The cost shows up below, in the all-healthy grid.</div>
+  </div>
+  <div class="grid" id="gA"></div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="kicker">Question 1 · Option B</div>
+    <h2>Conditional banner</h2>
+    <div class="why">Tinted band only for <b>Upcoming</b> and <b>Overdue</b>. Healthy and Inactive get the same row in muted foreground on the card background — same height, same position, no color. The layout never shifts; only the urgency does.</div>
+  </div>
+  <div class="grid" id="gB"></div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="kicker">Realism check</div>
+    <h2>A garage where nothing is wrong</h2>
+    <div class="why">Your sample grid above has a convenient spread of statuses. A real personal garage is mostly Healthy most of the time — this is what each option looks like on a normal Tuesday. <b>This is the comparison that should decide it.</b></div>
+  </div>
+  <div class="kicker" style="margin-bottom:12px">Always-on</div>
+  <div class="grid" id="gC"></div>
+  <div class="kicker" style="margin:32px 0 12px">Conditional</div>
+  <div class="grid" id="gD"></div>
+  <div class="note"><b>The trade:</b> always-on gives you a constant green reassurance signal and total consistency. Conditional means color in the grid <em>always</em> means "look here" — so the one Overdue truck in a garage of six is impossible to miss. Conditional is the stronger information design; always-on is the friendlier one.</div>
+</section>
+
+<section>
+  <div class="sechead">
+    <div class="kicker">Question 2</div>
+    <h2>What the banner can say</h2>
+    <div class="why">
+      I was too pessimistic earlier — most of the reason text is cheap. <code>ScheduleStatesByVehicle</code> already loads full <code>QueueRow</code>s and computes <code>DueState</code> per row (<code>processor.go:167-178</code>), then narrows to <code>[]string</code> on the way out. The due data is in memory and discarded. There's already a <code>DueEntry</code> shape carrying <code>Schedule</code> + <code>State</code> (<code>processor.go:147</code>) to widen toward.
+    </div>
+    <div class="tags"><span class="tag ok">Tier 1 — no new queries</span><span class="tag new">Tier 2 — cross-domain join</span></div>
+  </div>
+
+  <div class="kicker" style="margin-bottom:12px">Tier 1 — ships with the data already loaded</div>
+  <div class="grid" id="gE"></div>
+
+  <div class="kicker" style="margin:32px 0 12px">Tier 2 — adds the category name</div>
+  <div class="grid" id="gF"></div>
+
+  <div class="note">
+    <b>Tier 1</b> uses <code>NextDueMileage()</code> vs the vehicle's current mileage (<code>model.go:33</code>) and the last-activity timestamp that status derivation already fetches (<code>vehicle/status.go:45</code>). Widening the gatherer's return type — same query, same call site.<br><br>
+    <b>Tier 2</b> needs the schedule's <code>categoryID</code> resolved to a display name. That's a lookup into the separate <code>maintenancecategory</code> domain, per vehicle, on a list endpoint — an N+1 unless it's batched, and exactly the kind of cross-domain reach CLAUDE.md warns about. Worth doing, but as its own task with a deliberate batching design.<br><br>
+    <b>The gap is smaller than it looks:</b> "Service overdue by 1,120 mi" already tells you it's urgent and by how much. The category name tells you which wrench to pick up — useful, not load-bearing for a list card.
+  </div>
+</section>
+
+</div>
+
+<script>
+const CAR='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9L18.4 7A2 2 0 0 0 16.6 6H7.4a2 2 0 0 0-1.8 1.1L3.5 11.1C2.7 11.3 2 12.1 2 13v3c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M9 17h6"/></svg>';
+const HIST='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>';
+const WRENCH='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+const ALERT='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>';
+const CHECK='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.801 10A10 10 0 1 1 17 3.335"/><path d="m9 11 3 3L22 4"/></svg>';
+const PAUSE='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M10 15V9"/><path d="M14 15V9"/></svg>';
+
+const V=[
+ {nick:'The Commuter',year:2019,make:'Honda',model:'Civic',trim:'EX',miles:84210,status:'Healthy',photo:'p1',last:'6 days ago',t1:'Up to date',t2:'Up to date · next oil change in 2,400 mi'},
+ {nick:'',year:2021,make:'Toyota',model:'Tacoma',trim:'TRD Off-Road',miles:41900,status:'Upcoming Maintenance',photo:'p2',last:'2 days ago',t1:'Service due in 310 mi',t2:'Tire rotation due in 310 mi'},
+ {nick:'Weekend Truck',year:2014,make:'Ford',model:'F-150',trim:'XLT',miles:152340,status:'Overdue',photo:'p3',last:'4 months ago',t1:'Service overdue by 1,120 mi',t2:'Brake fluid overdue by 1,120 mi'},
+ {nick:'',year:2023,make:'Tesla',model:'Model Y',trim:'Long Range',miles:12880,status:'Healthy',photo:'p4',last:'yesterday',t1:'Up to date',t2:'Up to date · next cabin filter in 7,100 mi'},
+ {nick:'Project Car',year:1998,make:'Mazda',model:'MX-5 Miata',trim:'',miles:210412,status:'Inactive',photo:'',last:'11 months ago',t1:'No activity in 11 months',t2:'No activity in 11 months'},
+ {nick:'',year:2020,make:'Subaru',model:'Outback',trim:'Premium',miles:66050,status:'Healthy',photo:'',last:'3 weeks ago',t1:'Up to date',t2:'Up to date · next oil change in 3,900 mi'},
+];
+// A garage where nothing is wrong.
+const CALM=[
+ {nick:'The Commuter',year:2019,make:'Honda',model:'Civic',trim:'EX',miles:84210,status:'Healthy',photo:'p1',last:'6 days ago',t1:'Up to date'},
+ {nick:'',year:2023,make:'Tesla',model:'Model Y',trim:'Long Range',miles:12880,status:'Healthy',photo:'p4',last:'yesterday',t1:'Up to date'},
+ {nick:'Weekend Truck',year:2014,make:'Ford',model:'F-150',trim:'XLT',miles:152340,status:'Healthy',photo:'p3',last:'2 weeks ago',t1:'Up to date'},
+ {nick:'',year:2020,make:'Subaru',model:'Outback',trim:'Premium',miles:66050,status:'Healthy',photo:'p6',last:'3 weeks ago',t1:'Up to date'},
+ {nick:'Sunday Car',year:2016,make:'Porsche',model:'Cayman',trim:'S',miles:31200,status:'Healthy',photo:'p5',last:'9 days ago',t1:'Up to date'},
+ {nick:'',year:2021,make:'Toyota',model:'Tacoma',trim:'TRD Off-Road',miles:41900,status:'Overdue',photo:'p2',last:'2 days ago',t1:'Service overdue by 640 mi'},
+];
+
+const cls=s=>s==='Healthy'?'healthy':s==='Upcoming Maintenance'?'upcoming':s==='Overdue'?'overdue':'inactive';
+const loud=s=>s==='Upcoming Maintenance'||s==='Overdue';
+const title=v=>v.nick||`${v.year} ${v.make} ${v.model}`;
+const spec=v=>`${v.year} ${v.make} ${v.model}${v.trim?' '+v.trim:''}`;
+const mi=v=>v.miles.toLocaleString('en-US')+' mi';
+const icon=s=>s==='Overdue'?ALERT:s==='Upcoming Maintenance'?WRENCH:s==='Inactive'?PAUSE:CHECK;
+const carfax=`<div class="foot"><button class="iconbtn" title="Carfax report">${HIST}</button></div>`;
+
+function card(v, {conditional=false, text='t1'}={}) {
+  const msg = v[text] ?? v.t1;
+  const band = conditional && !loud(v.status)
+    ? `<div class="quietrow">${icon(v.status)}<span class="truncate">${msg}</span></div>`
+    : `<div class="banner ${cls(v.status)}">${icon(v.status)}<span class="truncate">${msg}</span></div>`;
+  return `
+  <div class="hero">
+    <div class="photo ${v.photo} hero-photo">${CAR}</div>
+    ${band}
+    <div class="hero-body">
+      <div class="hero-title truncate">${title(v)}</div>
+      <div class="hero-sub truncate">${spec(v)}</div>
+    </div>
+    <div class="strip">
+      <div><div class="k">Odometer</div><div class="v mono">${mi(v)}</div></div>
+      <div><div class="k">Last activity</div><div class="v mute">${v.last}</div></div>
+    </div>
+    ${carfax}
+  </div>`;
+}
+
+document.getElementById('gA').innerHTML = V.map(v=>card(v)).join('');
+document.getElementById('gB').innerHTML = V.map(v=>card(v,{conditional:true})).join('');
+document.getElementById('gC').innerHTML = CALM.map(v=>card(v)).join('');
+document.getElementById('gD').innerHTML = CALM.map(v=>card(v,{conditional:true})).join('');
+document.getElementById('gE').innerHTML = V.slice(0,3).map(v=>card(v,{conditional:true,text:'t1'})).join('');
+document.getElementById('gF').innerHTML = V.slice(0,3).map(v=>card(v,{conditional:true,text:'t2'})).join('');
+
+const root=document.documentElement;
+root.dataset.theme=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';
+document.getElementById('themeBtn').addEventListener('click',()=>{root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';});
+</script>
+</body>
+</html>

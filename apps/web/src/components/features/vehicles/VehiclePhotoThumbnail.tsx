@@ -4,16 +4,24 @@ import { cn } from '../../../lib/utils';
 import { useMediaContentUrl } from '../../../lib/hooks/api/media';
 
 /**
- * Every state occupies exactly this box, so cards with and without photos align
- * within a grid row and the card does not reflow when an image arrives.
- * `shrink-0` is what stops a long title from squeezing it.
+ * The default box: an 80x80 square. Every state occupies exactly the box in
+ * force, so cards with and without photos align within a grid row and the card
+ * does not reflow when an image arrives. `shrink-0` is what stops a long title
+ * from squeezing it.
  */
-const BOX = 'h-20 w-20 shrink-0 rounded-md';
+const DEFAULT_BOX = 'h-20 w-20 shrink-0 rounded-md';
 
 interface VehiclePhotoThumbnailProps {
   mediaId?: string;
   /** Used for the image's alt text — the card already knows it, so no metadata request is needed. */
   vehicleLabel: string;
+  /**
+   * Overrides the default 80x80 square — the list card passes a 16:9 hero box.
+   * Applied to ALL four states (image, skeleton, and both placeholders), so
+   * "identical dimensions in every state" is structurally guaranteed here rather
+   * than restated at four call sites.
+   */
+  boxClassName?: string;
   className?: string;
 }
 
@@ -23,13 +31,21 @@ interface VehiclePhotoThumbnailProps {
  * a list page is not something a user can act on — so the accessible label is
  * what keeps them distinguishable.
  */
-function PhotoPlaceholder({ label, className }: { label: string; className?: string }) {
+function PhotoPlaceholder({
+  label,
+  boxClassName,
+  className,
+}: {
+  label: string;
+  boxClassName: string;
+  className?: string;
+}) {
   return (
     <div
       role="img"
       aria-label={label}
       className={cn(
-        BOX,
+        boxClassName,
         'flex items-center justify-center bg-muted text-muted-foreground',
         className,
       )}
@@ -59,15 +75,16 @@ function PhotoPlaceholder({ label, className }: { label: string; className?: str
 export function VehiclePhotoThumbnail({
   mediaId,
   vehicleLabel,
+  boxClassName = DEFAULT_BOX,
   className,
 }: VehiclePhotoThumbnailProps) {
   const { url, isLoading, isError } = useMediaContentUrl(mediaId, 'thumbnail');
 
   if (!mediaId) {
-    return <PhotoPlaceholder label="No photo" className={className} />;
+    return <PhotoPlaceholder label="No photo" boxClassName={boxClassName} className={className} />;
   }
   if (isLoading) {
-    return <Skeleton className={cn(BOX, className)} />;
+    return <Skeleton className={cn(boxClassName, className)} />;
   }
   if (isError || !url) {
     // "No photo" is reserved for the `!mediaId` branch above. Reaching here
@@ -75,13 +92,19 @@ export function VehiclePhotoThumbnail({
     // React Query pausing the query offline (isLoading false, isError false,
     // data undefined), which would otherwise tell the user their vehicle has no
     // photo at all.
-    return <PhotoPlaceholder label="Photo unavailable" className={className} />;
+    return (
+      <PhotoPlaceholder
+        label="Photo unavailable"
+        boxClassName={boxClassName}
+        className={className}
+      />
+    );
   }
   return (
     <img
       src={url}
       alt={`Photo of ${vehicleLabel}`}
-      className={cn(BOX, 'object-cover', className)}
+      className={cn(boxClassName, 'object-cover', className)}
     />
   );
 }

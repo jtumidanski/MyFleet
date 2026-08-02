@@ -10,9 +10,6 @@
  *   5. useRenameFleet invalidates fleetKeys.all AND memberKeys.all
  *   6. useRevokeInvite invalidates inviteKeys.lists()
  *   7. useAcceptInvite invalidates memberKeys.all, fleetKeys.all, inviteKeys.all
- *   8. useResendInvite invalidates inviteKeys.lists() on success AND on a
- *      rejected mutation (token rotation must not leave a stale cache behind
- *      just because the resend hit the cooldown 429 — see task-009 brief).
  *
  * Invalidation tests render the real hooks with a real QueryClient so that
  * removing an invalidation call from the hook source WILL break the test.
@@ -22,6 +19,9 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { memberKeys, useRemoveMember } from './members';
+import { authKeys } from './auth';
+import { mintAccessToken } from '../../api/refresh';
+import { toast } from 'sonner';
 import {
   inviteKeys,
   useCreateInvite,
@@ -73,6 +73,13 @@ vi.mock('../../../services/api/InviteService', () => ({
     acceptInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
     resendInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
   },
+}));
+
+// Both exports: the API client imports refreshAccessToken from this module, so
+// a partial mock would break its import.
+vi.mock('../../api/refresh', () => ({
+  mintAccessToken: vi.fn().mockResolvedValue('fresh-token'),
+  refreshAccessToken: vi.fn().mockResolvedValue('fresh-token'),
 }));
 
 vi.mock('../../../services/api/FleetSettingsService', () => ({
@@ -232,11 +239,75 @@ describe('mutation invalidation contracts — real hooks', () => {
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.all }));
   });
 
+  // The JWT still carries the pre-accept active_fleet_id claim (empty for a
+  // first-time invitee), and /auth/me reports that claim. Without a fresh token
+  // the new member is bounced back to onboarding by RequireAuth.
+  //
+  // This asserts the mint COMPLETES before the identity refetch starts, not
+  // merely that it was called first: invocationCallOrder records call time, so
+  // an un-awaited mint would satisfy an ordering-only assertion while still
+  // racing /auth/me against the token write.
+  it('useAcceptInvite waits for the fresh token before refetching identity', async () => {
+    let releaseMint: ((token: string) => void) | undefined;
+    vi.mocked(mintAccessToken).mockImplementationOnce(
+      () =>
+        new Promise<string | null>((resolve) => {
+          releaseMint = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useAcceptInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('tok-abc');
+    });
+
+    await waitFor(() => expect(mintAccessToken).toHaveBeenCalledTimes(1));
+
+    const authInvalidations = () =>
+      (invalidateSpy.mock.calls as Array<[{ queryKey?: unknown }]>).filter(
+        (c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(authKeys.all),
+      ).length;
+
+    // Mint is still pending: identity must not have been refetched yet.
+    expect(authInvalidations()).toBe(0);
+
+    await act(async () => {
+      releaseMint?.('fresh-token');
+    });
+
+    await waitFor(() => expect(authInvalidations()).toBe(1));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  // A failed mint means stale claims, not a dead session — the invite is
+  // already spent server-side. Clearing the still-valid token here (which
+  // refreshAccessToken would do) logs the user out on the success path.
+  it('useAcceptInvite still succeeds, without refetching identity, when the mint fails', async () => {
+    vi.mocked(mintAccessToken).mockResolvedValueOnce(null);
+
+    const { result } = renderHook(() => useAcceptInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('tok-abc');
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+    expect(toast.error).toHaveBeenCalled();
+  });
+
   // --------------------------------------------------------------------------
   // useResendInvite
   //
   // Resend rotates the token, so a stale inviteKeys.list cache would hand the
-  // copy-link button a dead token — invalidation is REQUIRED, not cosmetic.
+  // copy button a dead token — invalidation is REQUIRED, not cosmetic.
   // useInvites reads inviteKeys.list({ fleetId }); asserting against
   // inviteKeys.lists() here matches the sibling tests and still catches a
   // typo'd or narrowed key via React Query's default prefix invalidation.
@@ -250,11 +321,7 @@ describe('mutation invalidation contracts — real hooks', () => {
       result.current.mutate('inv-1');
     });
 
-    await waitFor(() =>
-      expect(result.current.isIdle || result.current.isSuccess || result.current.isError).toBe(
-        true,
-      ),
-    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));

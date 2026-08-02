@@ -42,6 +42,29 @@ func StatusFor(err error) int {
 	}
 }
 
+// Detailed wraps a status sentinel with a human-readable JSON:API `detail`.
+//
+// Error() returns the BASE sentinel's message, not a concatenation: the
+// envelope's `title` is `err.Error()`, so wrapping with fmt.Errorf("...: %w")
+// would turn every 409 title into a sentence and change the response shape for
+// every existing caller. The detail rides in the `detail` field instead.
+//
+// errors.Is matches both the wrapper (pointer identity, so a handler can tell
+// two sentinels over the same base apart) and the base sentinel (via Unwrap, so
+// StatusFor keeps mapping it to the right status with no new mapping code).
+func Detailed(base error, detail string) error {
+	return &detailedError{base: base, detail: detail}
+}
+
+type detailedError struct {
+	base   error
+	detail string
+}
+
+func (e *detailedError) Error() string  { return e.base.Error() }
+func (e *detailedError) Unwrap() error  { return e.base }
+func (e *detailedError) Detail() string { return e.detail }
+
 // APIError is one entry in the standard error envelope (design §6).
 type APIError struct {
 	Status string       `json:"status"`

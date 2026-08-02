@@ -16,6 +16,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 )
 
@@ -42,6 +43,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 	prov := NewProvider(db)
 	adm := NewAdministrator(db).WithActivityRecorder(record).WithEmitter(emit).WithCreatedEmitter(emitCreated)
 	proc := NewProcessor(log, prov)
+	// Read-only, and only to name the fleet an invitee is being asked to join
+	// — they hold no membership yet, so they cannot resolve the id themselves.
+	fleets := fleet.NewProvider(db)
 
 	return func(r chi.Router) {
 		// POST /fleets/{id}/invites — owner-only; creates an invite with a unique token
@@ -155,6 +159,52 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 			server.WriteJSON(w, http.StatusOK, server.Document{Data: TransformSlice(ms)})
+		})
+
+		// GET /invites/pending — the invites waiting for the CALLER.
+		//
+		// The discovery path for someone invited before they had an account.
+		// Nothing delivers invites (task-009-smtp-invite-delivery is specced
+		// but unimplemented), so without this an invitee logs in, has no fleet,
+		// and is offered only "create a fleet" — the invite addressed to them
+		// is unreachable unless the owner separately sent them the link.
+		//
+		// Scoped entirely by identity.Email, the validated `email` claim. There
+		// is no path, query or body parameter naming a user: enumerating
+		// someone else's invites is not a check that could be forgotten but a
+		// shape the route cannot express.
+		//
+		// Registered before /invites/{id} routes is unnecessary — chi matches
+		// the static segment ahead of the wildcard regardless — but no GET
+		// /invites/{id} exists in the first place.
+		r.Get("/invites/pending", func(w http.ResponseWriter, req *http.Request) {
+			identity := auth.IdentityFromContext(req.Context())
+
+			ms, err := proc.ListRedeemableForEmail(identity.Email)
+			if err != nil {
+				log.WithError(err).WithField("correlation_id",
+					telemetry.CorrelationIDFromContext(req.Context())).
+					Error("list pending invites")
+				server.WriteError(w, err)
+				return
+			}
+
+			out := make([]server.Resource, 0, len(ms))
+			for _, m := range ms {
+				// A soft-deleted fleet returns ErrNotFound here, and an invite
+				// into a fleet that no longer exists is not something to offer
+				// — accepting it would mint a membership in a dead fleet. Drop
+				// it from the listing rather than failing the whole request for
+				// the sake of one stale row.
+				f, ferr := fleets.GetByID(m.FleetID())
+				if ferr != nil {
+					log.WithError(ferr).WithField("fleet_id", m.FleetID()).
+						Warn("pending invite names a fleet that cannot be read; omitting it")
+					continue
+				}
+				out = append(out, TransformPending(m, f.Name()))
+			}
+			server.WriteJSON(w, http.StatusOK, server.Document{Data: out})
 		})
 
 		// DELETE /invites/{id} — owner-only
@@ -323,6 +373,25 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 
 			if err := proc.ValidateAccept(inv, identity.Email); err != nil {
+				// Already-accepted and expired are ordinary user outcomes the
+				// response body now explains; logging them adds noise. The other
+				// two are worth being greppable: a mismatch is either a genuine
+				// wrong-account attempt or a regression of the empty-email-claim
+				// defect, and an unusable invite is a corrupt row an operator
+				// should chase. Invite id and correlation id only: never
+				// inv.Email(), never identity.Email (PRD FR-10/§8). The invite id
+				// joins to the row for an operator who already has database
+				// access, so the line itself discloses nothing.
+				fields := logrus.Fields{
+					"invite_id":      inv.ID(),
+					"correlation_id": telemetry.CorrelationIDFromContext(req.Context()),
+				}
+				switch {
+				case errors.Is(err, ErrEmailMismatch):
+					log.WithFields(fields).Warn("invite accept rejected: email mismatch")
+				case errors.Is(err, ErrInviteUnusable):
+					log.WithFields(fields).Error("invite accept rejected: invite row has no email address")
+				}
 				server.WriteError(w, err)
 				return
 			}

@@ -25,6 +25,17 @@ class InviteService extends BaseService<InviteAttributes, CreateInviteAttributes
   }
 
   /**
+   * GET /api/fleet/invites/pending — the invites waiting for the CALLER.
+   *
+   * Takes no argument by design: the server scopes the result to the validated
+   * token's `email` claim, so there is no identifier here for a caller to
+   * tamper with.
+   */
+  async listPending(): Promise<ListResult<InviteAttributes>> {
+    return this.listAt('/api/fleet/invites/pending');
+  }
+
+  /**
    * POST /api/fleet/fleets/{fleetId}/invites
    * attrs: { email, role }
    */
