@@ -38,10 +38,12 @@ func (s *stubDownstream) Purge(context.Context, adminclient.PurgeRequest) (map[s
 	}
 	return map[string]int{s.name + "_rows": 7}, nil
 }
+
 func (s *stubDownstream) Restore(context.Context, string) (map[string]int, error) {
 	s.restored++
 	return map[string]int{}, nil
 }
+
 func (s *stubDownstream) Reap(context.Context, string) (map[string]int, error) {
 	s.reaped++
 	return map[string]int{}, nil

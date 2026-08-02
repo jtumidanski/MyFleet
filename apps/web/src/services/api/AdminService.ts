@@ -125,7 +125,9 @@ class AdminService {
    * the server compares it exactly, so the disabled button is a courtesy rather
    * than the control.
    */
-  async createPurge(attributes: CreatePurgeInput): Promise<JsonApiResource<PurgeOperationAttributes>> {
+  async createPurge(
+    attributes: CreatePurgeInput,
+  ): Promise<JsonApiResource<PurgeOperationAttributes>> {
     const doc = await apiClient.request<JsonApiDocument<JsonApiResource<PurgeOperationAttributes>>>(
       `${this.basePath}/purge-operations`,
       {
@@ -155,7 +157,10 @@ class AdminService {
   async retryPurge(id: string): Promise<JsonApiResource<PurgeOperationAttributes>> {
     const doc = await apiClient.request<JsonApiDocument<JsonApiResource<PurgeOperationAttributes>>>(
       `${this.basePath}/purge-operations/${id}/retry`,
-      { method: 'POST', body: JSON.stringify({ data: { type: 'purge-operations', attributes: {} } }) },
+      {
+        method: 'POST',
+        body: JSON.stringify({ data: { type: 'purge-operations', attributes: {} } }),
+      },
     );
     return doc.data;
   }

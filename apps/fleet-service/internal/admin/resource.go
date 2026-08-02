@@ -154,7 +154,8 @@ func InitializeRoutes(log logrus.FieldLogger, proc *Processor) func(chi.Router) 
 				TargetType   string `json:"target_type"`
 				TargetID     string `json:"target_id"`
 				Confirmation string `json:"confirmation"`
-			}) {
+			},
+			) {
 				identity := auth.IdentityFromContext(req.Context())
 				if err := authz.RequirePlatformAdmin(identity); err != nil {
 					server.WriteError(w, err)

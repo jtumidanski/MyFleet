@@ -117,8 +117,22 @@ describe('AdminFleetsPage', () => {
   it('renders the owner row without an enabled remove action', async () => {
     mockFleet({
       members: [
-        { user_id: 'u1', email: '', display_name: 'A', role: 'owner', status: 'active', joined_at: '' },
-        { user_id: 'u2', email: '', display_name: 'B', role: 'member', status: 'active', joined_at: '' },
+        {
+          user_id: 'u1',
+          email: '',
+          display_name: 'A',
+          role: 'owner',
+          status: 'active',
+          joined_at: '',
+        },
+        {
+          user_id: 'u2',
+          email: '',
+          display_name: 'B',
+          role: 'member',
+          status: 'active',
+          joined_at: '',
+        },
       ],
     });
     renderAt('/admin/fleets/f1');

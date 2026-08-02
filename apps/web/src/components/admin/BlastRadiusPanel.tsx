@@ -93,7 +93,11 @@ export function BlastRadiusPanel({
       </p>
       <dl className="mt-3 grid gap-2 sm:grid-cols-2">
         {keys.map((k) => (
-          <div key={k} className="flex items-baseline justify-between gap-4" data-testid={`radius-${k}`}>
+          <div
+            key={k}
+            className="flex items-baseline justify-between gap-4"
+            data-testid={`radius-${k}`}
+          >
             <dt className="text-sm text-muted-foreground">{humanise(k)}</dt>
             <dd className="text-sm font-semibold tabular-nums">{counts[k]}</dd>
           </div>

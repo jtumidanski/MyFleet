@@ -98,7 +98,13 @@ describe('after a system purge', () => {
   });
 
   it('lets them reach every admin screen without a fleet', () => {
-    for (const route of ['/admin', '/admin/fleets', '/admin/users', '/admin/purges', '/admin/audit']) {
+    for (const route of [
+      '/admin',
+      '/admin/fleets',
+      '/admin/users',
+      '/admin/purges',
+      '/admin/audit',
+    ]) {
       const { unmount } = renderTreeAt(route);
       expect(screen.getByText(/platform admin/i)).toBeInTheDocument();
       expect(screen.queryByText('onboarding')).not.toBeInTheDocument();

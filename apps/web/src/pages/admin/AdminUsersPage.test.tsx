@@ -61,6 +61,8 @@ describe('AdminUsersPage', () => {
     mockUsers([{ id: 'u1' }]);
     renderWithProviders(<AdminUsersPage />);
     await screen.findByTestId('user-u1');
-    expect(screen.queryByRole('button', { name: /grant|revoke|make admin/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /grant|revoke|make admin/i }),
+    ).not.toBeInTheDocument();
   });
 });
