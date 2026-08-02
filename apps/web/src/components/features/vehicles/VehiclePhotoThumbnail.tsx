@@ -60,9 +60,9 @@ function PhotoPlaceholder({
  *
  * Bytes come through the authenticated API as an object URL — a bare <img src>
  * cannot be used because the API requires an Authorization header that the
- * browser will not send for image subresource requests. The thumbnail variant
- * is requested, so a card costs tens of kilobytes rather than the full-size
- * upload.
+ * browser will not send for image subresource requests. The card variant
+ * (768px longest edge) is requested: it matches the rendered hero at 1x and 2x
+ * without costing the full-size upload.
  *
  * Deliberately not MediaThumbnail: that component issues a second metadata
  * request per tile for its alt text (N avoidable requests on a list of N
@@ -78,7 +78,7 @@ export function VehiclePhotoThumbnail({
   boxClassName = DEFAULT_BOX,
   className,
 }: VehiclePhotoThumbnailProps) {
-  const { url, isLoading, isError } = useMediaContentUrl(mediaId, 'thumbnail');
+  const { url, isLoading, isError } = useMediaContentUrl(mediaId, 'card');
 
   if (!mediaId) {
     return <PhotoPlaceholder label="No photo" boxClassName={boxClassName} className={className} />;
