@@ -67,12 +67,20 @@ type fakeVariantAdmin struct {
 	called       bool
 	replaceCalls int
 	replaced     []mediavariant.Model
+	upsertCalls  int
+	upserted     []mediavariant.Model
 }
 
 func (f *fakeVariantAdmin) ReplaceForMediaObject(_ string, variants []mediavariant.Model) error {
 	f.called = true
 	f.replaceCalls++
 	f.replaced = variants
+	return nil
+}
+
+func (f *fakeVariantAdmin) Upsert(m mediavariant.Model) error {
+	f.upsertCalls++
+	f.upserted = append(f.upserted, m)
 	return nil
 }
 

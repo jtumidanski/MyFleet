@@ -6,11 +6,19 @@ import (
 	"gorm.io/gorm"
 )
 
-// Entity maps to media.media_variants (PRD §6).
+// Entity maps to media.media_variants (PRD §6). (media_object_id, variant) is
+// unique: a media object has at most one rendition of each kind. The constraint
+// is what makes Upsert's additive write safe against two processes racing to
+// generate the same variant — which a rolling update can transiently produce,
+// since each pod has its own in-process single-flight map.
+//
+// The plain index on MediaObjectID is kept even though the composite index
+// leads with the same column: AutoMigrate never drops indexes, so removing the
+// tag would leave an orphan in deployed databases while changing nothing.
 type Entity struct {
 	ID            string `gorm:"type:uuid;primaryKey"`
-	MediaObjectID string `gorm:"type:uuid;not null;index"`
-	Variant       string `gorm:"not null"`
+	MediaObjectID string `gorm:"type:uuid;not null;index;uniqueIndex:ux_media_variants_object_variant"`
+	Variant       string `gorm:"not null;uniqueIndex:ux_media_variants_object_variant"`
 	ObjectKey     string `gorm:"not null"`
 	Width         int
 	Height        int

@@ -15,6 +15,12 @@ import (
 // GORM AutoMigrate mishandles schema-qualified table names (media.media_variants)
 // on SQLite when the entity carries index tags, so the table is created directly
 // — the same approach mediaobject's tests take.
+//
+// The UNIQUE (media_object_id, variant) constraint mirrors the composite
+// uniqueIndex tag on Entity. It is restated here because AutoMigrate does not
+// run in these tests, and without it SQLite rejects Upsert's ON CONFLICT clause
+// outright — so a suite that omitted it would pass against a schema production
+// does not have.
 func newVariantTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -32,7 +38,8 @@ func newVariantTestDB(t *testing.T) *gorm.DB {
 		width           INTEGER,
 		height          INTEGER,
 		content_type    TEXT,
-		created_at      DATETIME
+		created_at      DATETIME,
+		UNIQUE (media_object_id, variant)
 	)`).Error; err != nil {
 		t.Fatalf("create media_variants: %v", err)
 	}
