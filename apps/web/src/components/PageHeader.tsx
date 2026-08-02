@@ -25,7 +25,11 @@ export interface PageHeaderProps {
   titleAdornment?: ReactNode;
   /** Secondary line beneath the title, muted. */
   description?: ReactNode;
-  /** Right-aligned controls on the title row. */
+  /**
+   * Right-aligned controls on the title row. Taller than the title line box
+   * by design (a Button is 36-40px against a 32px line); the slot absorbs the
+   * difference so the title lands in the same place on every page.
+   */
   actions?: ReactNode;
   /** Per-page escape hatch; merged via cn() so a caller can override. */
   className?: string;
@@ -59,7 +63,25 @@ export function PageHeader({
         </div>
         {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && (
+        // -my-1 is what keeps a page with actions vertically identical to one
+        // without. The h1's line box is 32px; a default Button is 40px and a
+        // size="sm" one 36px, so as a plain flex item the tallest action sets
+        // the row height — pushing the title down 4px (Vehicles) or 2px
+        // (Dashboard) and widening the gap to the content below by the same
+        // amount, while Activity/Notifications/Settings stayed at 32px.
+        // Shrinking the actions' margin box by 4px top and bottom hands the
+        // row height back to the title on both sides; the buttons simply
+        // overhang the 32px line box symmetrically, which is where an
+        // optically-centred control belongs anyway.
+        //
+        // The 4px assumes actions are at most 40px tall — the default Button.
+        // A size="lg" Button (44px) would grow the row by 2px again and put
+        // this back where it started; raise the offset with it, or don't put
+        // one here. Nothing enforces this, so it is written down where the
+        // next person changing button.tsx's heights will see it.
+        <div className="-my-1 flex shrink-0 items-center gap-2">{actions}</div>
+      )}
     </div>
   );
 }
