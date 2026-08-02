@@ -3,9 +3,12 @@
 // /admin HTTP tree.
 //
 // Nothing outside this package may read auth.Identity.PlatformAdmin, and nothing
-// inside it may call authz.RequireSameFleet. arch_test.go enforces both, because
-// the whole safety argument for a cross-fleet API is that it lives in a parallel
-// tree rather than in a relaxed guard.
+// inside it may call authz.RequireSameFleet, because the whole safety argument
+// for a cross-fleet API is that it lives in a parallel tree rather than in a
+// relaxed guard. Both halves of that invariant are enforced by Task 11's
+// separation arch test, which owns the internal/authz/scope.go allowlist the
+// check needs; arch_test.go in this package only covers manifest completeness
+// and key uniqueness.
 package admin
 
 // Scope is the blast radius of a purge operation.
