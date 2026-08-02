@@ -59,7 +59,12 @@ function toDatetimeLocal(iso: string): string {
  * drawer (row -> null) or switching to a different kind stops the request
  * rather than leaving it running in the background.
  */
-export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: VehicleRecordDrawerProps) {
+export function VehicleRecordDrawer({
+  row,
+  onClose,
+  vehicleId,
+  canWrite,
+}: VehicleRecordDrawerProps) {
   const [mode, setMode] = useState<'view' | 'edit'>('view');
 
   // A newly selected row always starts in view mode, even if the previous
@@ -81,7 +86,9 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
   const appendDocument = useAppendMaintenanceRecordDocument(vehicleId);
   const deleteRecord = useDeleteMaintenanceRecord(vehicleId);
 
-  const { data: fuelLog, isLoading: fuelLoading } = useFuelLog(isFuelKind ? row?.sourceId : undefined);
+  const { data: fuelLog, isLoading: fuelLoading } = useFuelLog(
+    isFuelKind ? row?.sourceId : undefined,
+  );
   const updateFuel = useUpdateFuelLog();
   const deleteFuel = useDeleteFuelLog();
 
@@ -142,7 +149,9 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
           `Record updated, but ${attachFailures} attachment${attachFailures === 1 ? '' : 's'} could not be attached`,
         );
       } else {
-        toast.success(kind === 'modification' ? 'Modification updated' : 'Maintenance record updated');
+        toast.success(
+          kind === 'modification' ? 'Modification updated' : 'Maintenance record updated',
+        );
       }
       setMode('view');
     } catch (err) {
@@ -155,7 +164,9 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
     if (!record) return;
     try {
       await deleteRecord.mutateAsync(record.id);
-      toast.success(kind === 'modification' ? 'Modification deleted' : 'Maintenance record deleted');
+      toast.success(
+        kind === 'modification' ? 'Modification deleted' : 'Maintenance record deleted',
+      );
       onClose();
     } catch (err) {
       const apiError = createErrorFromUnknown(err);
@@ -244,7 +255,9 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
             <DetailRow label="Vendor" value={record.attributes.vendor || '—'} />
             <div className="col-span-2">
               <dt className="text-muted-foreground">Notes</dt>
-              <dd className="whitespace-pre-wrap text-foreground">{record.attributes.notes || '—'}</dd>
+              <dd className="whitespace-pre-wrap text-foreground">
+                {record.attributes.notes || '—'}
+              </dd>
             </div>
           </dl>
 
@@ -295,7 +308,10 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
       body = (
         <div className="space-y-4">
           <dl className="grid grid-cols-2 gap-3 text-sm">
-            <DetailRow label="Date" value={new Date(fuelLog.attributes.date).toLocaleDateString()} />
+            <DetailRow
+              label="Date"
+              value={new Date(fuelLog.attributes.date).toLocaleDateString()}
+            />
             <DetailRow label="Odometer" value={formatMileage(fuelLog.attributes.mileage)} />
             <DetailRow label="Gallons" value={fuelLog.attributes.gallons.toFixed(3)} />
             <DetailRow

@@ -1,6 +1,11 @@
 import { formatMileage, formatMoney } from '@myfleet/ui-components';
 import { cn } from '../../../../lib/utils';
-import { deriveOdometer, deriveTrailingCost, deriveAvgEconomy, deriveNextService } from '../../../../lib/vehicleStats';
+import {
+  deriveOdometer,
+  deriveTrailingCost,
+  deriveAvgEconomy,
+  deriveNextService,
+} from '../../../../lib/vehicleStats';
 import type { VehicleRecordRow } from '../../../../lib/vehicleRecords';
 import type { MaintenanceSchedule } from '../../../../types/models/maintenanceSchedule';
 
@@ -47,7 +52,12 @@ function trailingCutoffIso(now: Date): string {
  * currently loaded, and while more pages remain unfetched a record count
  * would imply a completeness the number doesn't have.
  */
-export function VehicleStatStrip({ rows, schedules, currentMileage, partial }: VehicleStatStripProps) {
+export function VehicleStatStrip({
+  rows,
+  schedules,
+  currentMileage,
+  partial,
+}: VehicleStatStripProps) {
   const now = new Date();
 
   const odometer = deriveOdometer(rows, currentMileage);
@@ -92,7 +102,11 @@ export function VehicleStatStrip({ rows, schedules, currentMileage, partial }: V
             : `${fuelRows.length} fill-up${fuelRows.length === 1 ? '' : 's'}`
         }
       />
-      <StatTile label="Next service" value={nextService?.label ?? '—'} valueClassName={nextServiceClass} />
+      <StatTile
+        label="Next service"
+        value={nextService?.label ?? '—'}
+        valueClassName={nextServiceClass}
+      />
     </div>
   );
 }

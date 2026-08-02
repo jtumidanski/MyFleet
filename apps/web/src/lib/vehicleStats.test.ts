@@ -10,12 +10,24 @@ import type { VehicleRecordRow } from './vehicleRecords';
 import type { MaintenanceSchedule } from '../types/models/maintenanceSchedule';
 
 function mileageRow(date: string, mileage: number): VehicleRecordRow {
-  return { id: `mileage:${date}`, sourceId: date, kind: 'mileage', date, title: 'Odometer', mileage };
+  return {
+    id: `mileage:${date}`,
+    sourceId: date,
+    kind: 'mileage',
+    date,
+    title: 'Odometer',
+    mileage,
+  };
 }
 function fuelRow(date: string, mileage: number, cost: number, gallons: number): VehicleRecordRow {
   return {
-    id: `fuel:${date}`, sourceId: date, kind: 'fuel', date,
-    title: `${gallons} gal`, mileage, cost,
+    id: `fuel:${date}`,
+    sourceId: date,
+    kind: 'fuel',
+    date,
+    title: `${gallons} gal`,
+    mileage,
+    cost,
   };
 }
 function schedule(
@@ -40,13 +52,15 @@ function schedule(
 
 describe('deriveOdometer', () => {
   it('prefers the newest mileage row', () => {
-    expect(deriveOdometer([mileageRow('2026-01-01', 80000), mileageRow('2026-06-01', 84210)], 1))
-      .toBe(84210);
+    expect(
+      deriveOdometer([mileageRow('2026-01-01', 80000), mileageRow('2026-06-01', 84210)], 1),
+    ).toBe(84210);
   });
 
   it('prefers the newest mileage row regardless of array order', () => {
-    expect(deriveOdometer([mileageRow('2026-06-01', 84210), mileageRow('2026-01-01', 80000)], 1))
-      .toBe(84210);
+    expect(
+      deriveOdometer([mileageRow('2026-06-01', 84210), mileageRow('2026-01-01', 80000)], 1),
+    ).toBe(84210);
   });
 
   it('falls back to the vehicle current mileage when there are no rows', () => {
@@ -65,16 +79,28 @@ describe('deriveTrailingCost', () => {
     const rows = [
       fuelRow('2026-07-01T00:00:00Z', 84000, 58.31, 16),
       { ...mileageRow('2026-06-01T00:00:00Z', 83000), cost: undefined },
-      { id: 'maintenance:a', sourceId: 'a', kind: 'maintenance' as const,
-        date: '2026-05-01T00:00:00Z', title: 'Brakes', cost: 612.4 },
+      {
+        id: 'maintenance:a',
+        sourceId: 'a',
+        kind: 'maintenance' as const,
+        date: '2026-05-01T00:00:00Z',
+        title: 'Brakes',
+        cost: 612.4,
+      },
     ];
     expect(deriveTrailingCost(rows, now)).toBeCloseTo(670.71, 2);
   });
 
   it('excludes rows older than twelve months', () => {
     const rows = [
-      { id: 'maintenance:old', sourceId: 'old', kind: 'maintenance' as const,
-        date: '2025-01-01T00:00:00Z', title: 'Old', cost: 1000 },
+      {
+        id: 'maintenance:old',
+        sourceId: 'old',
+        kind: 'maintenance' as const,
+        date: '2025-01-01T00:00:00Z',
+        title: 'Old',
+        cost: 1000,
+      },
     ];
     expect(deriveTrailingCost(rows, now)).toBe(0);
   });
@@ -86,8 +112,14 @@ describe('deriveTrailingCost', () => {
     // on the boundary being tested — the row must match the cutoff's exact
     // ISO shape to exercise the `>=` at vehicleStats.ts:30.
     const rows = [
-      { id: 'maintenance:edge', sourceId: 'edge', kind: 'maintenance' as const,
-        date: '2025-08-02T00:00:00.000Z', title: 'Edge', cost: 100 },
+      {
+        id: 'maintenance:edge',
+        sourceId: 'edge',
+        kind: 'maintenance' as const,
+        date: '2025-08-02T00:00:00.000Z',
+        title: 'Edge',
+        cost: 100,
+      },
     ];
     expect(deriveTrailingCost(rows, now)).toBe(100);
   });
@@ -103,15 +135,13 @@ describe('deriveAvgEconomy', () => {
     // gallons must be set so this row actually survives the usability
     // filter as one usable fill-up (not zero) — otherwise this exercises
     // the empty-array case a second time instead of the single-row one.
-    expect(deriveAvgEconomy([{ ...fuelRow('2026-07-01', 84000, 58.31, 16), gallons: 16 }]))
-      .toBeUndefined();
+    expect(
+      deriveAvgEconomy([{ ...fuelRow('2026-07-01', 84000, 58.31, 16), gallons: 16 }]),
+    ).toBeUndefined();
   });
 
   it('is undefined when the odometer did not advance', () => {
-    const rows = [
-      fuelRow('2026-07-15', 84000, 58.31, 16),
-      fuelRow('2026-07-01', 84000, 55.02, 16),
-    ];
+    const rows = [fuelRow('2026-07-15', 84000, 58.31, 16), fuelRow('2026-07-01', 84000, 55.02, 16)];
     expect(deriveAvgEconomy(rows)).toBeUndefined();
   });
 
@@ -184,7 +214,9 @@ describe('deriveAvgEconomy', () => {
 
 describe('rankSchedule', () => {
   it('ranks overdue before upcoming before everything else', () => {
-    expect(rankSchedule(schedule('a', 'overdue'))).toBeLessThan(rankSchedule(schedule('b', 'upcoming')));
+    expect(rankSchedule(schedule('a', 'overdue'))).toBeLessThan(
+      rankSchedule(schedule('b', 'upcoming')),
+    );
     expect(rankSchedule(schedule('b', 'upcoming'))).toBeLessThan(rankSchedule(schedule('c', 'ok')));
   });
 
@@ -219,7 +251,9 @@ describe('deriveNextService', () => {
   });
 
   it('derives severity from status: an informational-but-overdue schedule renders danger', () => {
-    const schedules = [schedule('a', 'overdue', { severity: 'informational', nextDueMileage: 80000 })];
+    const schedules = [
+      schedule('a', 'overdue', { severity: 'informational', nextDueMileage: 80000 }),
+    ];
     const result = deriveNextService(schedules, 84000, now);
     expect(result?.severity).toBe('danger');
   });
@@ -241,7 +275,10 @@ describe('deriveNextService', () => {
     // says the service is due in three days — the nearer dimension must
     // win, not whichever branch happens to be checked first.
     const schedules = [
-      schedule('hybrid', 'upcoming', { nextDueMileage: 89000, nextDueDate: '2026-08-05T00:00:00Z' }),
+      schedule('hybrid', 'upcoming', {
+        nextDueMileage: 89000,
+        nextDueDate: '2026-08-05T00:00:00Z',
+      }),
     ];
     const result = deriveNextService(schedules, 84000, now);
     expect(result?.label).toBe('3 days');
@@ -252,7 +289,10 @@ describe('deriveNextService', () => {
       // 100 mi remaining (well inside the 500 mi due-soon window) vs. 20
       // days remaining (well inside the 30 day window, but proportionally
       // further off): mileage is the nearer axis here.
-      schedule('hybrid', 'upcoming', { nextDueMileage: 84100, nextDueDate: '2026-08-22T00:00:00Z' }),
+      schedule('hybrid', 'upcoming', {
+        nextDueMileage: 84100,
+        nextDueDate: '2026-08-22T00:00:00Z',
+      }),
     ];
     const result = deriveNextService(schedules, 84000, now);
     expect(result?.label).toBe('100 mi');
@@ -261,7 +301,10 @@ describe('deriveNextService', () => {
   it('prefers the mileage axis on an exact urgency tie', () => {
     const schedules = [
       // Both axes sit at exactly half their due-soon window: urgency ties.
-      schedule('hybrid', 'upcoming', { nextDueMileage: 84250, nextDueDate: '2026-08-17T00:00:00Z' }),
+      schedule('hybrid', 'upcoming', {
+        nextDueMileage: 84250,
+        nextDueDate: '2026-08-17T00:00:00Z',
+      }),
     ];
     const result = deriveNextService(schedules, 84000, now);
     expect(result?.label).toBe('250 mi');

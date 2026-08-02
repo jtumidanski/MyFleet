@@ -2,7 +2,11 @@ import { useCallback, useMemo } from 'react';
 import { useMaintenanceRecords } from './maintenance';
 import { useFuelLogs } from './fuel';
 import { useMileageRecords } from './mileage';
-import { mergeVehicleRecords, type RecordSource, type VehicleRecordRow } from '../../vehicleRecords';
+import {
+  mergeVehicleRecords,
+  type RecordSource,
+  type VehicleRecordRow,
+} from '../../vehicleRecords';
 import type { MaintenanceCategory } from '../../../types/models/maintenanceCategory';
 
 /**
@@ -50,10 +54,7 @@ export function useVehicleRecords(vehicleId: string, categoriesQuery: Categories
 
   const categories = categoriesQuery.data ?? EMPTY_CATEGORIES;
 
-  const categoryById = useMemo(
-    () => new Map(categories.map((c) => [c.id, c])),
-    [categories],
-  );
+  const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
 
   const sources = useMemo<RecordSource[]>(() => {
     const maintenanceRows: VehicleRecordRow[] = (maintenance.data?.rows ?? []).map((r) => {
@@ -64,8 +65,7 @@ export function useVehicleRecords(vehicleId: string, categoriesQuery: Categories
         // The category owns kind — a record stores none (design D1).
         kind: category?.attributes.kind === 'modification' ? 'modification' : 'maintenance',
         date: r.attributes.performedAt,
-        title:
-          r.attributes.description || category?.attributes.name || r.attributes.categoryId,
+        title: r.attributes.description || category?.attributes.name || r.attributes.categoryId,
         mileage: r.attributes.mileage,
         cost: r.attributes.cost,
       };
@@ -98,9 +98,12 @@ export function useVehicleRecords(vehicleId: string, categoriesQuery: Categories
       { rows: mileageRows, hasMore: mileage.hasNextPage },
     ];
   }, [
-    maintenance.data, maintenance.hasNextPage,
-    fuel.data, fuel.hasNextPage,
-    mileage.data, mileage.hasNextPage,
+    maintenance.data,
+    maintenance.hasNextPage,
+    fuel.data,
+    fuel.hasNextPage,
+    mileage.data,
+    mileage.hasNextPage,
     categoryById,
   ]);
 
@@ -150,9 +153,12 @@ export function useVehicleRecords(vehicleId: string, categoriesQuery: Categories
     if (fuel.hasNextPage) void fetchFuelNextPage();
     if (mileage.hasNextPage) void fetchMileageNextPage();
   }, [
-    maintenance.hasNextPage, fetchMaintenanceNextPage,
-    fuel.hasNextPage, fetchFuelNextPage,
-    mileage.hasNextPage, fetchMileageNextPage,
+    maintenance.hasNextPage,
+    fetchMaintenanceNextPage,
+    fuel.hasNextPage,
+    fetchFuelNextPage,
+    mileage.hasNextPage,
+    fetchMileageNextPage,
   ]);
 
   return useMemo(

@@ -178,8 +178,13 @@ export function useCreateMaintenanceRecord(vehicleId: string) {
 export function useUpdateMaintenanceRecord(vehicleId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, attributes }: { id: string; attributes: UpdateMaintenanceRecordAttributes }) =>
-      maintenanceRecordService.patch(id, attributes),
+    mutationFn: ({
+      id,
+      attributes,
+    }: {
+      id: string;
+      attributes: UpdateMaintenanceRecordAttributes;
+    }) => maintenanceRecordService.patch(id, attributes),
     onSettled: (_data, _error, variables) => {
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(variables.id) });

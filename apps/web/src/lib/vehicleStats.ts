@@ -117,7 +117,9 @@ interface DueAxis {
  */
 function urgency(axis: DueAxis): number {
   const threshold = axis.kind === 'mileage' ? DUE_SOON_MILES : DUE_SOON_DAYS;
-  return axis.remaining < 0 ? 1 + Math.abs(axis.remaining) / threshold : 1 - axis.remaining / threshold;
+  return axis.remaining < 0
+    ? 1 + Math.abs(axis.remaining) / threshold
+    : 1 - axis.remaining / threshold;
 }
 
 /**
@@ -127,7 +129,11 @@ function urgency(axis: DueAxis): number {
  * remaining), and a date axis needs a `nextDueDate` that parses to a valid
  * instant (guards against literal `NaN` from a malformed date string).
  */
-function dueAxes(schedule: MaintenanceSchedule, odometer: number | undefined, now: Date): DueAxis[] {
+function dueAxes(
+  schedule: MaintenanceSchedule,
+  odometer: number | undefined,
+  now: Date,
+): DueAxis[] {
   const axes: DueAxis[] = [];
 
   const dueMileage = schedule.attributes.nextDueMileage;

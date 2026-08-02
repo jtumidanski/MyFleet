@@ -62,8 +62,7 @@ export function CategoryCombobox({
     () =>
       categories.filter(
         (c) =>
-          c.attributes.systemDefined &&
-          c.attributes.name.toLowerCase().includes(normalizedQuery),
+          c.attributes.systemDefined && c.attributes.name.toLowerCase().includes(normalizedQuery),
       ),
     [categories, normalizedQuery],
   );
@@ -71,8 +70,7 @@ export function CategoryCombobox({
     () =>
       categories.filter(
         (c) =>
-          !c.attributes.systemDefined &&
-          c.attributes.name.toLowerCase().includes(normalizedQuery),
+          !c.attributes.systemDefined && c.attributes.name.toLowerCase().includes(normalizedQuery),
       ),
     [categories, normalizedQuery],
   );

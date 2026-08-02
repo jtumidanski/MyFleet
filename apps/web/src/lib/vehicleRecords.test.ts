@@ -45,7 +45,7 @@ describe('mergeVehicleRecords', () => {
   // The MOST constraining incomplete source wins: the shallowest coverage.
   it('uses the newest oldest-loaded date among incomplete sources', () => {
     const sources: RecordSource[] = [
-      { rows: [row('fuel', '2026-05-01')], hasMore: true },              // oldest = 05-01
+      { rows: [row('fuel', '2026-05-01')], hasMore: true }, // oldest = 05-01
       { rows: [row('mileage', '2026-06-01'), row('mileage', '2026-01-01')], hasMore: true }, // oldest = 01-01
     ];
 
@@ -91,7 +91,7 @@ describe('mergeVehicleRecords', () => {
   // No backend list query has an ORDER BY tiebreaker, so a row sharing a
   // timestamp with a page boundary can be re-fetched on the next page. The
   // same id must never appear twice in the merged feed.
-  it('dedupes a row that arrives twice within one source\'s accumulated pages', () => {
+  it("dedupes a row that arrives twice within one source's accumulated pages", () => {
     const duplicate = row('fuel', '2026-03-01');
     const sources: RecordSource[] = [
       // Simulates two accumulated pages that both included the same boundary row.
@@ -144,7 +144,11 @@ describe('mergeVehicleRecords', () => {
 });
 
 describe('filterVehicleRecords', () => {
-  const rows = [row('fuel', '2026-03-01'), row('mileage', '2026-02-01'), row('modification', '2026-01-01')];
+  const rows = [
+    row('fuel', '2026-03-01'),
+    row('mileage', '2026-02-01'),
+    row('modification', '2026-01-01'),
+  ];
 
   it('returns everything for "all"', () => {
     expect(filterVehicleRecords(rows, 'all')).toHaveLength(3);

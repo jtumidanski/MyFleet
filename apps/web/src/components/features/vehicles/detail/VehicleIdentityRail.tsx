@@ -104,7 +104,9 @@ export function VehicleIdentityRail({
                   type="button"
                   onClick={onViewGallery}
                   aria-label={
-                    isLastTile && remaining > 0 ? `View all photos (${remaining} more)` : 'View photos'
+                    isLastTile && remaining > 0
+                      ? `View all photos (${remaining} more)`
+                      : 'View photos'
                   }
                   className="relative h-16 w-16 shrink-0 overflow-hidden rounded-md"
                 >

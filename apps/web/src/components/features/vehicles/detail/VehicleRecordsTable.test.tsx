@@ -5,12 +5,33 @@ import { VehicleRecordsTable } from './VehicleRecordsTable';
 import type { VehicleRecordRow } from '../../../../lib/vehicleRecords';
 
 const rows: VehicleRecordRow[] = [
-  { id: 'fuel:1', sourceId: '1', kind: 'fuel', date: '2026-07-28T00:00:00Z',
-    title: '16.204 gal', mileage: 84010, cost: 58.31 },
-  { id: 'maintenance:2', sourceId: '2', kind: 'maintenance', date: '2026-07-12T00:00:00Z',
-    title: 'Front brake pads', mileage: 82940, cost: 612.4 },
-  { id: 'modification:3', sourceId: '3', kind: 'modification', date: '2026-05-18T00:00:00Z',
-    title: 'Rock sliders', mileage: 79430, cost: 980 },
+  {
+    id: 'fuel:1',
+    sourceId: '1',
+    kind: 'fuel',
+    date: '2026-07-28T00:00:00Z',
+    title: '16.204 gal',
+    mileage: 84010,
+    cost: 58.31,
+  },
+  {
+    id: 'maintenance:2',
+    sourceId: '2',
+    kind: 'maintenance',
+    date: '2026-07-12T00:00:00Z',
+    title: 'Front brake pads',
+    mileage: 82940,
+    cost: 612.4,
+  },
+  {
+    id: 'modification:3',
+    sourceId: '3',
+    kind: 'modification',
+    date: '2026-05-18T00:00:00Z',
+    title: 'Rock sliders',
+    mileage: 79430,
+    cost: 980,
+  },
 ];
 
 function renderTable(props: Partial<React.ComponentProps<typeof VehicleRecordsTable>> = {}) {

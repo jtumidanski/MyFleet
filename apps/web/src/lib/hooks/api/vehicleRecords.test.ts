@@ -357,10 +357,7 @@ describe('useVehicleRecords', () => {
         { hasNextPage: true },
       ),
       fuel: stub(
-        [
-          fuelLog('f1', '2026-03-01T00:00:00Z', 10),
-          fuelLog('f2', '2026-01-01T00:00:00Z', 8),
-        ],
+        [fuelLog('f1', '2026-03-01T00:00:00Z', 10), fuelLog('f2', '2026-01-01T00:00:00Z', 8)],
         { hasNextPage: false },
       ),
     });

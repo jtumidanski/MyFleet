@@ -2,13 +2,7 @@ import { Card, CardContent } from '../../../ui/card';
 import { Button } from '../../../ui/button';
 
 export type QuickAction =
-  | 'mileage'
-  | 'fuel'
-  | 'maintenance'
-  | 'modification'
-  | 'schedule'
-  | 'upload'
-  | 'delete';
+  'mileage' | 'fuel' | 'maintenance' | 'modification' | 'schedule' | 'upload' | 'delete';
 
 interface VehicleQuickActionsProps {
   canWrite: boolean;

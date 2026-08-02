@@ -59,7 +59,9 @@ export function LogMaintenanceDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{kind === 'modification' ? 'Log modification' : 'Log maintenance'}</DialogTitle>
+          <DialogTitle>
+            {kind === 'modification' ? 'Log modification' : 'Log maintenance'}
+          </DialogTitle>
         </DialogHeader>
         {categories && (
           <MaintenanceRecordForm
