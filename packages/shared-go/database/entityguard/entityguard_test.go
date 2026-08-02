@@ -189,3 +189,23 @@ func TestAnalyze_ignoresTestFiles(t *testing.T) {
 		t.Fatalf("a Save in a _test.go file must be ignored; got %v", got)
 	}
 }
+
+// A ToEntity() whose result type is a pointer (or, equally, a qualified
+// package.Type) is exactly as undecidable as an unparseable body: this guard
+// cannot resolve it to a same-package struct declaration. Silently treating it
+// as "no ToEntity here" would be the same silent-pass bug the unparseable-body
+// case already guards against.
+func TestAnalyze_pointerResultToEntityIsAFinding(t *testing.T) {
+	src := strings.Replace(lossySrc, "ToEntity() Entity {", "ToEntity() *Entity {", 1)
+	src = strings.Replace(src, "return Entity{ID: m.id, Name: m.name}", "return &Entity{ID: m.id, Name: m.name}", 1)
+	got, err := Analyze(writeFixture(t, "widget", src))
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(got) != 1 || got[0].Reason != ReasonUnverifiable {
+		t.Fatalf("want exactly one %q finding, got %v", ReasonUnverifiable, got)
+	}
+	if !strings.Contains(got[0].String(), "*Entity") {
+		t.Fatalf("message must name the unresolved result type; got:\n%s", got[0].String())
+	}
+}

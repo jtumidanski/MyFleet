@@ -144,14 +144,17 @@ func analyzeDir(dir string) ([]Finding, error) {
 	if savePos == "" {
 		return nil, nil // no Save write path: the defect needs both ingredients
 	}
-	entityName, assigned, ok := findToEntity(files)
+	entityName, assigned, ok, detail := findToEntity(files)
 	if entityName == "" {
 		return nil, nil // no Model/Entity round-trip in this package
 	}
 	base := Finding{Dir: filepath.Clean(dir), Package: pkgName, SavePos: savePos}
 	if !ok {
+		if detail == "" {
+			detail = "ToEntity() does not return a single composite literal"
+		}
 		base.Reason = ReasonUnverifiable
-		base.Detail = "ToEntity() does not return a single composite literal"
+		base.Detail = detail
 		return []Finding{base}, nil
 	}
 	st, stPos := findStruct(fset, files, entityName)
@@ -214,9 +217,14 @@ func findSaveCall(fset *token.FileSet, files []*ast.File) string {
 }
 
 // findToEntity locates `func (…) ToEntity() T` and returns T plus the set of
-// field names its returned composite literal assigns. ok is false when the body
-// is not a single return of a composite literal — the undecidable case.
-func findToEntity(files []*ast.File) (entityName string, assigned map[string]bool, ok bool) {
+// field names its returned composite literal assigns. ok is false when the
+// method's shape defeats analysis — either the result type does not resolve to
+// a plain, same-package struct name (a pointer or a qualified type), or the
+// body is not a single return of a composite literal. detail is non-empty only
+// when it must override analyzeDir's generic composite-literal message with a
+// more specific one; a silent skip here would violate this guard's own
+// invariant that an undecidable package is a finding, not a pass.
+func findToEntity(files []*ast.File) (entityName string, assigned map[string]bool, ok bool, detail string) {
 	for _, f := range files {
 		for _, decl := range f.Decls {
 			fn, isFn := decl.(*ast.FuncDecl)
@@ -226,14 +234,21 @@ func findToEntity(files []*ast.File) (entityName string, assigned map[string]boo
 			if fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
 				continue
 			}
-			ident, isIdent := fn.Type.Results.List[0].Type.(*ast.Ident)
+			resultType := fn.Type.Results.List[0].Type
+			ident, isIdent := resultType.(*ast.Ident)
 			if !isIdent {
-				continue
+				// A pointer (*Entity) or qualified (pkg.Entity) result type is a
+				// real ToEntity method this guard still cannot resolve to a
+				// same-package struct declaration, so it is reported rather than
+				// treated as "no ToEntity here at all".
+				typeStr := resultTypeString(resultType)
+				return typeStr, nil, false,
+					"ToEntity() returns " + typeStr + ", not a plain struct type declared in this package"
 			}
 			entityName = ident.Name
 			lit := soleReturnedCompositeLit(fn.Body)
 			if lit == nil {
-				return entityName, nil, false
+				return entityName, nil, false, ""
 			}
 			assigned = map[string]bool{}
 			for _, elt := range lit.Elts {
@@ -241,16 +256,32 @@ func findToEntity(files []*ast.File) (entityName string, assigned map[string]boo
 				if !isKV {
 					// A positional literal names no fields, so nothing can be
 					// proven about which columns it sets.
-					return entityName, nil, false
+					return entityName, nil, false, ""
 				}
 				if key, isKeyIdent := kv.Key.(*ast.Ident); isKeyIdent {
 					assigned[key.Name] = true
 				}
 			}
-			return entityName, assigned, true
+			return entityName, assigned, true, ""
 		}
 	}
-	return "", nil, false
+	return "", nil, false, ""
+}
+
+// resultTypeString renders a ToEntity result type for diagnostic messages. It
+// only needs to name the shapes ToEntity plausibly returns: a bare type name,
+// a pointer to one, or a qualified (package.Type) name.
+func resultTypeString(e ast.Expr) string {
+	switch t := e.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		return "*" + resultTypeString(t.X)
+	case *ast.SelectorExpr:
+		return resultTypeString(t.X) + "." + t.Sel.Name
+	default:
+		return "<unresolvable type>"
+	}
 }
 
 func soleReturnedCompositeLit(body *ast.BlockStmt) *ast.CompositeLit {
