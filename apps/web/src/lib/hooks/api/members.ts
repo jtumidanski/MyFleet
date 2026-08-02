@@ -71,26 +71,29 @@ export function useRemoveMember(fleetId: string) {
   return useMutation({
     mutationFn: async ({ userId, isSelf }: { userId: string; isSelf: boolean }) => {
       await memberService.removeMember(fleetId, userId);
-      if (isSelf) {
-        // FR-4.1. active_fleet_id and role are JWT claims fixed at mint time,
-        // so the token in hand still claims a fleet the user just left.
-        //
-        // mintAccessToken, NOT refreshAccessToken: the removal already
-        // committed server-side, so a transient mint failure must not clear a
-        // still-valid token — that would log the user out on the path that just
-        // succeeded. Same reasoning as useAcceptInvite.
-        await mintAccessToken();
-      }
       return { isSelf };
     },
     onSuccess: async ({ isSelf }) => {
-      if (isSelf) {
-        // Refetching /auth/me is what routes the user onward: the refreshed
-        // token resolves to an empty active_fleet_id and RequireAuth redirects
-        // to onboarding on its own. A manual navigate() here would be a second,
-        // racing source of truth for the same decision.
-        await queryClient.invalidateQueries({ queryKey: authKeys.all });
+      if (!isSelf) return;
+      // FR-4.1. active_fleet_id and role are JWT claims fixed at mint time,
+      // so the token in hand still claims a fleet the user just left.
+      //
+      // mintAccessToken, NOT refreshAccessToken: the removal already
+      // committed server-side, so a transient mint failure must not clear a
+      // still-valid token — that would log the user out on the path that just
+      // succeeded. Same reasoning as useAcceptInvite.
+      const token = await mintAccessToken();
+      if (!token) {
+        toast.error(
+          'You left the fleet, but your session could not be updated. Sign out and back in to see it.',
+        );
+        return;
       }
+      // Refetching /auth/me is what routes the user onward: the refreshed
+      // token resolves to an empty active_fleet_id and RequireAuth redirects
+      // to onboarding on its own. A manual navigate() here would be a second,
+      // racing source of truth for the same decision.
+      await queryClient.invalidateQueries({ queryKey: authKeys.all });
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: memberKeys.lists() });

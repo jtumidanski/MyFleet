@@ -27,6 +27,7 @@ import { fleetKeys } from './fleets';
 import { useRenameFleet } from './fleetSettings';
 import { userKeys } from './users';
 import { memberService } from '../../../services/api/MemberService';
+import { ApiError, createErrorFromUnknown } from '@myfleet/shared-ts';
 
 // ---------------------------------------------------------------------------
 // Key factory hierarchy
@@ -206,6 +207,30 @@ describe('mutation invalidation contracts — real hooks', () => {
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: userKeys.all }));
   });
 
+  // A failed mint after a self-leave means stale claims, not a dead session —
+  // the removal already committed server-side. The surviving token still
+  // claims the just-left fleet, so authKeys.all must NOT be invalidated on a
+  // failed mint: refetching /auth/me with the stale token would report the
+  // fleet the user just left, and RequireAuth would never redirect. Same
+  // reasoning, and same shape, as useAcceptInvite's mint-failure test above.
+  it('useRemoveMember still succeeds, without refetching identity, when the mint fails on a self-leave', async () => {
+    vi.mocked(mintAccessToken).mockResolvedValueOnce(null);
+
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'me', isSelf: true });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+    expect(toast.error).toHaveBeenCalled();
+  });
+
   it('useUpdateMemberRole PATCHes the role and invalidates members and fleets', async () => {
     const { result } = renderHook(() => useUpdateMemberRole('f1'), {
       wrapper: makeWrapper(queryClient),
@@ -235,6 +260,29 @@ describe('mutation invalidation contracts — real hooks', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(mintAccessToken).not.toHaveBeenCalled();
+  });
+
+  // 409 = demoting the sole owner. The custom message is the one thing this
+  // hook's onError does beyond the shared toast fallback, so it needs direct
+  // coverage rather than relying on useRemoveMember's 409 test to stand in.
+  it('useUpdateMemberRole surfaces a dedicated toast on a sole-owner 409', async () => {
+    vi.mocked(memberService.updateRole).mockRejectedValueOnce(new Error('conflict'));
+    vi.mocked(createErrorFromUnknown).mockReturnValueOnce(
+      new ApiError(409, 'conflict', 'conflict'),
+    );
+
+    const { result } = renderHook(() => useUpdateMemberRole('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'user-1', role: 'member' });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).toHaveBeenCalledWith(
+      'This fleet would be left with no owner. Promote someone else first.',
+    );
   });
 
   // --------------------------------------------------------------------------
