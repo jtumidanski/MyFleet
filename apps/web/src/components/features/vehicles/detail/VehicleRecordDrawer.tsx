@@ -13,6 +13,7 @@ import {
   useMaintenanceRecord,
   useMaintenanceCategories,
   useUpdateMaintenanceRecord,
+  useAppendMaintenanceRecordDocument,
   useDeleteMaintenanceRecord,
 } from '../../../../lib/hooks/api/maintenance';
 import { useFuelLog, useUpdateFuelLog, useDeleteFuelLog } from '../../../../lib/hooks/api/fuel';
@@ -36,6 +37,12 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <dd className="text-foreground">{value}</dd>
     </div>
   );
+}
+
+/** RFC3339 -> `YYYY-MM-DDTHH:MM`, the shape a `datetime-local` input (and
+ * these forms' own "now" default) requires. */
+function toDatetimeLocal(iso: string): string {
+  return new Date(iso).toISOString().slice(0, 16);
 }
 
 /**
@@ -71,6 +78,7 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
     isMaintenanceKind ? row?.sourceId : undefined,
   );
   const updateRecord = useUpdateMaintenanceRecord(vehicleId);
+  const appendDocument = useAppendMaintenanceRecordDocument(vehicleId);
   const deleteRecord = useDeleteMaintenanceRecord(vehicleId);
 
   const { data: fuelLog, isLoading: fuelLoading } = useFuelLog(isFuelKind ? row?.sourceId : undefined);
@@ -95,7 +103,10 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
 
   const kind = row.kind === 'modification' ? 'modification' : 'maintenance';
 
-  const handleUpdateRecord = async (values: MaintenanceRecordFormInput) => {
+  const handleUpdateRecord = async (
+    values: MaintenanceRecordFormInput,
+    documentMediaIds: string[],
+  ) => {
     if (!record) return;
     try {
       await updateRecord.mutateAsync({
@@ -109,7 +120,30 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
           notes: values.notes || undefined,
         },
       });
-      toast.success(kind === 'modification' ? 'Modification updated' : 'Maintenance record updated');
+
+      // UpdateMaintenanceRecordAttributes (the PATCH body) has no
+      // documentMediaIds field, so any files picked in the edit form must be
+      // attached separately, through the append-document endpoint, or they'd
+      // be uploaded and then silently orphaned. Sequential, not Promise.all:
+      // appendDocumentMedia is a single-id POST with no batch form, and this
+      // keeps a partial failure's toast attributable to "N attached, then it
+      // failed" rather than an ambiguous mixed-settle race.
+      let attachFailures = 0;
+      for (const mediaId of documentMediaIds) {
+        try {
+          await appendDocument.mutateAsync({ id: record.id, mediaId });
+        } catch {
+          attachFailures += 1;
+        }
+      }
+
+      if (attachFailures > 0) {
+        toast.error(
+          `Record updated, but ${attachFailures} attachment${attachFailures === 1 ? '' : 's'} could not be attached`,
+        );
+      } else {
+        toast.success(kind === 'modification' ? 'Modification updated' : 'Maintenance record updated');
+      }
       setMode('view');
     } catch (err) {
       const apiError = createErrorFromUnknown(err);
@@ -173,9 +207,18 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
           categories={categories}
           kind={kind}
           defaultMileage={record.attributes.mileage}
+          defaultValues={{
+            categoryId: record.attributes.categoryId,
+            performedAt: toDatetimeLocal(record.attributes.performedAt),
+            description: record.attributes.description ?? '',
+            mileage: record.attributes.mileage,
+            cost: record.attributes.cost,
+            vendor: record.attributes.vendor ?? '',
+            notes: record.attributes.notes ?? '',
+          }}
           onSubmit={handleUpdateRecord}
           onCancel={() => setMode('view')}
-          submitting={updateRecord.isPending}
+          submitting={updateRecord.isPending || appendDocument.isPending}
         />
       );
     } else {
@@ -236,6 +279,13 @@ export function VehicleRecordDrawer({ row, onClose, vehicleId, canWrite }: Vehic
       body = (
         <FuelForm
           defaultMileage={fuelLog.attributes.mileage}
+          defaultValues={{
+            date: toDatetimeLocal(fuelLog.attributes.date),
+            mileage: fuelLog.attributes.mileage,
+            gallons: fuelLog.attributes.gallons,
+            totalCost: fuelLog.attributes.totalCost,
+            pricePerGallon: fuelLog.attributes.pricePerGallon,
+          }}
           onSubmit={handleUpdateFuel}
           onCancel={() => setMode('view')}
           submitting={updateFuel.isPending}

@@ -30,6 +30,13 @@ interface MaintenanceRecordFormProps {
    * (it would still pass a value to the server, just the wrong one).
    */
   kind: MaintenanceCategoryKind;
+  /**
+   * Prefills the form for editing an existing record. Omitted fields fall
+   * back to the create-flow defaults below (blank / `defaultMileage`).
+   * Merged in last, so an explicit `undefined` on a field here still yields
+   * that field's create-flow default rather than `undefined` itself.
+   */
+  defaultValues?: Partial<MaintenanceRecordFormInput>;
   onSubmit: (
     values: MaintenanceRecordFormInput,
     documentMediaIds: string[],
@@ -41,12 +48,13 @@ interface MaintenanceRecordFormProps {
 /**
  * Form for logging a maintenance record.
  * - Category dropdown populated from GET /maintenance-categories, filtered by `kind`.
- * - Mileage pre-filled from latest mileage record (auto-fill).
+ * - Mileage pre-filled from latest mileage record (auto-fill), or overridden by `defaultValues`.
  */
 export function MaintenanceRecordForm({
   categories,
   defaultMileage,
   kind,
+  defaultValues,
   onSubmit,
   onCancel,
   submitting,
@@ -67,6 +75,7 @@ export function MaintenanceRecordForm({
       vendor: '',
       notes: '',
       documentMediaIds: [],
+      ...defaultValues,
     },
   });
 

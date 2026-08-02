@@ -2,17 +2,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { MileageSparkline } from '../mileage/MileageSparkline';
 import { VehicleActivityTimeline } from '../../activity/VehicleActivityTimeline';
 import { useMileageRecords } from '../../../../lib/hooks/api/mileage';
-import type { VehicleRecordRow } from '../../../../lib/vehicleRecords';
 
 interface VehicleTrendsProps {
   vehicleId: string;
-  /**
-   * Unused directly — kept on the prop surface to match the Task 16 brief's
-   * interface — MileageSparkline needs raw MileageRecords, not merged rows,
-   * so the sparkline fetches its own via useMileageRecords rather than
-   * reshaping these.
-   */
-  mileageRows: VehicleRecordRow[];
 }
 
 /**

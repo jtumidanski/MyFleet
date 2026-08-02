@@ -188,6 +188,27 @@ export function useUpdateMaintenanceRecord(vehicleId: string) {
   });
 }
 
+/**
+ * POST /api/fleet/maintenance-records/{id}/document-media — attach one
+ * already-uploaded (confirmed) media object to an existing record.
+ *
+ * This is what lets the record drawer's Edit flow actually attach files a
+ * user picks mid-edit: `UpdateMaintenanceRecordAttributes` (the PATCH body)
+ * has no `documentMediaIds` field, so an update alone cannot carry new
+ * attachments — this append endpoint is the only server-side path that can.
+ */
+export function useAppendMaintenanceRecordDocument(vehicleId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, mediaId }: { id: string; mediaId: string }) =>
+      maintenanceRecordService.appendDocumentMedia(id, mediaId),
+    onSettled: (_data, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(variables.id) });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+    },
+  });
+}
+
 /** DELETE /api/fleet/maintenance-records/{id} — soft delete */
 export function useDeleteMaintenanceRecord(vehicleId: string) {
   const queryClient = useQueryClient();
