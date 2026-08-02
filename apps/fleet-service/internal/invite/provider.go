@@ -22,7 +22,7 @@ func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 func (p *dbProvider) GetByID(id string) (Model, error) {
 	var e Entity
-	if err := p.db.First(&e, "id = ?", id).Error; err != nil {
+	if err := p.db.First(&e, "id = ? AND deleted_at IS NULL", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Model{}, ErrNotFound
 		}
@@ -33,7 +33,7 @@ func (p *dbProvider) GetByID(id string) (Model, error) {
 
 func (p *dbProvider) GetByToken(token string) (Model, error) {
 	var e Entity
-	if err := p.db.First(&e, "token = ?", token).Error; err != nil {
+	if err := p.db.First(&e, "token = ? AND deleted_at IS NULL", token).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Model{}, ErrNotFound
 		}
@@ -44,7 +44,7 @@ func (p *dbProvider) GetByToken(token string) (Model, error) {
 
 func (p *dbProvider) ListByFleetID(fleetID string) ([]Model, error) {
 	var es []Entity
-	if err := p.db.Where("fleet_id = ?", fleetID).Find(&es).Error; err != nil {
+	if err := p.db.Where("fleet_id = ? AND deleted_at IS NULL", fleetID).Find(&es).Error; err != nil {
 		return nil, err
 	}
 	out := make([]Model, 0, len(es))

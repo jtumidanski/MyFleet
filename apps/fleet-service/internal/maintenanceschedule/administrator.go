@@ -129,7 +129,7 @@ func (a *dbAdministrator) RecomputeTx(tx *gorm.DB, id string, currentMileage int
 
 func (a *dbAdministrator) get(id string) (Model, error) {
 	var e Entity
-	if err := a.db.First(&e, "id = ?", id).Error; err != nil {
+	if err := a.db.First(&e, "id = ? AND deleted_at IS NULL", id).Error; err != nil {
 		return Model{}, err
 	}
 	return Make(e), nil

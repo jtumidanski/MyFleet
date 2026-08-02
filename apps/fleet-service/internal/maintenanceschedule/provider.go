@@ -42,7 +42,7 @@ func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 func (p *dbProvider) GetByID(id string) (Model, error) {
 	var e Entity
-	if err := p.db.First(&e, "id = ?", id).Error; err != nil {
+	if err := p.db.First(&e, "id = ? AND deleted_at IS NULL", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Model{}, ErrNotFound
 		}
@@ -52,7 +52,7 @@ func (p *dbProvider) GetByID(id string) (Model, error) {
 }
 
 func (p *dbProvider) ListByVehicle(vehicleID string, page server.Page) ([]Model, int, error) {
-	q := p.db.Model(&Entity{}).Where("vehicle_id = ?", vehicleID)
+	q := p.db.Model(&Entity{}).Where("vehicle_id = ? AND deleted_at IS NULL", vehicleID)
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
@@ -60,7 +60,7 @@ func (p *dbProvider) ListByVehicle(vehicleID string, page server.Page) ([]Model,
 	}
 
 	var es []Entity
-	if err := p.db.Where("vehicle_id = ?", vehicleID).
+	if err := p.db.Where("vehicle_id = ? AND deleted_at IS NULL", vehicleID).
 		Order("created_at asc").Offset(page.Offset()).Limit(page.Size).Find(&es).Error; err != nil {
 		return nil, 0, err
 	}
@@ -95,11 +95,16 @@ func (p *dbProvider) ListActive() ([]QueueRow, error) {
 // queryActive joins active schedules to their (non-deleted) vehicle, optionally
 // scoping to a single fleet and/or a single vehicle. Returns each schedule with
 // the vehicle's current mileage for live DueState computation.
+//
+// `s.deleted_at IS NULL` is not cosmetic: the no-argument form backs
+// /internal/maintenance/due, which drives notification-service's reminder job.
+// Without it a purged schedule keeps generating notifications for a fleet that
+// no longer exists.
 func (p *dbProvider) queryActive(fleetID, vehicleID *string) ([]QueueRow, error) {
 	q := p.db.Table("fleet.maintenance_schedules AS s").
 		Select("s.*, v.current_mileage AS current_mileage, v.fleet_id AS fleet_id").
 		Joins("JOIN fleet.vehicles v ON v.id = s.vehicle_id AND v.deleted_at IS NULL").
-		Where("s.active = ?", true)
+		Where("s.active = ? AND s.deleted_at IS NULL", true)
 	if fleetID != nil {
 		q = q.Where("v.fleet_id = ?", *fleetID)
 	}
