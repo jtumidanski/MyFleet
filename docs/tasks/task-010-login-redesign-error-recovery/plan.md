@@ -10,6 +10,19 @@
 
 ## Global Constraints
 
+> **SUPERSEDED — FR-ERR-8 ("the state cookie is cleared on every failure
+> path").** Review found this makes an unauthenticated denial-of-login
+> possible: `GET /auth/callback` is public and carries no CSRF token, so the
+> provider-`?error=` pre-check and the missing-`code`/`state` exit run before
+> `verifyStateCookie` and are reachable by any third party who can make a
+> victim's browser issue the request — clearing there destroys an in-flight
+> `oidc_state` they never touched. The pre-diff `http.Error` exits left it
+> intact, so clearing was a regression. **Ruled by the user: the finding
+> governs, not the plan.** The cookie is now cleared exactly once, immediately
+> after `verifyStateCookie` succeeds; exits before that point leave it alone.
+> Recorded in `failLogin`'s doc comment and in the test table's
+> `wantCookieCleared` field. Commit `e3b9a04`.
+
 - **Do not add dependencies.** `lucide-react`, `Button`, `logrus`, and `logrus/hooks/test` (ships inside the existing `github.com/sirupsen/logrus v1.9.4` module) are all already available.
 - **Only existing CSS tokens.** No new custom properties in `apps/web/src/index.css`. The danger callout uses exactly `border-danger-border bg-danger-subtle text-danger-subtle-foreground`.
 - **No hardcoded palette classes in `.tsx`.** `apps/web/src/test/conventions.test.ts:113-154` fails any `.tsx` matching `(bg|text|border|ring|divide)-(gray|slate|zinc|neutral|white|black|red|green|blue|amber|yellow|emerald|orange)`. The Google mark's white backing is an in-SVG `fill="#FFFFFF"`, which is outside that regex by construction.
@@ -56,7 +69,7 @@ Six of the nine failure exits sit behind concrete processor types, which is why 
 - Consumes: nothing from earlier tasks.
 - Produces: `oidc.Authenticator`, `oidc.UserProvisioner`, `oidc.TokenIssuer` (exported interfaces on `Dependencies`); test helpers `okDeps() Dependencies`, `okAuthenticator() fakeAuthenticator`, `stateCookie(t *testing.T, state, nonce string) *http.Cookie`, `callback(t *testing.T, d Dependencies, target string, cookies ...*http.Cookie) (*httptest.ResponseRecorder, *test.Hook)` — Tasks 2 and 3 build directly on all four.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/auth-service/internal/oidc/resource_test.go`:
 
@@ -206,12 +219,12 @@ func TestCallback_successWithoutFleetGoesToOnboarding(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test github.com/jtumidanski/myfleet/apps/auth-service/internal/oidc -run TestCallback -v`
 Expected: FAIL to compile — `cannot use fakeAuthenticator{} (value of type fakeAuthenticator) as *Processor value in struct literal` (and the same for `Users` and `Sessions`).
 
-- [ ] **Step 3: Narrow the three `Dependencies` fields to interfaces**
+- [x] **Step 3: Narrow the three `Dependencies` fields to interfaces**
 
 In `apps/auth-service/internal/oidc/resource.go`, add `"context"` to the import block (first entry, before `"crypto/hmac"`), then insert the interfaces immediately above `Dependencies` (currently line 26) and change the three field types:
 
@@ -258,17 +271,17 @@ type Dependencies struct {
 
 Nothing else in `resource.go` changes: every call site (`d.OIDC.AuthCodeURL`, `d.OIDC.Exchange`, `d.OIDC.Verify`, `d.Users.ProvisionFromGoogle`, `d.Sessions.MintAccess`, `d.Sessions.IssueRefresh`) is already method-only.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `go test github.com/jtumidanski/myfleet/apps/auth-service/internal/oidc -run TestCallback -v`
 Expected: PASS (2 tests).
 
-- [ ] **Step 5: Verify `cmd/main.go` still compiles against the new types**
+- [x] **Step 5: Verify `cmd/main.go` still compiles against the new types**
 
 Run: `make build && make vet`
 Expected: both succeed with no output. This is the check that the three concrete processors satisfy the interfaces — if a signature were transcribed wrong, `oidcDeps` in `apps/auth-service/cmd/main.go:72-82` would fail to compile.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/auth-service/internal/oidc/resource.go apps/auth-service/internal/oidc/resource_test.go
@@ -290,7 +303,7 @@ Nine `http.Error` calls collapse into one `failLogin` helper. `Dependencies` gai
 - Consumes: `okDeps()`, `okAuthenticator()`, `stateCookie()`, `callback()` from Task 1.
 - Produces: `loginErrorCode` (unexported string type) with constants `errCancelled`, `errInvalidState`, `errAuthFailed`, `errServerError`; `failLogin(w http.ResponseWriter, req *http.Request, d Dependencies, code loginErrorCode)`; `Dependencies.LoginPath string`. Task 3 calls `failLogin` with `errCancelled` and `errAuthFailed`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 First add `LoginPath: "/login",` to `okDeps()` in `resource_test.go`, immediately after the `OnboardingPath` line:
 
@@ -488,12 +501,12 @@ func TestCallback_failureHonoursLoginPath(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test github.com/jtumidanski/myfleet/apps/auth-service/internal/oidc -run TestCallback_failure -v`
 Expected: FAIL to compile — `unknown field LoginPath in struct literal of type Dependencies`.
 
-- [ ] **Step 3: Add `LoginPath`, the code constants, and `failLogin`**
+- [x] **Step 3: Add `LoginPath`, the code constants, and `failLogin`**
 
 In `apps/auth-service/internal/oidc/resource.go`, add the field to `Dependencies` beside its siblings:
 
@@ -539,7 +552,7 @@ func failLogin(w http.ResponseWriter, req *http.Request, d Dependencies, code lo
 }
 ```
 
-- [ ] **Step 4: Replace the nine `http.Error` exits**
+- [x] **Step 4: Replace the nine `http.Error` exits**
 
 In `callbackHandler`, replace each `http.Error(...)` line — and only that line — with the matching `failLogin` call. The `log.WithError(...)` lines above them are untouched.
 
@@ -609,17 +622,17 @@ In `callbackHandler`, replace each `http.Error(...)` line — and only that line
 		}
 ```
 
-- [ ] **Step 5: Confirm no `http.Error` remains**
+- [x] **Step 5: Confirm no `http.Error` remains**
 
 Run: `grep -c "http.Error" apps/auth-service/internal/oidc/resource.go`
 Expected: `0`
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `go test github.com/jtumidanski/myfleet/apps/auth-service/internal/oidc -v`
 Expected: PASS — `TestCallback_successRedirectsHomeWithAccessToken`, `TestCallback_successWithoutFleetGoesToOnboarding`, all ten subtests of `TestCallback_failureRedirectsToLogin`, `TestCallback_failureHonoursLoginPath`, and the pre-existing `TestProfileFromClaims_extractsFields`.
 
-- [ ] **Step 7: Wire `APP_LOGIN_PATH` in `cmd/main.go`**
+- [x] **Step 7: Wire `APP_LOGIN_PATH` in `cmd/main.go`**
 
 In `apps/auth-service/cmd/main.go`, add one line to the `oidc.Dependencies` literal, after `OnboardingPath`:
 
@@ -640,12 +653,12 @@ In `apps/auth-service/cmd/main.go`, add one line to the `oidc.Dependencies` lite
 
 No `deploy/` change: `APP_HOME_PATH` and `APP_ONBOARDING_PATH` are likewise absent from the manifests and rely on their Go defaults.
 
-- [ ] **Step 8: Verify the service builds**
+- [x] **Step 8: Verify the service builds**
 
 Run: `make build && make vet && go test -race github.com/jtumidanski/myfleet/apps/auth-service/...`
 Expected: all pass.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add apps/auth-service/internal/oidc/resource.go apps/auth-service/internal/oidc/resource_test.go apps/auth-service/cmd/main.go
@@ -666,7 +679,7 @@ Today a user who clicks **Cancel** at Google's consent screen returns with no `c
 - Consumes: `failLogin`, `errCancelled`, `errAuthFailed` (Task 2); `okDeps()`, `callback()`, `clearsStateCookie()`, `loggedAt()` (Tasks 1-2).
 - Produces: nothing further tasks depend on.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `apps/auth-service/internal/oidc/resource_test.go`:
 
@@ -710,12 +723,12 @@ func TestCallback_otherProviderErrorIsAuthFailed(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test github.com/jtumidanski/myfleet/apps/auth-service/internal/oidc -run TestCallback_providerAccessDeniedIsCancelled -v`
 Expected: FAIL — `Location = "http://app.test/login#error=invalid_state", want "http://app.test/login#error=cancelled"` (the request has no `code`, so it currently falls into the missing-code exit).
 
-- [ ] **Step 3: Add the pre-check**
+- [x] **Step 3: Add the pre-check**
 
 In `apps/auth-service/internal/oidc/resource.go`, insert at the very top of the `callbackHandler` closure, above the existing `code := req.URL.Query().Get("code")`:
 
@@ -739,12 +752,12 @@ In `apps/auth-service/internal/oidc/resource.go`, insert at the very top of the 
 		}
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `go test -race github.com/jtumidanski/myfleet/apps/auth-service/... -v`
 Expected: PASS, including both new tests and every test from Tasks 1-2.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/auth-service/internal/oidc/resource.go apps/auth-service/internal/oidc/resource_test.go
@@ -765,7 +778,7 @@ The SPA's half of the fragment contract. The module owns the closed code set, th
 - Consumes: nothing from earlier tasks (the contract is the four code strings, produced by Task 2).
 - Produces: `type LoginErrorCode = 'cancelled' | 'invalid_state' | 'auth_failed' | 'server_error'`; `interface LoginErrorNotice { tone: 'neutral' | 'danger'; message: string }`; `consumeLoginError(): LoginErrorCode | null`; `noticeFor(code: LoginErrorCode): LoginErrorNotice`. Task 6 imports both functions and the `LoginErrorCode` type.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/web/src/lib/auth/loginError.test.ts`:
 
@@ -859,12 +872,12 @@ describe('noticeFor', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npm run -w apps/web test -- src/lib/auth/loginError.test.ts`
 Expected: FAIL — `Failed to resolve import "./loginError"`.
 
-- [ ] **Step 3: Write the module**
+- [x] **Step 3: Write the module**
 
 Create `apps/web/src/lib/auth/loginError.ts`:
 
@@ -941,12 +954,12 @@ export function consumeLoginError(): LoginErrorCode | null {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run -w apps/web test -- src/lib/auth/loginError.test.ts`
 Expected: PASS (14 tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/lib/auth/loginError.ts apps/web/src/lib/auth/loginError.test.ts
@@ -969,7 +982,7 @@ The login page needs the theme control without the authenticated `PATCH` behind 
 - Consumes: `ThemePreference` from `../types/models/user`; `useTheme` from `../context/ThemeContext`.
 - Produces: `ThemeToggleButton({ preference, onSelect }: { preference: ThemePreference; onSelect: (next: ThemePreference) => void })` — Task 6 renders it with `preference`/`setPreference` straight from `useTheme()`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/ThemeToggleButton.test.tsx`:
 
@@ -1027,12 +1040,12 @@ describe('ThemeToggleButton', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npm run -w apps/web test -- src/components/ThemeToggleButton.test.tsx`
 Expected: FAIL — `Failed to resolve import "./ThemeToggleButton"`.
 
-- [ ] **Step 3: Create the presentational component**
+- [x] **Step 3: Create the presentational component**
 
 Create `apps/web/src/components/ThemeToggleButton.tsx` — the cycle map, icon map, aria strings and markup move here verbatim from `ThemeToggle.tsx`:
 
@@ -1088,7 +1101,7 @@ export function ThemeToggleButton({ preference, onSelect }: ThemeToggleButtonPro
 }
 ```
 
-- [ ] **Step 4: Reduce `ThemeToggle` to the mutation wrapper**
+- [x] **Step 4: Reduce `ThemeToggle` to the mutation wrapper**
 
 Replace the whole of `apps/web/src/components/ThemeToggle.tsx`:
 
@@ -1132,17 +1145,17 @@ export function ThemeToggle() {
 }
 ```
 
-- [ ] **Step 5: Run both toggle test files to verify they pass**
+- [x] **Step 5: Run both toggle test files to verify they pass**
 
 Run: `npm run -w apps/web test -- src/components/ThemeToggleButton.test.tsx src/components/ThemeToggle.test.tsx`
 Expected: PASS. `ThemeToggle.test.tsx` passes **unmodified** — the rendered DOM is identical, and its assertions (`getByRole('button')`, `aria-label`, `title`, the lucide icon class) all still hold.
 
-- [ ] **Step 6: Run the full frontend suite**
+- [x] **Step 6: Run the full frontend suite**
 
 Run: `npm run -w apps/web test`
 Expected: PASS, including `AppLayout.test.tsx`, which renders `ThemeToggle` in place.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/ThemeToggleButton.tsx apps/web/src/components/ThemeToggleButton.test.tsx apps/web/src/components/ThemeToggle.tsx
@@ -1164,7 +1177,7 @@ The page composition, the Google mark, and the three states. `GoogleMark` is cre
 - Consumes: `consumeLoginError`, `noticeFor` (Task 4); `ThemeToggleButton` (Task 5); `useAuth` (`login`, `isAuthenticated`), `useTheme` (`preference`, `setPreference`), `BrandMark`, `Button`.
 - Produces: `GoogleMark({ className }: { className?: string })`; the rewritten `LoginPage()`. Nothing downstream consumes them.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/pages/LoginPage.test.tsx`:
 
@@ -1340,12 +1353,12 @@ describe('LoginPage', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npm run -w apps/web test -- src/pages/LoginPage.test.tsx`
 Expected: FAIL — `Unable to find an element with the text: Your cars.` (the current page still renders the card).
 
-- [ ] **Step 3: Create the Google mark**
+- [x] **Step 3: Create the Google mark**
 
 Create `apps/web/src/components/GoogleMark.tsx`:
 
@@ -1394,7 +1407,7 @@ export function GoogleMark({ className }: { className?: string }) {
 }
 ```
 
-- [ ] **Step 4: Rewrite the page**
+- [x] **Step 4: Rewrite the page**
 
 Replace the whole of `apps/web/src/pages/LoginPage.tsx`:
 
@@ -1516,19 +1529,19 @@ export function LoginPage() {
 }
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `npm run -w apps/web test -- src/pages/LoginPage.test.tsx`
 Expected: PASS (10 tests).
 
 If the `#error=...` cases fail with the notice absent while the module's own tests pass, the cause is the memoisation surviving between cases — check that `vi.resetModules()` runs **before** the dynamic `import('./LoginPage')` in `renderLogin`, not after.
 
-- [ ] **Step 6: Run the whole frontend suite**
+- [x] **Step 6: Run the whole frontend suite**
 
 Run: `npm run -w apps/web test`
 Expected: PASS — in particular `src/test/conventions.test.ts` ("no hardcoded palette classes"), which now walks `GoogleMark.tsx` and `LoginPage.tsx`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/GoogleMark.tsx apps/web/src/pages/LoginPage.tsx apps/web/src/pages/LoginPage.test.tsx
@@ -1547,7 +1560,7 @@ Everything the PRD's acceptance criteria demand that is not already asserted by 
 - Consumes: everything from Tasks 1-6.
 - Produces: nothing.
 
-- [ ] **Step 1: Run the full CI target**
+- [x] **Step 1: Run the full CI target**
 
 ```sh
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -1556,7 +1569,7 @@ make ci
 
 Expected: `lint-check`, `vet`, `test`, `build`, `fe-test`, `fe-build`, `manifests` and `carfax-template` all pass. If `lint-check` reports formatting, run `make lint` and re-run `make ci`.
 
-- [ ] **Step 2: Confirm no plaintext error exit survives**
+- [x] **Step 2: Confirm no plaintext error exit survives**
 
 ```sh
 grep -c "http.Error" apps/auth-service/internal/oidc/resource.go
@@ -1564,7 +1577,7 @@ grep -c "http.Error" apps/auth-service/internal/oidc/resource.go
 
 Expected: `0` (PRD acceptance criterion).
 
-- [ ] **Step 3: Render and dry-run both kustomize overlays**
+- [x] **Step 3: Render and dry-run both kustomize overlays**
 
 This task changes no manifest, but CLAUDE.md requires both overlays re-verified before a PR, and the local overlay is not exempt.
 
@@ -1590,7 +1603,7 @@ Run `npm run -w apps/web dev` and visit each of these, in **both** light and dar
 
 Also press the theme control in the top-right and confirm it cycles light → dark → system → light with no toast and no request in the network panel.
 
-- [ ] **Step 5: Rebase onto `main` if the `return_to` work has landed**
+- [x] **Step 5: Rebase onto `main` if the `return_to` work has landed**
 
 PRD §7.4: a separate branch implements post-login return paths and touches `LoginPage.tsx`, `LoginPage.test.tsx`, `resource.go` and `resource_test.go`. If it has merged to `main`:
 
@@ -1604,6 +1617,15 @@ Reconcile rather than overwrite:
 - `Dependencies` — the two branches add different fields; take both.
 
 Then re-run Step 1.
+
+**Done as a MERGE, not a rebase** (user's call — it keeps the six reviewed
+commits intact): commit `c445237`. The reconciliation was wider than predicted:
+`session.MembershipResolver` had also been renamed to
+`session.PrincipalResolver` and now returns a whole `Principal`, `setStateCookie`
+gained a `returnPath` parameter, `verifyStateCookie` returns three values, and a
+new arch test forbids `oidc/resource.go` from constructing a `Principal` at all.
+`navigate('/')` needed the same `from` treatment as `login()`. See the merge
+commit message for the file-by-file resolution.
 
 - [ ] **Step 6: Code review**
 
