@@ -8,6 +8,7 @@ package fleetclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -29,6 +30,42 @@ type DueSchedule struct {
 	State          string `json:"state"`
 	NextDueDate    string `json:"next_due_date"`
 	NextDueMileage int    `json:"next_due_mileage"`
+}
+
+// ErrInviteNotFound is returned by Invite when fleet-service reports 404. The
+// mail consumer treats it as a PERMANENT condition (mark the ledger, do not
+// retry): an invite that has been deleted will never come back, and retrying
+// against it four times is pure waste.
+var ErrInviteNotFound = errors.New("invite not found")
+
+// Invite is one invite as served by fleet-service's network-restricted
+// GET /internal/invites/{inviteID}. It carries the TOKEN, which is why the
+// endpoint is internal-only and why this struct is never logged whole.
+//
+// ExpiresAt/AcceptedAt stay strings on the wire and are parsed with
+// time.RFC3339 by the caller, matching how the invite REST layer formats them.
+type Invite struct {
+	InviteID        string  `json:"invite_id"`
+	FleetID         string  `json:"fleet_id"`
+	FleetName       string  `json:"fleet_name"`
+	Email           string  `json:"email"`
+	Role            string  `json:"role"`
+	Token           string  `json:"token"`
+	ExpiresAt       string  `json:"expires_at"`
+	AcceptedAt      *string `json:"accepted_at"`
+	InvitedByUserID string  `json:"invited_by_user_id"`
+}
+
+// statusError carries the HTTP status of a non-200 internal response so callers
+// can classify it. It formats identically to the fmt.Errorf it replaced, so
+// ActiveMembers and DueSchedules are unaffected.
+type statusError struct {
+	url  string
+	code int
+}
+
+func (e *statusError) Error() string {
+	return fmt.Sprintf("fleet internal %s: status %d", e.url, e.code)
 }
 
 // Client calls fleet-service's internal endpoints. base is the service base URL
@@ -61,6 +98,20 @@ func (c *Client) DueSchedules(ctx context.Context) ([]DueSchedule, error) {
 	return out, nil
 }
 
+// Invite fetches one invite, including its token, for composing an invite email.
+func (c *Client) Invite(ctx context.Context, inviteID string) (Invite, error) {
+	url := fmt.Sprintf("%s/internal/invites/%s", c.base, inviteID)
+	var out Invite
+	if err := c.getJSON(ctx, url, &out); err != nil {
+		var se *statusError
+		if errors.As(err, &se) && se.code == http.StatusNotFound {
+			return Invite{}, ErrInviteNotFound
+		}
+		return Invite{}, err
+	}
+	return out, nil
+}
+
 func (c *Client) getJSON(ctx context.Context, url string, dst any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -72,7 +123,7 @@ func (c *Client) getJSON(ctx context.Context, url string, dst any) error {
 	}
 	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("fleet internal %s: status %d", url, res.StatusCode)
+		return &statusError{url: url, code: res.StatusCode}
 	}
 	return json.NewDecoder(res.Body).Decode(dst)
 }
