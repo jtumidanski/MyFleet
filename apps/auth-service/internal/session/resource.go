@@ -12,10 +12,14 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
-// MembershipResolver resolves a user's active fleet and role for token minting.
-// It is injected (Decision 1) so the session package never imports the concrete
-// membership client, avoiding an import cycle.
-type MembershipResolver func(ctx context.Context, userID string) (fleetID, role string, err error)
+// PrincipalResolver resolves the COMPLETE session.Principal for a user — email
+// from the local users table, active fleet and role from fleet-service.
+//
+// It is injected (Decision 1) so neither session nor oidc imports the concrete
+// membership client, and it is the single construction site for Principal: a
+// call site that assembles its own can omit a field and mint a token missing a
+// claim, which is exactly what the refresh path did with Email.
+type PrincipalResolver func(ctx context.Context, userID string) (Principal, error)
 
 // RefreshCookieName is the cookie carrying the opaque rotating refresh token.
 const RefreshCookieName = "refresh_token"
@@ -25,14 +29,14 @@ const RefreshCookieName = "refresh_token"
 // caller. The processor must already be wired with a store via WithStore.
 // cookieSecure controls the Secure flag on the refresh cookie (false for local
 // plaintext HTTP, true in production).
-func InitializePublicRoutes(log logrus.FieldLogger, proc *Processor, resolve MembershipResolver, cookieSecure bool) func(chi.Router) {
+func InitializePublicRoutes(log logrus.FieldLogger, proc *Processor, resolve PrincipalResolver, cookieSecure bool) func(chi.Router) {
 	return func(r chi.Router) {
 		r.Post("/auth/refresh", refreshHandler(log, proc, resolve, cookieSecure))
 		r.Post("/auth/logout", logoutHandler(log, proc, cookieSecure))
 	}
 }
 
-func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve MembershipResolver, cookieSecure bool) http.HandlerFunc {
+func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve PrincipalResolver, cookieSecure bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		raw := readRefreshToken(req)
 		if raw == "" {
@@ -52,14 +56,19 @@ func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve MembershipR
 			return
 		}
 
-		fleetID, role, err := resolve(req.Context(), userID)
+		principal, err := resolve(req.Context(), userID)
 		if err != nil {
-			log.WithError(err).Error("resolve membership on refresh")
+			// Fail closed (FR-5): a token with incomplete identity is never
+			// minted. Clear the cookie too — unlike this path's previous bare
+			// 401 — so a session whose user row is gone stops re-presenting a
+			// credential that can only 401.
+			log.WithError(err).Error("resolve principal on refresh")
+			clearRefreshCookie(w, cookieSecure)
 			server.WriteError(w, server.ErrUnauthorized)
 			return
 		}
 
-		access, err := proc.MintAccess(Principal{UserID: userID, ActiveFleetID: fleetID, Role: role})
+		access, err := proc.MintAccess(principal)
 		if err != nil {
 			log.WithError(err).Error("mint access on refresh")
 			server.WriteError(w, server.ErrUnauthorized)
