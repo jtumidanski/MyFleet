@@ -125,10 +125,15 @@ func main() {
 		Activity:  activityProc,
 	}
 
-	// One-time cleanup of rows the pre-cascade vehicle sweep already orphaned
+	// Startup cleanup of rows the pre-cascade vehicle sweep already orphaned
 	// (PRD §11b). Under the leader lock so only one replica runs it, and a no-op
-	// on a healthy database. It must precede /admin/stats being trusted: until
-	// it runs, the console reports numbers no fleet can reconcile (risks.md R10).
+	// on a healthy database. It matters most for /admin/stats: until it has run
+	// at least once, the console reports numbers no fleet can reconcile
+	// (risks.md R10). It runs on every boot, not just the first, so it stays a
+	// no-op guard rather than a migration — a transient failure here (lock
+	// contention, a statement timeout) must not take the whole service down, so
+	// it logs and keeps booting rather than Fatal-ing, matching every other
+	// sweep in this file.
 	if _, err := database.WithLeaderLock(db, "admin-orphan-cleanup", func() error {
 		removed, cerr := admin.DeleteOrphans(db)
 		if cerr != nil {
@@ -143,7 +148,7 @@ func main() {
 		}
 		return nil
 	}); err != nil {
-		log.WithError(err).Fatal("orphan cleanup")
+		log.WithError(err).Warn("orphan cleanup")
 	}
 
 	// Background sweep: hard-delete soft-deleted vehicles past their purge

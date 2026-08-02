@@ -43,9 +43,11 @@ func DeleteVehicleChildren(tx *gorm.DB, vehicleIDs []string) error {
 // manifest target's OrphanRule. It returns per-key counts removed and is a no-op
 // on a clean database.
 //
-// This is the one-time cleanup for rows the pre-cascade vehicle sweep already
-// stranded (PRD §11b). It runs at startup under an advisory lock and logs what
-// it removed; on a healthy database it removes nothing and says so.
+// This is the cleanup for rows the pre-cascade vehicle sweep already stranded
+// (PRD §11b). It runs at every startup under an advisory lock and logs what it
+// removed; on a healthy database — which is every boot after the first — it
+// removes nothing and says so, so it stays a cheap no-op guard rather than a
+// one-shot migration that only the first deploy needed.
 //
 // The DELETE target carries no alias: `DELETE FROM t AS c` is Postgres-only and
 // SQLite (the whole test harness) rejects it, so the correlated sub-query
@@ -59,8 +61,9 @@ func DeleteVehicleChildren(tx *gorm.DB, vehicleIDs []string) error {
 // single walk of Manifest would leave that document behind. Looping to a fixed
 // point — re-walking Manifest until a full pass removes nothing — resolves any
 // depth of chain in one call regardless of manifest order, which matters
-// because this runs once at startup and needs to leave a clean database, not a
-// partially-cleaned one that requires a second deploy to finish.
+// because a caller running this at startup needs it to leave a clean database
+// in one call, not a partially-cleaned one that requires a second deploy to
+// finish.
 func DeleteOrphans(db *gorm.DB) (map[string]int, error) {
 	out := make(map[string]int, len(Manifest))
 	// Bounded by len(Manifest): no orphan chain can be deeper than the number of

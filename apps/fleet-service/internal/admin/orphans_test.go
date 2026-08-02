@@ -38,6 +38,68 @@ func TestPurgeExpired_cascadesToChildren(t *testing.T) {
 	}
 }
 
+// The cascade must reach ONLY the expired vehicle's own children. SeedFleet
+// gives every fleet exactly one row per child table, so a single-fleet fixture
+// cannot distinguish a correctly id-scoped DELETE from a bare
+// `DELETE FROM <table>` with the `WHERE ... IN ?` accidentally dropped — both
+// would leave that fixture's child tables at zero. A second, untouched fleet
+// is what makes the difference observable.
+func TestPurgeExpired_cascadeIsScopedToExpiredVehicle(t *testing.T) {
+	db := admintest.NewDB(t)
+	f1 := admintest.SeedFleet(t, db, "fleet-1")
+	f2 := admintest.SeedFleet(t, db, "fleet-2")
+
+	past := time.Now().UTC().Add(-time.Hour)
+	if err := db.Exec(`UPDATE fleet.vehicles SET deleted_at = ?, purge_after = ? WHERE id = ?`,
+		past, past, f1.VehicleID).Error; err != nil {
+		t.Fatalf("expire vehicle: %v", err)
+	}
+
+	if err := vehicle.PurgeExpired(db, admin.DeleteVehicleChildren); err != nil {
+		t.Fatalf("purge expired: %v", err)
+	}
+
+	rowExists := func(table, id string) bool {
+		t.Helper()
+		var n int64
+		if err := db.Raw("SELECT count(*) FROM "+table+" WHERE id = ?", id).Scan(&n).Error; err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		return n == 1
+	}
+
+	// fleet-2's vehicle was never expired: every one of its child rows must
+	// survive the cascade untouched.
+	survivors := map[string]string{
+		"fleet.mileage_records":              f2.MileageRecordID,
+		"fleet.fuel_logs":                    f2.FuelLogID,
+		"fleet.maintenance_records":          f2.MaintenanceRecordID,
+		"fleet.maintenance_record_documents": f2.DocumentID,
+		"fleet.maintenance_schedules":        f2.ScheduleID,
+		"fleet.vehicle_media":                f2.VehicleMediaID,
+	}
+	for table, id := range survivors {
+		if !rowExists(table, id) {
+			t.Errorf("%s: fleet-2's row %s was deleted by a cascade meant to be scoped to fleet-1's vehicle", table, id)
+		}
+	}
+
+	// fleet-1's own children must be gone.
+	purged := map[string]string{
+		"fleet.mileage_records":              f1.MileageRecordID,
+		"fleet.fuel_logs":                    f1.FuelLogID,
+		"fleet.maintenance_records":          f1.MaintenanceRecordID,
+		"fleet.maintenance_record_documents": f1.DocumentID,
+		"fleet.maintenance_schedules":        f1.ScheduleID,
+		"fleet.vehicle_media":                f1.VehicleMediaID,
+	}
+	for table, id := range purged {
+		if rowExists(table, id) {
+			t.Errorf("%s: fleet-1's row %s survived its own vehicle's purge", table, id)
+		}
+	}
+}
+
 // FR-ADMIN-RESTORE-7 / design F3: the legacy sweep must not eat a vehicle that
 // belongs to a pending, still-cancellable admin operation.
 func TestPurgeExpired_skipsAdminStampedVehicles(t *testing.T) {
