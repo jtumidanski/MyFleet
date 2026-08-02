@@ -179,6 +179,44 @@ func TestIDsByKindScopesToFleet(t *testing.T) {
 	}
 }
 
+// TestList_noActiveFleetSeesSystemOnly proves the degradation path required
+// when a caller has no active fleet (removed from their last fleet, or
+// mid fleet-switch): List(kind, "", page) must still succeed and return
+// exactly the system categories, never fleet A's custom row and never an
+// error. This is the scenario visibleTo's empty-fleetID branch exists for —
+// on PostgreSQL, binding "" as a uuid parameter fails at bind time, so this
+// path must never fall through to "fleet_id = ?" with an empty string.
+func TestList_noActiveFleetSeesSystemOnly(t *testing.T) {
+	db := newTestDB(t)
+	if err := Seed(db); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	fleetA := "11111111-1111-1111-1111-111111111111"
+	if err := db.Create(&Entity{
+		ID:      uuid.NewString(),
+		Name:    "Rear Diff Fluid",
+		Kind:    string(KindMaintenance),
+		FleetID: &fleetA,
+	}).Error; err != nil {
+		t.Fatalf("create custom: %v", err)
+	}
+
+	p := NewProvider(db)
+	rows, total, err := p.List(KindMaintenance, "", server.Page{Number: 1, Size: 100})
+	if err != nil {
+		t.Fatalf("List(no active fleet): %v", err)
+	}
+	if total != 8 || len(rows) != 8 {
+		t.Fatalf("no-active-fleet: len=%d total=%d, want 8/8 (system rows only)", len(rows), total)
+	}
+	if containsName(rows, "Rear Diff Fluid") {
+		t.Fatal("a caller with no active fleet must NOT see fleet A's custom category")
+	}
+	if !containsName(rows, "Oil Change") {
+		t.Fatal("a caller with no active fleet must still see system categories")
+	}
+}
+
 func containsName(ms []Model, name string) bool {
 	for _, m := range ms {
 		if m.Name() == name {

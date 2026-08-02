@@ -2,10 +2,13 @@ package maintenancecategory
 
 import (
 	"errors"
+	"sort"
+	"sync"
 	"testing"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
@@ -33,6 +36,16 @@ func newTestDB(t *testing.T) *gorm.DB {
 	// FleetID and works around it the same way (see
 	// activity/processor_test.go's newActivityDB): create the table with
 	// explicit DDL mirroring the GORM entity instead of AutoMigrate.
+	//
+	// PIN: this DDL's column set MUST mirror the Entity struct exactly. A new
+	// Entity field with no matching column here does not fail to compile —
+	// it silently vanishes from every query gorm builds against this test DB
+	// (Find/Create pick columns from the struct via reflection, so a column
+	// gorm expects but the table lacks fails per-column, not per-test). That
+	// is exactly how the PostgreSQL-only uuid-bind bug in visibleTo went
+	// undetected here: FleetID was TEXT in this DDL but uuid in production.
+	// TestDDLColumnsMatchEntity below fails loudly the moment this list and
+	// the Entity struct's columns disagree; keep them in lockstep by hand.
 	if err := db.Exec(`CREATE TABLE fleet.maintenance_categories (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -44,6 +57,61 @@ func newTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("ddl: %v", err)
 	}
 	return db
+}
+
+// TestDDLColumnsMatchEntity guards the pin above: newTestDB's hand-written
+// DDL must declare exactly the columns gorm derives from the Entity struct,
+// no more and no fewer. AutoMigrate itself can't be used as the source of
+// truth here — that's the whole reason this DDL exists (see the comment in
+// newTestDB): gorm's sqlite driver breaks on the schema-qualified table's
+// indexed column. So this compares two independent sources instead: gorm's
+// own schema parser (what Entity SHOULD produce, via reflection — no table
+// involved) against sqlite's PRAGMA table_info for the table newTestDB
+// actually created (what the DDL DID produce). A field added to Entity with
+// no corresponding line in the DDL — or a DDL column with no matching
+// Entity field — fails this test immediately instead of drifting silently.
+func TestDDLColumnsMatchEntity(t *testing.T) {
+	s, err := schema.Parse(&Entity{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatalf("parse Entity schema: %v", err)
+	}
+	wantCols := append([]string(nil), s.DBNames...)
+	sort.Strings(wantCols)
+
+	db := newTestDB(t)
+	rows, err := db.Raw("PRAGMA fleet.table_info(maintenance_categories)").Rows()
+	if err != nil {
+		t.Fatalf("table_info: %v", err)
+	}
+	defer rows.Close()
+
+	var gotCols []string
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			t.Fatalf("scan table_info row: %v", err)
+		}
+		gotCols = append(gotCols, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate table_info rows: %v", err)
+	}
+	sort.Strings(gotCols)
+
+	if len(wantCols) != len(gotCols) {
+		t.Fatalf("column count mismatch: Entity has %v, newTestDB's DDL has %v — "+
+			"update the hand-written DDL in newTestDB to match", wantCols, gotCols)
+	}
+	for i := range wantCols {
+		if wantCols[i] != gotCols[i] {
+			t.Fatalf("column mismatch: Entity has %v, newTestDB's DDL has %v — "+
+				"update the hand-written DDL in newTestDB to match", wantCols, gotCols)
+		}
+	}
 }
 
 // TestSeedIsIdempotent verifies that running Seed twice does not duplicate rows.
