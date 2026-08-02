@@ -20,6 +20,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { asVehicleStatus } from '../components/features/vehicles/vehicleBanner';
+import { PageHeader } from '../components/PageHeader';
 import type { VehicleFormInput } from '../lib/schemas/vehicle';
 import type { UpdateVehicleAttributes } from '../types/models/vehicle';
 
@@ -37,17 +38,25 @@ export function VehicleDetailPage() {
   const canWrite = role === 'owner' || role === 'member';
   const canRestore = role === 'owner';
 
+  // Both non-loaded branches carry the SAME container and width as the loaded
+  // branch (FR-10/FR-16), and a real heading rather than a heading-shaped
+  // skeleton: the title text swaps when data lands, but its box does not move.
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-40 w-full max-w-2xl" />
+      <div className="max-w-2xl space-y-6">
+        <PageHeader title="Vehicle" />
+        <Skeleton className="h-40 w-full" />
       </div>
     );
   }
 
   if (!vehicle) {
-    return <p className="text-muted-foreground">Vehicle not found.</p>;
+    return (
+      <div className="max-w-2xl space-y-6">
+        <PageHeader title="Vehicle" />
+        <p className="text-muted-foreground">Vehicle not found.</p>
+      </div>
+    );
   }
 
   const { attributes } = vehicle;
@@ -94,45 +103,47 @@ export function VehicleDetailPage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{title}</h1>
-            {status && <StatusBadge status={status} />}
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
+      <PageHeader
+        title={title}
+        titleAdornment={status && <StatusBadge status={status} />}
+        description={
+          <>
             {attributes.year} {attributes.make} {attributes.model}
             {attributes.trim ? ` ${attributes.trim}` : ''}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {canWrite && !editing && (
-            <Button type="button" variant="outline" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-          )}
-          {canWrite && (
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => void handleDelete()}
-              disabled={softDelete.isPending}
-            >
-              Delete
-            </Button>
-          )}
-          {canRestore && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void handleRestore()}
-              disabled={restore.isPending}
-            >
-              Restore
-            </Button>
-          )}
-        </div>
-      </div>
+          </>
+        }
+        actions={
+          (canWrite || canRestore) && (
+            <>
+              {canWrite && !editing && (
+                <Button type="button" variant="outline" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+              )}
+              {canWrite && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void handleDelete()}
+                  disabled={softDelete.isPending}
+                >
+                  Delete
+                </Button>
+              )}
+              {canRestore && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleRestore()}
+                  disabled={restore.isPending}
+                >
+                  Restore
+                </Button>
+              )}
+            </>
+          )
+        }
+      />
 
       <Card>
         <CardContent className="pt-6">
