@@ -54,6 +54,12 @@ func (a *dbAdministrator) Update(m Model) (Model, error) {
 	e := m.ToEntity()
 	if err := a.db.Model(&Entity{}).Where("id = ? AND deleted_at IS NULL", e.ID).
 		Updates(map[string]any{
+			// This map is an explicit allow-list, so a field missing from it is
+			// silently dropped — and because the return below is built from the
+			// in-memory entity rather than a re-read, the response still showed
+			// the new value. That is what made an edited category look saved
+			// until the next fetch.
+			"category_id":  e.CategoryID,
 			"performed_at": e.PerformedAt,
 			"mileage":      e.Mileage,
 			"cost":         e.Cost,

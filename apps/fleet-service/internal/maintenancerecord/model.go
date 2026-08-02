@@ -51,6 +51,13 @@ func (m Model) UpdatedAt() time.Time       { return m.updatedAt }
 func (m Model) DeletedAt() *time.Time      { return m.deletedAt }
 func (m Model) DocumentMediaIDs() []string { return m.documentMediaIDs }
 
+// WithCategoryID returns a copy with the category changed.
+//
+// No emptiness check here: Validate owns that invariant and Processor.Update
+// runs it after the mutation function, so a PATCH clearing the category is
+// rejected as a validation error rather than silently persisted.
+func (m Model) WithCategoryID(categoryID string) Model { m.categoryID = categoryID; return m }
+
 // WithMileage returns a copy with the mileage changed.
 func (m Model) WithMileage(miles int) Model { m.mileage = miles; return m }
 
