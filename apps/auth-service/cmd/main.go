@@ -125,6 +125,10 @@ func main() {
 		AddRouteInitializer(jwks.InitializeRoutes(ks)).
 		AddRouteInitializer(oidc.InitializeRoutes(log, oidcDeps)).
 		AddRouteInitializer(session.InitializePublicRoutes(log, sess, resolve, cookieSecure)).
+		// Internal routes: no JWT, network-restricted (consumed by
+		// fleet-service's admin console). Kept off the public internet by the
+		// priority-200 internal-deny rule in the main overlay's ingressroute.
+		AddRouteInitializer(platformadmin.InitializeInternalRoutes(log, db)).
 		// protected routes (JWT validated against the in-memory key): /auth/me
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {

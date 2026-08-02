@@ -116,6 +116,30 @@ spec:
       services:
         - name: media-service
           port: 8080
+    # auth-service registers /internal/admin/* WITHOUT JWT
+    # (apps/auth-service/internal/platformadmin/resource.go). Those routes are a
+    # cross-tenant user directory and the stale-claim oracle the purge path
+    # depends on.
+    #
+    # auth-service is safe by accident today: auth-stripprefix strips only
+    # `/api`, and every public auth route lives under `/auth/…`, so reaching
+    # /internal/… would need the public path /api/internal/…, which matches no
+    # /api/* router and falls through to the SPA catch-all. "Safe by accident"
+    # is one prefix change away from "not safe" and this rule costs six lines.
+    #
+    # PathRegexp with `[^/]*/*` for the same reason as the two rules above:
+    # stripPrefix removes a literal string, not a path segment.
+    #
+    # The service reference is inert: internal-deny short-circuits with 403
+    # before anything is proxied.
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathRegexp(`(?i)^/+api/+auth[^/]*/*internal`)
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: internal-deny
+      services:
+        - name: auth-service
+          port: 8080
     - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathPrefix(`/api/auth`)
       kind: Rule
       priority: 100
