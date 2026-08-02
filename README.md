@@ -15,6 +15,8 @@ for the full MVP product definition and
 
 - **Fleets & membership** — create a household, invite members by email,
   owner/member/viewer roles, fleet-scoped authorization on every request.
+  Invites are delivered by email through an SMTP relay, with resend (which
+  rotates the token) and a copy-link fallback for when a message never lands.
 - **Vehicles** — CRUD with soft-delete and a restore window, multiple photos
   per vehicle with a selectable primary image.
 - **Mileage** — immutable mileage history with a trend graph; fuel and
@@ -71,8 +73,12 @@ reverse proxy. Traefik routes by path prefix; the SPA is the catch-all at `/`.
 - Transport is **JSON:API**; Go services follow a DDD layout with immutable
   models, functional composition, and GORM entities.
 - Domain events (`vehicle.created`, `maintenance.completed`, `fuel.logged`,
-  `schedule.overdue`, `member.invited`) are enqueued transactionally and
-  published to Kafka.
+  `schedule.overdue`, `member.invited`, `invite.created`) are enqueued
+  transactionally and published to Kafka.
+- Invite email runs in its own consumer group (`invite-email`) rather than
+  alongside in-app notifications, so a stalled relay cannot hold back
+  notification offsets. The invite token never travels over Kafka — the
+  consumer fetches it from a network-restricted `/internal` endpoint.
 
 ## Getting started
 
@@ -94,9 +100,15 @@ export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
 ./scripts/dev-up.sh      # copies .env.example → .env if needed, then builds and starts
 ```
 
-That brings up Traefik, PostgreSQL, MinIO, Redpanda, all four services, and
-the SPA. The app is at <http://localhost>; the Traefik dashboard is at
-<http://localhost:8081>.
+That brings up Traefik, PostgreSQL, MinIO, Redpanda, Mailpit, all four
+services, and the SPA. The app is at <http://localhost>; the Traefik dashboard
+is at <http://localhost:8081>.
+
+Invite email goes to [Mailpit](https://mailpit.axllent.org/), a local sink that
+captures mail instead of sending it — open the inbox at <http://localhost:8025>
+(also routed at <http://localhost/mail>). Nothing local ever talks to a real
+relay, and no credentials are needed: compose points the service at Mailpit
+with TLS off.
 
 Equivalent Make targets:
 
@@ -118,6 +130,14 @@ no usable default and must be filled in before login works:
   one with `./scripts/gen-jwt-key.sh`.
 
 Never commit real credentials; Gitleaks runs in CI.
+
+Invite email needs nothing here — compose wires `notification-service` to
+Mailpit directly. In a real deployment it is **off by default**
+(`SMTP_ENABLED: "false"`) until a verified sending domain and relay credentials
+exist; see [runbook §8](docs/runbooks/k3s-deployment.md#8-invite-email-smtp--enabling-it)
+for the full enablement procedure. Config is provider-generic — moving between
+Resend, SES or anything else is a Secret edit and a pod restart, not a code
+change. `make ci` never needs a relay: every mail test uses an in-memory fake.
 
 ### Frontend dev server
 
@@ -187,6 +207,12 @@ deliberately manual and documented in
 [`docs/runbooks/k3s-deployment.md`](docs/runbooks/k3s-deployment.md). GORM
 `AutoMigrate` creates tables but **not** schemas — create those first or the
 services crash-loop.
+
+Invite email is the one feature that ships deliberately inert: it stays off
+until SPF/DKIM/DMARC are published for the sending domain and relay credentials
+are applied out of band. Turning it on, and reading the
+`myfleet_invite_emails_total` outcomes afterwards, is
+[runbook §8](docs/runbooks/k3s-deployment.md#8-invite-email-smtp--enabling-it).
 
 ## Repository layout
 
