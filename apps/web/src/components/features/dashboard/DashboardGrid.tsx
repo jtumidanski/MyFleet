@@ -5,122 +5,28 @@
  * No drag-and-drop library added — uses simple buttons per guidelines.
  * Layout persisted via PUT /fleets/{id}/dashboard.
  */
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import { Skeleton } from '../../ui/skeleton';
 import { Button } from '../../ui/button';
 import { cn } from '../../../lib/utils';
 import { widgetRegistry } from './widgetRegistry';
 import { WIDGET_CATALOG, type WidgetType } from './widgetCatalog';
-import { useDashboardLayout, useSaveDashboardLayout } from '../../../lib/hooks/api/dashboard';
-import type { WidgetInput } from '../../../types/models/dashboard';
+import { useDashboardWidgets } from './useDashboardWidgets';
 
 interface DashboardGridProps {
   fleetId: string;
   isOwner: boolean;
 }
 
-interface GridWidget {
-  id: string;
-  type: WidgetType;
-  positionX: number;
-  positionY: number;
-  width: number;
-  height: number;
-}
-
-function toGridWidget(w: {
-  id: string;
-  attributes: { type: string; positionX: number; positionY: number; width: number; height: number };
-}): GridWidget | null {
-  if (!WIDGET_CATALOG.includes(w.attributes.type as WidgetType)) return null;
-  return {
-    id: w.id,
-    type: w.attributes.type as WidgetType,
-    positionX: w.attributes.positionX,
-    positionY: w.attributes.positionY,
-    width: w.attributes.width,
-    height: w.attributes.height,
-  };
-}
-
-function toWidgetInputs(widgets: GridWidget[]): WidgetInput[] {
-  return widgets.map((w, idx) => ({
-    type: w.type,
-    positionX: 0,
-    positionY: idx,
-    width: w.width,
-    height: w.height,
-  }));
-}
-
 export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
-  const { data: dashboard, isLoading } = useDashboardLayout(fleetId);
-  const saveLayout = useSaveDashboardLayout(fleetId);
-
-  // Local widget list derived from the server layout on first load.
-  // We keep a local copy for immediate UI updates before the save settles.
-  const [localWidgets, setLocalWidgets] = useState<GridWidget[] | null>(null);
-
+  const { widgets, isLoading, addWidget, removeWidget, moveUp, moveDown } =
+    useDashboardWidgets(fleetId);
   const [showAddMenu, setShowAddMenu] = useState(false);
 
-  // On load, initialize local state once.
-  const serverWidgets: GridWidget[] = (dashboard?.attributes.widgets ?? [])
-    .map(toGridWidget)
-    .filter((w): w is GridWidget => w !== null);
-
-  const widgets = localWidgets ?? serverWidgets;
-
-  const save = useCallback(
-    (next: GridWidget[]) => {
-      setLocalWidgets(next);
-      saveLayout.mutate(toWidgetInputs(next));
-    },
-    [saveLayout],
-  );
-
-  const addWidget = (type: WidgetType) => {
-    const entry = widgetRegistry[type];
-    const next: GridWidget[] = [
-      ...widgets,
-      {
-        id: `new-${Date.now()}`,
-        type,
-        positionX: 0,
-        positionY: widgets.length,
-        width: entry.defaultWidth,
-        height: entry.defaultHeight,
-      },
-    ];
-    save(next);
+  const handleAdd = (type: WidgetType) => {
+    addWidget(type);
     setShowAddMenu(false);
-  };
-
-  const removeWidget = (id: string) => {
-    const next = widgets.filter((w) => w.id !== id);
-    save(next);
-  };
-
-  const moveUp = (idx: number) => {
-    if (idx === 0) return;
-    const next = [...widgets];
-    const above = next[idx - 1];
-    const current = next[idx];
-    if (!above || !current) return;
-    next[idx - 1] = current;
-    next[idx] = above;
-    save(next);
-  };
-
-  const moveDown = (idx: number) => {
-    if (idx === widgets.length - 1) return;
-    const next = [...widgets];
-    const current = next[idx];
-    const below = next[idx + 1];
-    if (!current || !below) return;
-    next[idx] = below;
-    next[idx + 1] = current;
-    save(next);
   };
 
   if (isLoading) {
@@ -156,7 +62,7 @@ export function DashboardGrid({ fleetId, isOwner }: DashboardGridProps) {
                           'w-full justify-start px-4 py-2 text-sm font-normal',
                           widgets.some((w) => w.type === type) && 'text-muted-foreground',
                         )}
-                        onClick={() => addWidget(type)}
+                        onClick={() => handleAdd(type)}
                       >
                         {widgetRegistry[type].label}
                       </Button>
