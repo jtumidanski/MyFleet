@@ -140,6 +140,32 @@ spec:
       services:
         - name: auth-service
           port: 8080
+    # notification-service's FIRST internal routes arrive with this task, and
+    # they are destructive: POST /internal/admin/purge, DELETE
+    # /internal/admin/purge/{opId}, POST /internal/admin/reap/{opId}
+    # (apps/notification-service/internal/admin/resource.go), all registered
+    # WITHOUT JWT.
+    #
+    # notifications-stripprefix strips the FULL /api/notifications prefix, so
+    # without this rule a public request to
+    # /api/notifications/internal/admin/purge arrives at the service as
+    # /internal/admin/purge — an unauthenticated, internet-reachable
+    # "delete everything for this fleet" endpoint.
+    #
+    # PathRegexp with `[^/]*/*` for the same reason as the rules above: Traefik
+    # normalises the path before matching and stripPrefix removes a literal
+    # string rather than a path segment.
+    #
+    # The service reference is inert: internal-deny short-circuits with 403
+    # before anything is proxied.
+    - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathRegexp(`(?i)^/+api/+notifications[^/]*/*internal`)
+      kind: Rule
+      priority: 200
+      middlewares:
+        - name: internal-deny
+      services:
+        - name: notification-service
+          port: 8080
     - match: (Host(`myfleet.tumidanski.com`) || Host(`myfleet.tumidanski.me`) || Host(`myfleet.home`)) && PathPrefix(`/api/auth`)
       kind: Rule
       priority: 100

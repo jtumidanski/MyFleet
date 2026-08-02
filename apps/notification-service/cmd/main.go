@@ -16,6 +16,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
+	"github.com/jtumidanski/myfleet/apps/notification-service/internal/admin"
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/consumer"
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/fleetclient"
 	"github.com/jtumidanski/myfleet/apps/notification-service/internal/inbox"
@@ -68,6 +69,17 @@ func main() {
 
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
+		// Internal routes: no JWT, network-restricted (consumed by
+		// fleet-service's admin console).
+		//
+		// SECURITY: notifications-stripprefix strips the FULL /api/notifications
+		// prefix, so a public request to /api/notifications/internal/admin/purge
+		// arrives here as /internal/admin/purge. These are the FIRST internal
+		// routes this service has ever had and they DELETE DATA. The
+		// priority-200 internal-deny rule in the main overlay's ingressroute is
+		// what keeps them off the public internet; the two ship together and
+		// never separately (design F2).
+		AddRouteInitializer(admin.InitializeInternalRoutes(log, db)).
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
