@@ -46,8 +46,12 @@ func newInviteDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func newInvite(fleetID, email, token string) Model {
-	return NewBuilder().
+// newInvite builds a complete, valid invite. Build() enforces the domain's
+// invariants and so returns an error; a fixture that trips one is a bug in the
+// fixture, not an outcome under test, so it fails the test outright.
+func newInvite(t *testing.T, fleetID, email, token string) Model {
+	t.Helper()
+	m, err := NewBuilder().
 		SetFleetID(fleetID).
 		SetEmail(email).
 		SetRole("member").
@@ -55,6 +59,10 @@ func newInvite(fleetID, email, token string) Model {
 		SetExpiresAt(time.Now().Add(7 * 24 * time.Hour)).
 		SetInvitedByUserID("user-1").
 		Build()
+	if err != nil {
+		t.Fatalf("build invite fixture: %v", err)
+	}
+	return m
 }
 
 func countRows(t *testing.T, db *gorm.DB, model any) int64 {
@@ -79,7 +87,7 @@ func TestInsert_commitsInviteAndOutboxTogether(t *testing.T) {
 			return sharedevents.Enqueue(tx, sharedevents.Envelope{EventID: "e1", Type: "invite.created", FleetID: fleetID})
 		})
 
-	m := newInvite("f1", "a@b.com", "tok-1")
+	m := newInvite(t, "f1", "a@b.com", "tok-1")
 	created, err := adm.Insert(m, "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
@@ -112,7 +120,7 @@ func TestInsert_rollsBackWhenEmitFails(t *testing.T) {
 	adm := NewAdministrator(db).WithCreatedEmitter(
 		func(*gorm.DB, string, string, string, string, string, string) error { return boom })
 
-	if _, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1"); !errors.Is(err, boom) {
+	if _, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1"); !errors.Is(err, boom) {
 		t.Fatalf("Insert err = %v, want %v", err, boom)
 	}
 	if n := countRows(t, db, &Entity{}); n != 0 {
@@ -136,7 +144,7 @@ func TestResend_rotatesTokenAndEmitsFreshEvent(t *testing.T) {
 			})
 		})
 
-	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	orig, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -193,7 +201,7 @@ func TestResend_rollsBackWhenEmitFails(t *testing.T) {
 			return boom
 		})
 
-	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	orig, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -224,7 +232,7 @@ func TestResend_deletedRowDoesNotRotateOrEmit(t *testing.T) {
 			})
 		})
 
-	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	orig, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -268,7 +276,7 @@ func TestResend_concurrentlyAcceptedDoesNotRotateOrEmit(t *testing.T) {
 			})
 		})
 
-	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	orig, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}

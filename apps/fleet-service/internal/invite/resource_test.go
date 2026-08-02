@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -261,19 +262,25 @@ func decodeDetail(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body.Errors[0].Detail
 }
 
-// seedInvite uses the builder's unexported setAcceptedAt, which exists for
-// exactly this purpose: production code stamps accepted_at inside
-// Administrator.Accept's transaction, never by hand.
+// seedInvite builds a row to be written straight to the table, so it goes
+// through Make rather than the Builder. Two reasons, both structural:
+//
+//   - accepted_at is stamped inside Administrator.Accept's transaction, never by
+//     hand, so the Builder has no setter for it — and should not grow one.
+//   - one case below is a deliberately CORRUPT row (blank email) that
+//     Builder.Build now rejects at construction. It can only exist as a row read
+//     back from the database, which is exactly what Make represents.
 func seedInvite(email string, expires time.Time, accepted *time.Time) Model {
-	return NewBuilder().
-		SetFleetID("fleet-1").
-		SetEmail(email).
-		SetRole("member").
-		SetToken("tok-" + email).
-		SetExpiresAt(expires).
-		SetInvitedByUserID("owner-1").
-		setAcceptedAt(accepted).
-		Build()
+	return Make(Entity{
+		ID:              uuid.NewString(),
+		FleetID:         "fleet-1",
+		Email:           email,
+		Role:            "member",
+		Token:           "tok-" + email,
+		ExpiresAt:       expires,
+		AcceptedAt:      accepted,
+		InvitedByUserID: "owner-1",
+	})
 }
 
 // TestAcceptRoute_rendersADistinctDetailPerPrecondition is the user-facing half

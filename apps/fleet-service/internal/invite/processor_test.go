@@ -55,8 +55,14 @@ func (s *stubProvider) CountByFleetSince(fleetID string, since time.Time) (int64
 	return s.countByFleet[fleetID], nil
 }
 
+// mk builds a Model the way one arrives in the code under test at runtime:
+// straight out of a database row, via Make. ValidateAccept only ever sees
+// Models that came back from the provider, and several cases below deliberately
+// exercise a CORRUPT row (blank email) — which Builder.Build now rejects at
+// construction, and which by definition could only reach the domain by being
+// read back rather than built.
 func mk(email string, expires time.Time, accepted *time.Time) Model {
-	return NewBuilder().SetEmail(email).SetExpiresAt(expires).setAcceptedAt(accepted).Build()
+	return Make(Entity{Email: email, ExpiresAt: expires, AcceptedAt: accepted})
 }
 
 func newTestProcessor() *Processor {
@@ -148,12 +154,14 @@ func TestCheckResendCooldown(t *testing.T) {
 	now := time.Now()
 	p := newTestProcessor()
 
-	fresh := NewBuilder().setUpdatedAt(now.Add(-time.Minute)).Build()
+	// updated_at is stamped by the database (GORM on insert, Resend explicitly),
+	// never by the builder, so the cooldown's input is built via Make.
+	fresh := Make(Entity{UpdatedAt: now.Add(-time.Minute)})
 	if err := p.CheckResendCooldown(fresh, 5*time.Minute, now); !errors.Is(err, server.ErrTooManyRequests) {
 		t.Fatalf("1 minute into a 5 minute cooldown must be 429, got %v", err)
 	}
 
-	stale := NewBuilder().setUpdatedAt(now.Add(-6 * time.Minute)).Build()
+	stale := Make(Entity{UpdatedAt: now.Add(-6 * time.Minute)})
 	if err := p.CheckResendCooldown(stale, 5*time.Minute, now); err != nil {
 		t.Fatalf("6 minutes into a 5 minute cooldown must be allowed, got %v", err)
 	}

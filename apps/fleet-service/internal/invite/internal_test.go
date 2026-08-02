@@ -48,7 +48,7 @@ func internalRouter(t *testing.T, db *gorm.DB, namer FleetNamer) chi.Router {
 func TestInternalGetInvite_returnsTokenAndFleetName(t *testing.T) {
 	db := newInviteDB(t)
 	adm := NewAdministrator(db)
-	created, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	created, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestInternalGetInvite_unknownIDIs404(t *testing.T) {
 func TestInternalGetInvite_returnsAcceptedInvites(t *testing.T) {
 	db := newInviteDB(t)
 	adm := NewAdministrator(db)
-	created, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	created, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestInternalGetInvite_returnsAcceptedInvites(t *testing.T) {
 // then falls back to a generic subject (design §4.5).
 func TestInternalGetInvite_missingFleetDegradesToEmptyName(t *testing.T) {
 	db := newInviteDB(t)
-	created, err := NewAdministrator(db).Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	created, err := NewAdministrator(db).Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}

@@ -118,7 +118,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			m := NewBuilder().
+			m, err := NewBuilder().
 				SetFleetID(fleetID).
 				SetEmail(attrs.Email).
 				SetRole(attrs.Role).
@@ -126,6 +126,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				SetExpiresAt(time.Now().Add(defaultExpiry)).
 				SetInvitedByUserID(identity.UserID).
 				Build()
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
 
 			created, err := adm.Insert(m, traceID)
 			if err != nil {
