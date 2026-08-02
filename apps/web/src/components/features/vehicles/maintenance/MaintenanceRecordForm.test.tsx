@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MaintenanceRecordForm } from './MaintenanceRecordForm';
@@ -17,7 +17,9 @@ vi.mock('../../../../services/api/MediaService', () => ({
   },
 }));
 
-// cmdk measures its list; jsdom implements neither method.
+// cmdk scrolls the selected item into view on keyboard navigation and mount;
+// jsdom does not implement scrollIntoView. (Its list-height measurement uses
+// ResizeObserver instead, which is already stubbed in the shared test setup.)
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
@@ -49,19 +51,23 @@ describe('MaintenanceRecordForm', () => {
       <MaintenanceRecordForm categories={categories} kind="modification" onSubmit={vi.fn()} />,
     );
 
-    // Open the picker — a Command renders no items until opened, so checking
-    // the closed document proves nothing.
+    // Open the picker and inspect its listbox directly — a Command renders no
+    // items until opened, so checking the closed document proves nothing, and
+    // scoping to the listbox guards against a name leaking outside the popover.
     await user.click(screen.getByRole('combobox', { name: /category/i }));
+    const listbox = await screen.findByRole('listbox');
 
     // The modification category is offered; the maintenance one is not.
-    expect(await screen.findByText('Exhaust')).toBeInTheDocument();
-    expect(screen.queryByText('Oil Change')).not.toBeInTheDocument();
+    expect(await within(listbox).findByText('Exhaust')).toBeInTheDocument();
+    expect(within(listbox).queryByText('Oil Change')).not.toBeInTheDocument();
   });
 
   it('rejects a description over 200 characters', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
-    renderForm(<MaintenanceRecordForm categories={categories} onSubmit={onSubmit} />);
+    renderForm(
+      <MaintenanceRecordForm categories={categories} kind="maintenance" onSubmit={onSubmit} />,
+    );
 
     await user.type(screen.getByLabelText(/description/i), 'a'.repeat(201));
     await user.click(screen.getByRole('button', { name: /log record/i }));
@@ -76,7 +82,9 @@ describe('MaintenanceRecordForm', () => {
     vi.mocked(mediaService.initUpload).mockReturnValue(new Promise(() => {}));
 
     const user = userEvent.setup();
-    renderForm(<MaintenanceRecordForm categories={categories} onSubmit={vi.fn()} />);
+    renderForm(
+      <MaintenanceRecordForm categories={categories} kind="maintenance" onSubmit={vi.fn()} />,
+    );
 
     const submit = screen.getByRole('button', { name: /log record/i });
     expect(submit).toBeEnabled();

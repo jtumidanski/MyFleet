@@ -24,8 +24,12 @@ interface MaintenanceRecordFormProps {
    * Restricts the category picker to one kind and relabels the submit button.
    * The picker is not grouped by kind because it never shows more than one kind
    * at a time (design D19).
+   *
+   * Required: `CategoryCombobox` assigns this kind to anything created inline,
+   * so an unset kind here would silently mis-kind a newly created category
+   * (it would still pass a value to the server, just the wrong one).
    */
-  kind?: MaintenanceCategoryKind;
+  kind: MaintenanceCategoryKind;
   onSubmit: (
     values: MaintenanceRecordFormInput,
     documentMediaIds: string[],
@@ -50,9 +54,7 @@ export function MaintenanceRecordForm({
   const now = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM for datetime-local
   const attachments = usePendingAttachments();
 
-  const visibleCategories = kind
-    ? categories.filter((c) => c.attributes.kind === kind)
-    : categories;
+  const visibleCategories = categories.filter((c) => c.attributes.kind === kind);
 
   const form = useForm<MaintenanceRecordFormInput>({
     resolver: zodResolver(maintenanceRecordSchema),
@@ -82,7 +84,7 @@ export function MaintenanceRecordForm({
               <FormLabel>Category</FormLabel>
               <CategoryCombobox
                 categories={visibleCategories}
-                kind={kind ?? 'maintenance'}
+                kind={kind}
                 value={field.value}
                 onChange={field.onChange}
                 ariaLabel="Category"
