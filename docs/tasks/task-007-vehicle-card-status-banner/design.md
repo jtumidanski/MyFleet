@@ -262,8 +262,10 @@ type ScheduleDueGatherer interface {
 This duplicates a struct shape across the boundary. That is the intended cost: CLAUDE.md
 prefers a straightforward move over a re-exported type alias, and an alias here would make
 `vehicle` import `maintenanceschedule` transitively — the exact coupling FR-9.5 forbids.
-The mapping lives in the composition root (§4.5), field-for-field, and a compile error is
-the failure mode if either side changes.
+The mapping lives in the composition root (§4.5), field-for-field. A field renamed or
+removed on either side is a compile error there; a field added is not — the adapter's keyed
+literal leaves it zero-valued silently — so the boundary relies on the mapping being touched
+deliberately, not on the compiler catching every drift.
 
 ### 4.2 `selectNextDue` — the governing breach
 
@@ -706,8 +708,9 @@ states.
   detail page. It looks fine and behaves wrong. The dedicated FR-6.6 test is the only thing
   standing between that and production.
 - **Two struct shapes must stay in sync** across the `maintenanceschedule` ↔ `vehicle`
-  boundary. The adapter makes drift a compile error, not a runtime one, but adding a field
-  means touching three files.
+  boundary. The adapter only catches a renamed or removed field at compile time; an added
+  field is silently zero-valued instead, so keeping the two in sync still means deliberately
+  touching all three declarations.
 - **`Urgency` is a designed quantity, not a PRD requirement.** D2 resolves a real gap, and if
   the resulting rankings read wrong against real fleet data, the fix is a formula change in
   one pure function with its own tests — cheap, but a change nonetheless.

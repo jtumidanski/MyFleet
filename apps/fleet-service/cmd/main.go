@@ -229,9 +229,11 @@ func mustJWKSKeyfunc(log *logrus.Logger, jwksURL string, maxAttempts int, delay 
 }
 
 // scheduleDueAdapter maps maintenanceschedule's due detail onto the vehicle
-// domain's port type. The mapping lives here, in the composition root, so
-// neither domain imports the other; a field added on one side becomes a compile
-// error here rather than a silently dropped value.
+// domain's port type, field for field. The mapping lives here, in the
+// composition root, so neither domain imports the other. A field renamed or
+// removed on either side is a compile error here; a field added is not — the
+// keyed literal below leaves it silently zero-valued, so adding a field means
+// touching this adapter deliberately, not relying on the compiler to notice.
 //
 // The previous binding worked by structural typing because the gatherer returned
 // a []string. With named struct types on both sides it cannot, which is the

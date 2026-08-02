@@ -4,8 +4,10 @@ package vehicle
 // boundary. The shape is duplicated rather than aliased on purpose: an alias
 // would make this package import maintenanceschedule transitively, which is the
 // exact coupling the port exists to prevent. The mapping lives in the
-// composition root (cmd/main.go), field for field, so a change on either side is
-// a compile error rather than a silent drop.
+// composition root (cmd/main.go), field for field. A rename or removal on
+// either side is a compile error there; an added field is not — the keyed
+// literal leaves it zero-valued silently, so keeping the two in sync means
+// touching both declarations and the adapter on purpose.
 type ScheduleDue struct {
 	ScheduleID string
 	State      string // ok | upcoming | overdue
