@@ -96,6 +96,10 @@ func main() {
 		return fleetevents.EmitMemberInvited(tx, fleetID, actorID, traceID,
 			dtoevents.MemberInvitedData{InviteID: inviteID, Email: email, Role: role})
 	}
+	emitInviteCreated := func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
+		return fleetevents.EmitInviteCreated(tx, fleetID, actorID, traceID,
+			dtoevents.InviteCreatedData{InviteID: inviteID, Email: email, Role: role})
+	}
 	emitMaintenanceCompleted := func(tx *gorm.DB, fleetID, actorID, traceID, scheduleID, vehicleID, recordID, categoryID string) error {
 		return fleetevents.EmitMaintenanceCompleted(tx, fleetID, actorID, traceID,
 			dtoevents.MaintenanceCompletedData{ScheduleID: scheduleID, VehicleID: vehicleID, MaintenanceRecord: recordID, CategoryID: categoryID})
@@ -183,7 +187,7 @@ func main() {
 				pr.Use(authmw.JWT(keyfn))
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
-				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited)(pr)
+				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited, emitInviteCreated)(pr)
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)

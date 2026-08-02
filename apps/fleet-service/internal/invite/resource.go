@@ -29,9 +29,9 @@ type OwnerChecker interface {
 
 // InitializeRoutes wires the JWT-protected invite endpoints.
 // ownerCheck is injected for the authoritative DB owner recheck on mutations.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, record ActivityRecorder, emit InvitedEmitter) func(chi.Router) {
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, record ActivityRecorder, emit InvitedEmitter, emitCreated CreatedEmitter) func(chi.Router) {
 	prov := NewProvider(db)
-	adm := NewAdministrator(db).WithActivityRecorder(record).WithEmitter(emit)
+	adm := NewAdministrator(db).WithActivityRecorder(record).WithEmitter(emit).WithCreatedEmitter(emitCreated)
 	proc := NewProcessor(log, prov)
 
 	return func(r chi.Router) {
@@ -89,7 +89,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				SetInvitedByUserID(identity.UserID).
 				Build()
 
-			created, err := adm.Insert(m)
+			created, err := adm.Insert(m, telemetry.CorrelationIDFromContext(req.Context()))
 			if err != nil {
 				server.WriteError(w, err)
 				return

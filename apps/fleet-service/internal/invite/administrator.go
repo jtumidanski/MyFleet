@@ -10,7 +10,10 @@ import (
 
 // Administrator is the write interface for invite data access.
 type Administrator interface {
-	Insert(Model) (Model, error)
+	// Insert creates the invite row and enqueues an invite.created outbox event
+	// in the SAME transaction (FR-EVT-1, FR-EVT-2). A failed enqueue rolls the
+	// invite back — an invite nobody is told about is worse than no invite.
+	Insert(m Model, traceID string) (Model, error)
 	Delete(id string) error
 	// Accept stamps accepted_at and creates an active membership in one transaction.
 	// Appends a member.invited activity event and enqueues a member.invited
@@ -26,10 +29,17 @@ type ActivityRecorder func(tx *gorm.DB, actorUserID, eventType, fleetID string, 
 // tx (design A8). Injected to avoid coupling. Satisfied by events.EmitMemberInvited.
 type InvitedEmitter func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error
 
+// CreatedEmitter enqueues an invite.created event in the outbox on the supplied
+// tx. Injected to avoid coupling, exactly like InvitedEmitter. Satisfied by
+// events.EmitInviteCreated. Deliberately a SEPARATE seam from InvitedEmitter:
+// member.invited fires on ACCEPT, invite.created fires on CREATE/RESEND.
+type CreatedEmitter func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error
+
 type dbAdministrator struct {
-	db     *gorm.DB
-	record ActivityRecorder
-	emit   InvitedEmitter
+	db          *gorm.DB
+	record      ActivityRecorder
+	emit        InvitedEmitter
+	emitCreated CreatedEmitter
 }
 
 // NewAdministrator returns an Administrator backed by the given database.
@@ -47,9 +57,26 @@ func (a *dbAdministrator) WithEmitter(emit InvitedEmitter) *dbAdministrator {
 	return a
 }
 
-func (a *dbAdministrator) Insert(m Model) (Model, error) {
+// WithCreatedEmitter injects the invite.created outbox emitter (FR-EVT-1).
+func (a *dbAdministrator) WithCreatedEmitter(emit CreatedEmitter) *dbAdministrator {
+	a.emitCreated = emit
+	return a
+}
+
+func (a *dbAdministrator) Insert(m Model, traceID string) (Model, error) {
 	e := m.ToEntity()
-	if err := a.db.Create(&e).Error; err != nil {
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&e).Error; err != nil {
+			return err
+		}
+		// FATAL: a failed enqueue rolls back the invite row. An invite the
+		// invitee is never told about is undeliverable by any in-product path.
+		if a.emitCreated != nil {
+			return a.emitCreated(tx, e.FleetID, e.InvitedByUserID, traceID, e.ID, e.Email, e.Role)
+		}
+		return nil
+	})
+	if err != nil {
 		return Model{}, err
 	}
 	return Make(e), nil
