@@ -3,6 +3,7 @@ package mailconsumer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/textproto"
 	"strings"
 	"testing"
@@ -379,12 +380,10 @@ func TestHandle_neverLogsTheToken(t *testing.T) {
 	}
 }
 
+// fmtValue renders ANY log field value faithfully so the leak scan in
+// TestHandle_neverLogsTheToken covers every field type, not just string and
+// error — a token embedded in a struct, a fmt.Stringer, a []byte, or any
+// other type must still be caught.
 func fmtValue(v any) string {
-	if s, ok := v.(string); ok {
-		return s
-	}
-	if err, ok := v.(error); ok {
-		return err.Error()
-	}
-	return ""
+	return fmt.Sprint(v)
 }
