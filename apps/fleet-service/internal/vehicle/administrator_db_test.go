@@ -95,19 +95,12 @@ func TestUpdate_preservesCreatedAt(t *testing.T) {
 	}
 }
 
-type fakeScheduleStates struct{ states []string }
-
-func (f fakeScheduleStates) ScheduleStatesByVehicle(string) ([]string, error) {
-	return f.states, nil
-}
-
-// noActivity is the case DeriveStatus's created_at fallback exists for.
-type noActivity struct{}
-
-func (noActivity) LastActivityByVehicle(string) (time.Time, error) { return time.Time{}, nil }
-
 // FR-FIX-1's user-visible symptom. Asserting created_at != zero alone would not
 // prove the bug is gone; this is the acceptance criterion that does.
+//
+// The gatherers are the package-scope fakes from status_test.go. A zero-valued
+// fakeActivity reports no activity at all, which is precisely the case the
+// created_at fallback exists for.
 func TestDeriveStatus_editedVehicleWithoutActivityStaysHealthy(t *testing.T) {
 	db := newVehicleDB(t)
 	created := seedVehicle(t, db)
@@ -120,9 +113,12 @@ func TestDeriveStatus_editedVehicleWithoutActivityStaysHealthy(t *testing.T) {
 		t.Fatalf("re-read: %v", err)
 	}
 
-	deps := StatusDeps{Schedules: fakeScheduleStates{states: []string{"ok"}}, Activity: noActivity{}}
-	if got := deps.DeriveStatus(reread, time.Now().UTC()); got != "Healthy" {
-		t.Fatalf("DeriveStatus after an edit = %q, want %q — a zeroed created_at makes the "+
+	deps := StatusDeps{
+		Schedules: fakeSchedules{dues: []ScheduleDue{{ScheduleID: "s1", State: "ok"}}},
+		Activity:  fakeActivity{},
+	}
+	if got := deps.Derive(reread, time.Now().UTC()).Status; got != "Healthy" {
+		t.Fatalf("Derive after an edit = %q, want %q — a zeroed created_at makes the "+
 			"inactivity fallback compare against 0001-01-01 and report Inactive", got, "Healthy")
 	}
 }
