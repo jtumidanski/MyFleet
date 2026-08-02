@@ -900,6 +900,7 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		}}
 		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+		callsBefore := len(store.getCalls)
 
 		info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
 		if err != nil {
@@ -915,6 +916,12 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		}
 		if info.Size != 0 {
 			t.Fatalf("Size = %d, want 0 — no variant response carries Content-Length", info.Size)
+		}
+		// The load-bearing property of the downgrade exception: it must never open
+		// the original's bytes, even though those are the only bytes guaranteed to
+		// exist for a "ready" object.
+		if got := store.getCalls[callsBefore:]; len(got) != 1 || got[0] != "fleet-a/thumb.jpg" {
+			t.Fatalf("store calls = %v; want exactly the thumbnail key and never the original %q", got, obj.ObjectKey())
 		}
 	})
 
@@ -982,6 +989,7 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		if err != nil {
 			t.Fatalf("mark ready: %v", err)
 		}
+		callsBefore := len(store.getCalls)
 
 		_, rc, err := pr.Content(context.Background(), ready.ID(), "fleet-a", ContentCard)
 		if err != nil {
@@ -993,6 +1001,11 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		if len(cards.scheduled) != 1 {
 			t.Fatalf("scheduled %d generations for a card row whose object is gone, want 1 — "+
 				"regeneration is what repairs the drift", len(cards.scheduled))
+		}
+		// Even with store/DB drift on the card key, the fallback reads the
+		// thumbnail key only — the original is never opened.
+		if got := store.getCalls[callsBefore:]; len(got) != 2 || got[0] != "fleet-a/card.jpg" || got[1] != "fleet-a/thumb.jpg" {
+			t.Fatalf("store calls = %v; want exactly [card.jpg, thumb.jpg] and never the original %q", got, ready.ObjectKey())
 		}
 	})
 }

@@ -235,6 +235,13 @@ func TestCardGenerator_producesTheSameCardTheWorkerWould(t *testing.T) {
 	if got.ContentType() != "image/jpeg" {
 		t.Fatalf("card ContentType = %q, want image/jpeg", got.ContentType())
 	}
+
+	store.mu.Lock()
+	putKeys := append([]string(nil), store.putKeys...)
+	store.mu.Unlock()
+	if len(putKeys) != 1 || putKeys[0] != got.ObjectKey() {
+		t.Fatalf("putKeys = %v, want exactly one PUT at the row's own object key %q", putKeys, got.ObjectKey())
+	}
 }
 
 // ★ Single-flight (FR-4.1, NFR-16): a cold grid can ask for the same missing

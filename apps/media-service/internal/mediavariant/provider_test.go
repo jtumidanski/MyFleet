@@ -27,6 +27,18 @@ func newVariantTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// The ":memory:" DSN carries no cache=shared, so every physical connection
+	// is an independent empty database. Nothing in this package's tests runs
+	// concurrently today, but capping the pool to one connection keeps the
+	// ATTACH and CREATE TABLE below from silently applying to a different,
+	// schema-less connection than a later query lands on — the same fix
+	// processing's newCardTestDB needed once it drove concurrent goroutines
+	// against one gorm.DB.
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.Exec("ATTACH DATABASE ':memory:' AS media").Error; err != nil {
 		t.Fatalf("attach media schema: %v", err)
 	}

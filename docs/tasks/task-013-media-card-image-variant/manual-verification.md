@@ -29,6 +29,28 @@ This is the defect task-007 deferred ("Deferred, note only" in its
 6. Hard-reload (bypassing both the React Query 5-minute stale window and the
    `Cache-Control: private, max-age=300` browser cache). The hero should now be
    visibly sharper.
+7. **Expect convergence over several visits, not one hard reload.** Three
+   things compose against a single-reload expectation:
+   - the downgraded thumbnail is cached under the *same* key and URL as the
+     eventual card, by React Query (`staleTime` 5 min, `gcTime` 6 min,
+     `refetchOnWindowFocus: false`) **and** by the browser
+     (`Cache-Control: private, max-age=300`);
+   - nothing signals that a downgrade occurred, so neither cache has a reason
+     to invalidate itself on that basis;
+   - the concurrency cap **drops** excess lazy-generation requests rather than
+     queueing them, so a cold twelve-card grid schedules only about four
+     generations per visit — the rest are simply not attempted, not queued for
+     later.
+
+   Net effect for a twelve-vehicle grid of pre-existing media: full sharpness
+   takes roughly **three visits**, spaced past the five-minute cache window
+   each time. Seeing a still-soft grid on visit two is convergence-in-progress,
+   not a defect — do not mistake it for one. A hard-reload bypasses the browser
+   cache and forces fresh requests, but it does **not** refill the concurrency
+   cap, so it cannot make more than the capped number of generations happen at
+   once. This is expected behaviour: PRD §9.6 (a shorter `staleTime` dedicated
+   to `card`) is deliberately still open, and closing it is what would remove
+   this multi-visit wait.
 
 ## 2. `card` is materially cheaper than `display` (NFR-1)
 
