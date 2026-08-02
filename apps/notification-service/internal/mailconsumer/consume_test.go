@@ -30,14 +30,23 @@ func (f *fakeInbox) Mark(eventID, consumer string) error {
 	return nil
 }
 
+// Errs is consumed one entry per call and takes precedence over Err, mirroring
+// mailer.FakeSender's shape so the fetch-retry tests can express "fail twice,
+// then succeed" the same way the send-retry tests already do.
 type fakeInvites struct {
 	inv   fleetclient.Invite
 	err   error
+	errs  []error
 	calls int
 }
 
 func (f *fakeInvites) Invite(context.Context, string) (fleetclient.Invite, error) {
 	f.calls++
+	if len(f.errs) > 0 {
+		err := f.errs[0]
+		f.errs = f.errs[1:]
+		return f.inv, err
+	}
 	return f.inv, f.err
 }
 
@@ -234,17 +243,22 @@ func TestHandle_permanentFailureAttemptsOnce(t *testing.T) {
 	}
 }
 
-// A deleted invite will never come back; four lookups against it are waste.
+// A deleted invite will never come back; ErrInviteNotFound must short-circuit
+// with exactly one lookup and ZERO backoff — it is not a transient condition,
+// so it must not enter the fetch-retry loop at all.
 func TestHandle_inviteNotFoundIsPermanent(t *testing.T) {
 	sender := &mailer.FakeSender{}
 	invites := &fakeInvites{err: fleetclient.ErrInviteNotFound}
-	c, ib, _ := newTestConsumer(t, invites, sender, enabledConfig())
+	c, ib, slept := newTestConsumer(t, invites, sender, enabledConfig())
 
 	if err := c.Handle(context.Background(), envelope()); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
 	if invites.calls != 1 {
 		t.Fatalf("want 1 lookup, got %d", invites.calls)
+	}
+	if len(*slept) != 0 {
+		t.Fatalf("ErrInviteNotFound must take zero backoff, got %v", *slept)
 	}
 	if len(sender.Sent) != 0 {
 		t.Fatal("nothing to send")
@@ -254,17 +268,79 @@ func TestHandle_inviteNotFoundIsPermanent(t *testing.T) {
 	}
 }
 
-// Any other fleet-service failure is transient: return the error UNMARKED so a
-// redelivery can still do the work.
+// Any other fleet-service failure is transient: it now goes through the SAME
+// bounded backoff as the send path (design §5.2) — added because events.Consume
+// does not redeliver (design §5.1), so a single-try lookup failure was a
+// silent, unbounded-frequency permanent mail loss with no metric. This test
+// used to assert a single call; it now asserts the full retry budget is spent
+// before the error surfaces, still unmarked.
 func TestHandle_lookupFailureReturnsErrorUnmarked(t *testing.T) {
 	sender := &mailer.FakeSender{}
-	c, ib, _ := newTestConsumer(t, &fakeInvites{err: errors.New("502")}, sender, enabledConfig())
+	invites := &fakeInvites{err: errors.New("502")}
+	c, ib, slept := newTestConsumer(t, invites, sender, enabledConfig())
 
 	if err := c.Handle(context.Background(), envelope()); err == nil {
 		t.Fatal("a transient lookup failure must surface as an error")
 	}
+	if invites.calls != 4 {
+		t.Fatalf("want the full retry budget exhausted (4 lookups), got %d", invites.calls)
+	}
+	if len(*slept) != 3 {
+		t.Fatalf("want 3 backoffs between 4 attempts, got %v", *slept)
+	}
 	if ib.seen["evt-1:"+consumerName] {
 		t.Fatal("a transient lookup failure must NOT mark the ledger")
+	}
+	if sender.Calls() != 0 {
+		t.Fatal("a fetch that never succeeds must never reach Send")
+	}
+}
+
+// The fetch-retry schedule must match the send-retry schedule exactly (design
+// §5.2: one budget, one set of tuning knobs, reused rather than duplicated).
+func TestHandle_transientLookupFailureRetriesWithSendSchedule(t *testing.T) {
+	sender := &mailer.FakeSender{}
+	invites := &fakeInvites{err: errors.New("dial tcp: connection refused")}
+	c, ib, slept := newTestConsumer(t, invites, sender, enabledConfig())
+
+	if err := c.Handle(context.Background(), envelope()); err == nil {
+		t.Fatal("exhausted lookup retries must surface as an error")
+	}
+	want := []time.Duration{2 * time.Second, 8 * time.Second, 32 * time.Second}
+	if len(*slept) != len(want) {
+		t.Fatalf("want %d backoffs, got %v", len(want), *slept)
+	}
+	for i, d := range want {
+		if (*slept)[i] != d {
+			t.Fatalf("backoff[%d]=%v want %v (schedule %v)", i, (*slept)[i], d, *slept)
+		}
+	}
+	if ib.seen["evt-1:"+consumerName] {
+		t.Fatal("exhausted lookup retries must NOT mark the ledger")
+	}
+}
+
+// A transient lookup failure that clears mid-schedule must send exactly one
+// email, not one per failed lookup attempt.
+func TestHandle_transientLookupFailureThatRecoversSendsOnce(t *testing.T) {
+	sender := &mailer.FakeSender{}
+	invites := &fakeInvites{inv: liveInvite(), errs: []error{errors.New("502"), nil}}
+	c, ib, slept := newTestConsumer(t, invites, sender, enabledConfig())
+
+	if err := c.Handle(context.Background(), envelope()); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if invites.calls != 2 {
+		t.Fatalf("want 2 lookups, got %d", invites.calls)
+	}
+	if len(*slept) != 1 {
+		t.Fatalf("want 1 backoff, got %v", *slept)
+	}
+	if sender.Calls() != 1 {
+		t.Fatalf("want exactly 1 email sent, got %d", sender.Calls())
+	}
+	if !ib.seen["evt-1:"+consumerName] {
+		t.Fatal("a recovered lookup followed by a successful send must mark the ledger")
 	}
 }
 

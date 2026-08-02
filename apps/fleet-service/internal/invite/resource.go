@@ -186,10 +186,14 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				server.WriteError(w, err)
 				return
 			}
-			// Path-pair mismatch → 403, not 404: the caller proved membership of
-			// the fleet they named but named an invite belonging to another one.
+			// Path-pair mismatch → 404, not 403 (authz.RequireSameFleet's
+			// convention, mirrored here by hand since the invite came from
+			// proc.GetByID rather than a second RequireSameFleet call): the
+			// invite belongs to a different fleet than the one named in the
+			// path, and that must look identical to a nonexistent invite so
+			// cross-fleet existence is never leaked.
 			if inv.FleetID() != fleetID {
-				server.WriteError(w, server.ErrForbidden)
+				server.WriteError(w, server.ErrNotFound)
 				return
 			}
 			// Token-level owner gate (fast path)

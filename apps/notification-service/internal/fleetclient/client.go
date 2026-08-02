@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // Member is one active fleet member (recipient) returned by
@@ -68,6 +69,16 @@ func (e *statusError) Error() string {
 	return fmt.Sprintf("fleet internal %s: status %d", e.url, e.code)
 }
 
+// requestTimeout bounds every call this client makes. Without it, a stalled
+// (not refused, not reset — TCP-accepted-then-silent) fleet-service wedges the
+// caller forever: main.go passes context.Background() into the mailconsumer's
+// Run, so there is no caller-supplied deadline either, and events.Consume calls
+// Handle synchronously in its fetch loop, so a hung request here stops the
+// entire invite-email consumer group with no log line and no metric. This is
+// the same hazard mailer/smtp.go already guards against one hop downstream —
+// do not delete this as "redundant with the context" without also fixing that.
+const requestTimeout = 10 * time.Second
+
 // Client calls fleet-service's internal endpoints. base is the service base URL
 // (e.g. http://fleet-service:8080), from FLEET_INTERNAL_URL.
 type Client struct {
@@ -75,8 +86,13 @@ type Client struct {
 	hc   *http.Client
 }
 
-// NewClient returns a Client targeting the given fleet-service base URL.
-func NewClient(base string) *Client { return &Client{base: base, hc: http.DefaultClient} }
+// NewClient returns a Client targeting the given fleet-service base URL. It
+// owns its own *http.Client with a bounded Timeout rather than using
+// http.DefaultClient, so this package cannot affect unrelated callers that
+// share the default.
+func NewClient(base string) *Client {
+	return &Client{base: base, hc: &http.Client{Timeout: requestTimeout}}
+}
 
 // ActiveMembers resolves a fleet's active members (recipients).
 func (c *Client) ActiveMembers(ctx context.Context, fleetID string) ([]Member, error) {

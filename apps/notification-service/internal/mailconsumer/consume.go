@@ -127,7 +127,7 @@ func (c *Consumer) Handle(ctx context.Context, e events.Envelope) error {
 	}
 	log = log.WithField("invite_id", inviteID)
 
-	inv, err := c.invites.Invite(ctx, inviteID)
+	inv, err := c.fetchInvite(ctx, log, inviteID)
 	if err != nil {
 		// A deleted invite will never come back — retrying is pure waste.
 		if errors.Is(err, fleetclient.ErrInviteNotFound) {
@@ -135,8 +135,11 @@ func (c *Consumer) Handle(ctx context.Context, e events.Envelope) error {
 			mailer.RecordOutcome(mailer.OutcomeSkippedStale)
 			return c.inbox.Mark(e.EventID, consumerName)
 		}
-		// Anything else is transient: leave UNMARKED so a redelivery retries.
-		return fmt.Errorf("fetch invite %s: %w", inviteID, err)
+		// fetchInvite already exhausted the same bounded backoff the send path
+		// uses (design §5.2) and recorded OutcomeFailedTransient itself. Leave
+		// the ledger UNMARKED: events.Consume does NOT redeliver (design §5.1),
+		// so this is a permanent loss for this event, not a "will retry later".
+		return err
 	}
 
 	if stale, reason := staleness(inv, time.Now()); stale {
@@ -176,6 +179,55 @@ func (c *Consumer) render(inv fleetclient.Invite) (mailer.Message, error) {
 		AcceptURL: acceptURL,
 		ExpiresAt: expires,
 	})
+}
+
+// fetchInvite retrieves the invite with the SAME bounded backoff the send path
+// uses (design §5.2 / §5.1): a transient fleet-service failure (502/503 during
+// a rolling deploy) sits immediately upstream of the send, and events.Consume
+// does not redeliver, so a lookup failure that is left to a single attempt is
+// just as much a silent, permanent mail loss as an unretried SMTP failure
+// would be. Reuses c.sleep and the RetryBase * 4^(attempt-1) / SendAttempts
+// budget rather than a second retry mechanism.
+//
+// ErrInviteNotFound short-circuits immediately with NO retry and NO backoff —
+// a deleted invite will never come back, so retrying against it is pure waste.
+//
+// On exhaustion this records OutcomeFailedTransient itself (the caller has no
+// other terminal path for this branch, unlike every other exit from Handle) so
+// the loss is observable via myfleet_invite_emails_total (FR-OBS-1), then
+// returns the wrapped error for the caller to leave the ledger UNMARKED.
+func (c *Consumer) fetchInvite(ctx context.Context, log logrus.FieldLogger, inviteID string) (fleetclient.Invite, error) {
+	backoff := c.cfg.RetryBase
+	var lastErr error
+	for attempt := 1; attempt <= c.cfg.SendAttempts; attempt++ {
+		inv, err := c.invites.Invite(ctx, inviteID)
+		if err == nil {
+			return inv, nil
+		}
+		if errors.Is(err, fleetclient.ErrInviteNotFound) {
+			return fleetclient.Invite{}, err
+		}
+		lastErr = err
+
+		if attempt == c.cfg.SendAttempts {
+			mailer.RecordOutcome(mailer.OutcomeFailedTransient)
+			log.WithError(err).WithField("attempts", attempt).
+				Error("invite lookup gave up after exhausting retries")
+			return fleetclient.Invite{}, fmt.Errorf("fetch invite %s: %w", inviteID, lastErr)
+		}
+
+		log.WithError(err).WithFields(logrus.Fields{"attempt": attempt, "retry_in": backoff.String()}).
+			Warn("invite lookup failed; retrying")
+		if sErr := c.sleep(ctx, backoff); sErr != nil {
+			mailer.RecordOutcome(mailer.OutcomeFailedTransient)
+			log.WithError(sErr).Warn("shutting down mid-backoff; invite lookup abandoned")
+			return fleetclient.Invite{}, fmt.Errorf("fetch invite %s: %w", inviteID, lastErr)
+		}
+		backoff *= 4
+	}
+	// Unreachable: ConfigFromEnv panics at startup if SendAttempts < 1, so the
+	// loop always executes at least once and returns from inside it above.
+	return fleetclient.Invite{}, fmt.Errorf("fetch invite %s: %w", inviteID, lastErr)
 }
 
 // send attempts delivery with bounded backoff (design §5.2). It never returns
