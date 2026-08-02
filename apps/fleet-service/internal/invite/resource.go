@@ -52,6 +52,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
+			traceID := telemetry.CorrelationIDFromContext(req.Context())
 
 			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
 				server.WriteError(w, err)
@@ -64,6 +65,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 			// Authoritative DB check via processor (stale-claim guard, design §9)
 			if err := ownerCheck.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
+				// ErrForbidden is the routine "not an owner" outcome; anything
+				// else is a DB fault an operator needs to see.
+				if !errors.Is(err, server.ErrForbidden) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"fleet_id": fleetID,
+						"user_id":  identity.UserID,
+						"trace_id": traceID,
+					}).Error("check invite owner")
+				}
 				server.WriteError(w, err)
 				return
 			}
@@ -86,12 +96,24 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			// Per-fleet creation window (FR-RATE-1). Checked before minting a
 			// token so a throttled request costs no entropy and no DB write.
 			if err := proc.CheckCreateLimit(fleetID, limits.CreatePerWindow, limits.CreateWindow, time.Now()); err != nil {
+				// ErrTooManyRequests is the routine rate-limit outcome; anything
+				// else means the count query itself failed.
+				if !errors.Is(err, server.ErrTooManyRequests) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"fleet_id": fleetID,
+						"trace_id": traceID,
+					}).Error("check invite create limit")
+				}
 				server.WriteError(w, err)
 				return
 			}
 
 			token, err := generateToken()
 			if err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					"fleet_id": fleetID,
+					"trace_id": traceID,
+				}).Error("generate invite token")
 				server.WriteError(w, err)
 				return
 			}
@@ -105,8 +127,12 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				SetInvitedByUserID(identity.UserID).
 				Build()
 
-			created, err := adm.Insert(m, telemetry.CorrelationIDFromContext(req.Context()))
+			created, err := adm.Insert(m, traceID)
 			if err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					"fleet_id": fleetID,
+					"trace_id": traceID,
+				}).Error("create invite")
 				server.WriteError(w, err)
 				return
 			}
@@ -124,6 +150,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 			ms, err := proc.ListByFleet(fleetID)
 			if err != nil {
+				log.WithError(err).WithField("fleet_id", fleetID).Error("list invites")
 				server.WriteError(w, err)
 				return
 			}
@@ -141,6 +168,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 					server.WriteError(w, server.ErrNotFound)
 					return
 				}
+				log.WithError(err).WithField("invite_id", id).Error("get invite")
 				server.WriteError(w, err)
 				return
 			}
@@ -156,11 +184,22 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 			// Authoritative DB check via processor (stale-claim guard, design §9)
 			if err := ownerCheck.RequireOwnerInFleet(inv.FleetID(), identity.UserID); err != nil {
+				if !errors.Is(err, server.ErrForbidden) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"invite_id": id,
+						"fleet_id":  inv.FleetID(),
+						"user_id":   identity.UserID,
+					}).Error("check invite owner")
+				}
 				server.WriteError(w, err)
 				return
 			}
 
 			if err := adm.Delete(id); err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					"invite_id": id,
+					"fleet_id":  inv.FleetID(),
+				}).Error("delete invite")
 				server.WriteError(w, err)
 				return
 			}
@@ -175,9 +214,16 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "fleetId")
 			inviteID := chi.URLParam(req, "inviteId")
+			traceID := telemetry.CorrelationIDFromContext(req.Context())
 
 			inv, err := proc.GetByID(inviteID)
 			if err != nil {
+				if !errors.Is(err, server.ErrNotFound) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"invite_id": inviteID,
+						"trace_id":  traceID,
+					}).Error("get invite")
+				}
 				server.WriteError(w, err)
 				return
 			}
@@ -203,6 +249,14 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			}
 			// Authoritative DB check via processor (stale-claim guard, design §9)
 			if err := ownerCheck.RequireOwnerInFleet(fleetID, identity.UserID); err != nil {
+				if !errors.Is(err, server.ErrForbidden) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"invite_id": inviteID,
+						"fleet_id":  fleetID,
+						"user_id":   identity.UserID,
+						"trace_id":  traceID,
+					}).Error("check invite owner")
+				}
 				server.WriteError(w, err)
 				return
 			}
@@ -221,12 +275,26 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 
 			token, err := generateToken()
 			if err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					"invite_id": inviteID,
+					"fleet_id":  fleetID,
+					"trace_id":  traceID,
+				}).Error("generate invite token")
 				server.WriteError(w, err)
 				return
 			}
-			updated, err := adm.Resend(inv, token, now.Add(defaultExpiry), now,
-				telemetry.CorrelationIDFromContext(req.Context()))
+			updated, err := adm.Resend(inv, token, now.Add(defaultExpiry), now, traceID)
 			if err != nil {
+				// ErrConflict here is the TOCTOU race (deleted/accepted
+				// concurrently, see administrator.go Resend) — a routine
+				// outcome the caller already handles, not an operator fault.
+				if !errors.Is(err, server.ErrConflict) {
+					log.WithError(err).WithFields(logrus.Fields{
+						"invite_id": inviteID,
+						"fleet_id":  fleetID,
+						"trace_id":  traceID,
+					}).Error("resend invite")
+				}
 				server.WriteError(w, err)
 				return
 			}
@@ -237,6 +305,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Post("/invites/{token}/accept", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			token := chi.URLParam(req, "token")
+			traceID := telemetry.CorrelationIDFromContext(req.Context())
 
 			inv, err := proc.GetByToken(token)
 			if err != nil {
@@ -244,6 +313,11 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 					server.WriteError(w, server.ErrNotFound)
 					return
 				}
+				// The token itself must never reach a log field or message
+				// (PRD §8 Security) — this branch logs no identifying field at
+				// all, only the correlation id, since the lookup by definition
+				// failed to resolve one.
+				log.WithError(err).WithField("trace_id", traceID).Error("get invite by token")
 				server.WriteError(w, err)
 				return
 			}
@@ -253,8 +327,14 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			updated, err := adm.Accept(inv, identity.UserID, telemetry.CorrelationIDFromContext(req.Context()))
+			updated, err := adm.Accept(inv, identity.UserID, traceID)
 			if err != nil {
+				log.WithError(err).WithFields(logrus.Fields{
+					"invite_id": inv.ID(),
+					"fleet_id":  inv.FleetID(),
+					"user_id":   identity.UserID,
+					"trace_id":  traceID,
+				}).Error("accept invite")
 				server.WriteError(w, err)
 				return
 			}
