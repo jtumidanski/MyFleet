@@ -10,14 +10,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
  * what defeats Radix's built-in focus restoration (it only ever restores to a
  * registered trigger), so it is the configuration the tests must exercise.
  */
-function Harness({ dismissible = true }: { dismissible?: boolean }) {
+function Harness({ dismissible = true, modal }: { dismissible?: boolean; modal?: boolean }) {
   const [open, setOpen] = React.useState(false);
   return (
     <div>
       <button type="button" onClick={() => setOpen(true)}>
         Open
       </button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={setOpen} modal={modal}>
         <DialogContent dismissible={dismissible}>
           <DialogHeader>
             <DialogTitle>Panel</DialogTitle>
@@ -46,6 +46,16 @@ describe('Dialog — announcement', () => {
     expect(dialog).toHaveAttribute('aria-modal', 'true');
     expect(dialog).toHaveAccessibleName('Panel');
     expect(dialog).toHaveAccessibleDescription('What this panel is for.');
+  });
+
+  it('drops the modal claim when the dialog is not modal', async () => {
+    // Radix routes a non-modal Root to DialogContentNonModal: no focus trap and
+    // no aria-hiding of the page behind. Announcing aria-modal there would
+    // promise assistive tech a containment the dialog does not have, so the
+    // attribute has to follow the Root rather than be hard-coded.
+    render(<Harness modal={false} />);
+    const dialog = await open();
+    expect(dialog).not.toHaveAttribute('aria-modal');
   });
 
   it('names the close button "Close"', async () => {

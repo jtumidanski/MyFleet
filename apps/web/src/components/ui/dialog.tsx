@@ -3,7 +3,24 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
-const Dialog = DialogPrimitive.Root;
+/**
+ * Whether the surrounding Root is modal. Radix keeps this in a context it does
+ * not export, and `DialogContent` has to know: the installed version emits no
+ * `aria-modal` of its own, so this primitive asserts it, and asserting it on a
+ * non-modal dialog would promise a containment Radix is not providing.
+ */
+const DialogModalContext = React.createContext(true);
+
+const Dialog = ({
+  modal = true,
+  ...props
+}: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Root>) => (
+  <DialogModalContext.Provider value={modal}>
+    <DialogPrimitive.Root modal={modal} {...props} />
+  </DialogModalContext.Provider>
+);
+Dialog.displayName = 'Dialog';
+
 const DialogTrigger = DialogPrimitive.Trigger;
 const DialogPortal = DialogPrimitive.Portal;
 const DialogClose = DialogPrimitive.Close;
@@ -64,6 +81,7 @@ const DialogContent = React.forwardRef<
     // trigger, so focus would land on <body> at close. Capture the opener when
     // the dialog mounts and put it back ourselves.
     const openerRef = React.useRef<HTMLElement | null>(null);
+    const modal = React.useContext(DialogModalContext);
 
     return (
       <DialogPortal>
@@ -72,8 +90,10 @@ const DialogContent = React.forwardRef<
           ref={ref}
           // The installed @radix-ui/react-dialog no longer sets this itself
           // (verified against dist/index.mjs), so it is asserted explicitly
-          // here to keep the dialog announced as modal to assistive tech.
-          aria-modal="true"
+          // here to keep the dialog announced as modal to assistive tech —
+          // but only when the Root actually is modal, since a non-modal Root
+          // gets neither a focus trap nor an aria-hidden page behind it.
+          aria-modal={modal ? 'true' : undefined}
           className={cn(
             'fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-full max-w-lg -translate-x-1/2 -translate-y-1/2 flex-col gap-4 border border-border bg-background p-6 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:rounded-lg',
             className,
