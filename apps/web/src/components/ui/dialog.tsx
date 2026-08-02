@@ -15,11 +15,13 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      // bg-background rather than a literal palette color: no dedicated
-      // overlay token exists (and Global Constraints forbid adding one), so
-      // the scrim reuses the page's own background tint, which stays dark in
-      // dark mode and light in light mode instead of fighting the theme.
-      'fixed inset-0 z-50 bg-background/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+      // conventions.test.ts bans literal palette-color utility classes, which
+      // rules out the brief's overlay class verbatim. Ruling: theme-split
+      // semantic tokens instead of a single reused token — foreground/80 is
+      // a near-black scrim in light mode, and background/80 is a near-black
+      // scrim in dark mode, so the backdrop stays genuinely dark in both
+      // themes rather than going inert (light-on-light) in one of them.
+      'fixed inset-0 z-50 bg-foreground/80 dark:bg-background/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
       className,
     )}
     {...props}
