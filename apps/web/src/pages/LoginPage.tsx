@@ -105,12 +105,20 @@ export function LoginPage() {
         </div>
 
         {/* A live region, because relabelling an element that has just become
-            disabled is not reliably announced (FR-A11Y-2). */}
-        {redirecting && (
-          <span className="sr-only" role="status">
-            Redirecting to Google…
-          </span>
-        )}
+            disabled is not reliably announced (FR-A11Y-2).
+
+            Rendered UNCONDITIONALLY, with only its text toggling. A region
+            mounted together with its text is a region that did not exist when
+            the announcement was made: assistive tech watches for changes
+            *inside* live regions it already knows about, and treats a
+            freshly-inserted one inconsistently. Compounding it, `disabled` on
+            the button drops focus to <body> at that same instant, so there is
+            no focused element to anchor the announcement to either. Keeping the
+            empty region in the tree from first paint means the press is a
+            content change in a region already being observed. */}
+        <span className="sr-only" role="status">
+          {redirecting ? 'Redirecting to Google…' : ''}
+        </span>
 
         <p className="text-sm text-muted-foreground">
           Maintenance, mileage, and receipts for every car in your household. Sign in with Google.

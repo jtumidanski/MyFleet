@@ -36,8 +36,15 @@ function isLoginErrorCode(value: string): value is LoginErrorCode {
 function readAndStrip(): LoginErrorCode | null {
   const hash = window.location.hash;
   const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
-  // No `error` key at all — including a `#access_token=` fragment, which
-  // belongs to captureTokenFromHash and must survive untouched (FR-STATE-8).
+  // The fragment belongs to captureTokenFromHash the moment it carries a token,
+  // and this function strips the WHOLE hash rather than one key. Bail out first,
+  // before the `error` test: auth-service emits success and failure on separate
+  // branches so the two keys never arrive together today, but FR-STATE-8 must
+  // hold structurally, not by provider convention plus provider ordering. A
+  // combined `#access_token=…&error=…` fragment would otherwise destroy the
+  // token — silently, and only for whichever consumer happened to run second.
+  if (params.has('access_token')) return null;
+  // No `error` key at all: nothing here for us.
   if (!params.has('error')) return null;
 
   // Strip before returning so a reload or a shared URL cannot resurrect a stale

@@ -65,6 +65,22 @@ describe('consumeLoginError', () => {
     expect(consumeLoginError()).toBe('cancelled');
     expect(consumeLoginError()).toBe('cancelled');
   });
+
+  // FR-STATE-8, made structural. readAndStrip removes the WHOLE hash, so a
+  // fragment carrying both keys would destroy the access token. auth-service
+  // never emits both today — success and failure are separate branches — and
+  // AuthProvider's lazy initializer happens to run first, so the guarantee held
+  // only by convention plus ordering. Now the token's presence alone is enough.
+  it.each([
+    ['token first', '/login#access_token=jwt-123&error=auth_failed'],
+    ['error first', '/login#error=auth_failed&access_token=jwt-123'],
+  ])('yields nothing and preserves the fragment when a token rides along (%s)', async (_n, url) => {
+    const { consumeLoginError } = await freshModule(url);
+
+    expect(consumeLoginError()).toBeNull();
+    // The whole fragment survives, token included, for captureTokenFromHash.
+    expect(window.location.hash).toContain('access_token=jwt-123');
+  });
 });
 
 describe('noticeFor', () => {

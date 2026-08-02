@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AuthContextValue } from '../context/AuthContext';
 import { THEME_STORAGE_KEY } from '../lib/theme';
+import { setAccessToken } from '../lib/api/token';
 import { resetMatchMedia } from '../test/setup';
 
 // Mock the auth context so the page can be exercised without the provider/query
@@ -55,16 +57,23 @@ async function renderLogin(
     import('./LoginPage'),
     import('../context/ThemeContext'),
   ]);
+  // QueryClientProvider mirrors AppProviders. The page itself needs no query
+  // client today — that is the point of FR-PRETOGGLE-3 — but its presence is
+  // what makes 'cycles the theme without issuing a request' fail on its own
+  // assertion if a mutation-bearing control is ever swapped in, instead of
+  // dying on an incidental "No QueryClient set".
   return render(
-    <MemoryRouter initialEntries={[{ pathname: '/login', state }]}>
-      <ThemeProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<div>dashboard</div>} />
-          <Route path="/invites/:token/accept" element={<div>invite accept</div>} />
-        </Routes>
-      </ThemeProvider>
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={[{ pathname: '/login', state }]}>
+        <ThemeProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/" element={<div>dashboard</div>} />
+            <Route path="/invites/:token/accept" element={<div>invite accept</div>} />
+          </Routes>
+        </ThemeProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -78,6 +87,14 @@ function signInButton() {
 describe('LoginPage', () => {
   beforeEach(() => {
     localStorage.clear();
+    // Seed a token so the fetch spy below is LOAD-BEARING. updateThemePreference
+    // short-circuits on `if (!getAccessToken()) return null` (lib/hooks/api/auth.ts),
+    // so with localStorage cleared the theme test fired zero requests no matter
+    // what the page rendered — it would have passed against a component that
+    // does issue the authenticated PATCH. The claim being made is "this control
+    // has no mutation behind it", not "there is no session", so the session has
+    // to be present for the claim to mean anything.
+    setAccessToken('test-access-token');
     resetMatchMedia();
     document.documentElement.classList.remove('dark');
     login.mockReset();
@@ -101,6 +118,21 @@ describe('LoginPage', () => {
     expect(signInButton()).toHaveTextContent('Continue with Google');
     expect(signInButton()).toBeEnabled();
     expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  // FR-A11Y-2, the structural half. A live region that appears at the same
+  // moment as its text is a region assistive tech was not yet observing, so the
+  // announcement is inconsistently made — and `disabled` drops focus to <body>
+  // simultaneously, removing the other anchor. The region must therefore be in
+  // the tree, and empty, BEFORE the press. This fails on the previous
+  // `{redirecting && <span role="status">}` shape; the assertion inside
+  // 'disables itself and announces the handoff' passes under both.
+  it('mounts the status live region empty, before anything is announced', async () => {
+    await renderLogin();
+
+    const status = screen.getByRole('status');
+    expect(status).toBeInTheDocument();
+    expect(status).toBeEmptyDOMElement();
   });
 
   // FR-STATE-2 / FR-STATE-3 / FR-A11Y-2: the press is acknowledged, a second
@@ -173,8 +205,12 @@ describe('LoginPage', () => {
   });
 
   // FR-PRETOGGLE-1 / FR-PRETOGGLE-2 / FR-PRETOGGLE-3: a working theme control
-  // with no session behind it. Spying on `fetch` rather than on a mocked
-  // useUpdateTheme is the stronger claim — it fails if ANY request appears.
+  // with no mutation behind it. Spying on `fetch` rather than on a mocked
+  // useUpdateTheme is the stronger claim — it fails if ANY request appears, by
+  // any transport (everything goes through global fetch; shared-ts/apiClient.ts
+  // uses it and there is no axios or XHR in the tree). beforeEach seeds an
+  // access token so updateThemePreference's no-token short-circuit cannot make
+  // this vacuous — see the comment there.
   it('cycles the theme without issuing a request', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -193,6 +229,17 @@ describe('LoginPage', () => {
 
     act(() => toggle().click());
     expect(toggle()).toHaveAttribute('aria-label', 'Theme: light. Switch to dark.');
+
+    // Flush microtasks before asserting. react-query's mutate() dispatches its
+    // mutationFn in a promise continuation, not synchronously, so a bare
+    // assertion right after the last act() ran BEFORE any request could be
+    // made — the spy read zero even when three PATCHes were queued behind it.
+    // Together with the seeded token above, this is what makes the spy able to
+    // fail at all. Verified by probe: pointing the page at the mutation-bearing
+    // ThemeToggle makes this line report 3 calls to /api/auth/me.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
