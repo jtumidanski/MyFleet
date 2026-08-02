@@ -4,7 +4,10 @@ import { maintenanceScheduleService } from '../../../services/api/MaintenanceSch
 import { maintenanceCategoryService } from '../../../services/api/MaintenanceCategoryService';
 import { vehicleKeys } from './vehicles';
 import { RECORD_PAGE_SIZE } from './pageSize';
-import type { CreateMaintenanceRecordAttributes } from '../../../types/models/maintenanceRecord';
+import type {
+  CreateMaintenanceRecordAttributes,
+  UpdateMaintenanceRecordAttributes,
+} from '../../../types/models/maintenanceRecord';
 import type {
   CreateMaintenanceScheduleAttributes,
   UpdateMaintenanceScheduleAttributes,
@@ -167,6 +170,20 @@ export function useCreateMaintenanceRecord(vehicleId: string) {
       maintenanceRecordService.createForVehicle(vehicleId, attrs),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
+    },
+  });
+}
+
+/** PATCH /api/fleet/maintenance-records/{id} — partial update. */
+export function useUpdateMaintenanceRecord(vehicleId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, attributes }: { id: string; attributes: UpdateMaintenanceRecordAttributes }) =>
+      maintenanceRecordService.patch(id, attributes),
+    onSettled: (_data, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(variables.id) });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
     },
   });
 }
