@@ -184,3 +184,43 @@ func TestAdminTreeIsSeparate(t *testing.T) {
 		t.Fatalf("walk %s: %v", internalRoot, err)
 	}
 }
+
+// TestNoManifestReachesTheAuthSchema is the standing guard behind the PRD's
+// "a system purge must not delete accounts" acceptance criterion.
+//
+// That criterion was written to be checked by hand against a running stack.
+// This checks it by construction instead, across all three purge manifests at
+// once: a purge can only ever touch a table some manifest names, so a manifest
+// that names no auth.* table cannot reach one. It is the same reasoning the
+// separation test above uses — a structural fact beats a remembered
+// observation, and this one is otherwise only ever confirmed by someone
+// deliberately destroying a platform to look.
+//
+// If a future purge genuinely needs to reach auth data, this test is where that
+// decision gets made explicitly rather than discovered afterwards.
+func TestNoManifestReachesTheAuthSchema(t *testing.T) {
+	manifests := []string{
+		"manifest.go",
+		"../../../media-service/internal/admin/manifest.go",
+		"../../../notification-service/internal/admin/manifest.go",
+	}
+	for _, path := range manifests {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			// A moved manifest must fail loudly. A skip here would leave the
+			// criterion silently unchecked, which is the failure mode this whole
+			// file exists to prevent.
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for _, line := range strings.Split(string(src), "\n") {
+			if !strings.Contains(line, "Table:") {
+				continue
+			}
+			if strings.Contains(line, `"auth.`) {
+				t.Errorf("%s names an auth schema table in its purge manifest: %s\n"+
+					"A purge must not be able to delete user accounts or sign-ins; if that has "+
+					"genuinely changed, change it here deliberately.", path, strings.TrimSpace(line))
+			}
+		}
+	}
+}
