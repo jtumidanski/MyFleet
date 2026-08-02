@@ -11,6 +11,7 @@ import {
 import { formatMileage, formatRelativeTime } from '@myfleet/ui-components';
 import { Button } from '../../ui/button';
 import { Card } from '../../ui/card';
+import { Skeleton } from '../../ui/skeleton';
 import { VehiclePhotoThumbnail } from './VehiclePhotoThumbnail';
 import { vehicleBanner, type BannerIcon, type BannerTone } from './vehicleBanner';
 import { buildCarfaxUrl } from '../../../lib/carfax';
@@ -183,5 +184,35 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="truncate tabular-nums text-sm text-foreground">{value}</div>
     </div>
+  );
+}
+
+/**
+ * The loading placeholder for a VehicleCard.
+ *
+ * Deliberately built from the same region structure as the card above — hero,
+ * banner, title, subtitle, stat strip, footer — rather than one fixed-height
+ * block. It lives in this file so that adding a region to the card and
+ * forgetting the skeleton is visible in the same diff.
+ */
+export function VehicleCardSkeleton() {
+  return (
+    <Card className="flex flex-col p-0">
+      <Skeleton className="aspect-[16/9] w-full rounded-none rounded-t-lg" />
+      <div className="flex h-9 items-center border-b border-border px-4">
+        <Skeleton className="h-3 w-40" />
+      </div>
+      <div className="space-y-2 px-4 pt-3">
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="h-3 w-1/2" />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-4 border-t border-border px-4 py-3">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-8 w-full" />
+      </div>
+      <div className="flex h-12 items-center justify-end px-4 pb-2">
+        <Skeleton className="h-8 w-8 rounded-md" />
+      </div>
+    </Card>
   );
 }

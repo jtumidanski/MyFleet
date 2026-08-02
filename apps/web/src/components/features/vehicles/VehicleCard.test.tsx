@@ -6,7 +6,7 @@ import { renderWithProviders } from '../../../test/renderWithProviders';
 import { stubObjectUrl, unstubObjectUrl } from '../../../test/objectUrl';
 import { mediaService } from '../../../services/api/MediaService';
 import { DEFAULT_RUNTIME_CONFIG, loadRuntimeConfig } from '../../../lib/config/runtimeConfig';
-import { VehicleCard } from './VehicleCard';
+import { VehicleCard, VehicleCardSkeleton } from './VehicleCard';
 import type { Vehicle } from '../../../types/models/vehicle';
 
 vi.mock('../../../services/api/MediaService', () => ({
@@ -392,5 +392,16 @@ describe('VehicleCard — Carfax', () => {
 
     await userEvent.click(screen.getByRole('link', { name: /Carfax/ }));
     expect(screen.getByTestId('pathname').textContent).toBe('/');
+  });
+});
+
+describe('VehicleCardSkeleton', () => {
+  it('mirrors the card structure rather than a single fixed-height block', () => {
+    // A structural skeleton cannot drift from the card the way a magic number
+    // does — the two live in the same file.
+    const { container } = renderWithProviders(<VehicleCardSkeleton />);
+    expect(container.querySelector('.aspect-\\[16\\/9\\]')).toBeInTheDocument();
+    // Photo, banner, title, subtitle, two stat slots, footer.
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThanOrEqual(6);
   });
 });
