@@ -152,3 +152,28 @@ describe('no hardcoded palette classes', () => {
     expect(offenders, `use the semantic tokens in src/index.css instead`).toEqual([]);
   });
 });
+
+// FR-17. Every authenticated page's title goes through PageHeader; a
+// hand-written <h1> is how the Dashboard drifted to text-lg and an <h2> in the
+// first place. The unauthenticated pages are centered-card layouts outside the
+// AppLayout shell — LoginPage's hero <h1> is a deliberate exception, not drift.
+describe('authenticated pages do not hand-write their title', () => {
+  const UNAUTHENTICATED = ['LoginPage.tsx', 'OnboardingPage.tsx', 'InviteAcceptPage.tsx'];
+
+  it('contain no <h1> element', () => {
+    const pagesDir = resolve(WEB_ROOT, 'src/pages');
+
+    const offenders = readdirSync(pagesDir)
+      .filter((f) => f.endsWith('.tsx') && !f.endsWith('.test.tsx'))
+      .filter((f) => !UNAUTHENTICATED.includes(f))
+      .flatMap((file) =>
+        readFileSync(join(pagesDir, file), 'utf8')
+          .split('\n')
+          .map((text, index) => ({ file, line: index + 1, text }))
+          .filter((entry) => entry.text.includes('<h1')),
+      )
+      .map((entry) => `${entry.file}:${entry.line}  ${entry.text.trim()}`);
+
+    expect(offenders, 'render the page title via <PageHeader title="…" /> instead').toEqual([]);
+  });
+});
