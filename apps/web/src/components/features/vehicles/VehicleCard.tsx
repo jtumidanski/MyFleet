@@ -194,6 +194,11 @@ function Stat({ label, value }: { label: string; value: string }) {
  * banner, title, subtitle, stat strip, footer — rather than one fixed-height
  * block. It lives in this file so that adding a region to the card and
  * forgetting the skeleton is visible in the same diff.
+ *
+ * Every region's height matches the populated card's exactly, including the
+ * title/subtitle and stat-strip text line boxes, not just the regions with an
+ * explicit fixed-height class — that is what stops the grid shifting once
+ * data arrives.
  */
 export function VehicleCardSkeleton() {
   return (
@@ -202,13 +207,37 @@ export function VehicleCardSkeleton() {
       <div className="flex h-9 items-center border-b border-border px-4">
         <Skeleton className="h-3 w-40" />
       </div>
-      <div className="space-y-2 px-4 pt-3">
-        <Skeleton className="h-4 w-2/3" />
-        <Skeleton className="h-3 w-1/2" />
+      {/* 24px + 20px, matching the card's base-size title and text-sm subtitle
+          line boxes exactly — the bars are inset inside those boxes so the
+          skeleton reads as text without being shorter than the text it stands
+          in for. No space-y here: the real title and subtitle have no gap. */}
+      <div className="px-4 pt-3">
+        <div className="flex h-6 items-center">
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+        <div className="flex h-5 items-center">
+          <Skeleton className="h-3 w-1/2" />
+        </div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-4 border-t border-border px-4 py-3">
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-8 w-full" />
+        {/* Each slot mirrors Stat's text-xs label over its text-sm value:
+            16px + 20px, not a single 32px bar. */}
+        <div>
+          <div className="flex h-4 items-center">
+            <Skeleton className="h-2.5 w-16" />
+          </div>
+          <div className="flex h-5 items-center">
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
+        <div>
+          <div className="flex h-4 items-center">
+            <Skeleton className="h-2.5 w-16" />
+          </div>
+          <div className="flex h-5 items-center">
+            <Skeleton className="h-3 w-20" />
+          </div>
+        </div>
       </div>
       <div className="flex h-12 items-center justify-end px-4 pb-2">
         <Skeleton className="h-8 w-8 rounded-md" />
