@@ -157,6 +157,7 @@ export function VehicleDetailPage() {
             total={recordsState.total}
             hasMore={recordsState.hasMore}
             isLoading={recordsState.isLoading}
+            isFetchingNextPage={recordsState.isFetchingNextPage}
             onLoadMore={recordsState.loadMore}
             onSelectRow={setSelectedRow}
           />

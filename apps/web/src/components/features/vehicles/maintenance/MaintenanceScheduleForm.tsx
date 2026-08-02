@@ -58,13 +58,15 @@ export function MaintenanceScheduleForm({
           render={({ field }) => (
             <FormItem>
               <FormLabel>Category</FormLabel>
-              <CategoryCombobox
-                categories={categories}
-                kind="maintenance"
-                value={field.value}
-                onChange={field.onChange}
-                ariaLabel="Category"
-              />
+              <FormControl>
+                <CategoryCombobox
+                  categories={categories}
+                  kind="maintenance"
+                  value={field.value}
+                  onChange={field.onChange}
+                  ariaLabel="Category"
+                />
+              </FormControl>
               <FormMessage />
             </FormItem>
           )}

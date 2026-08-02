@@ -60,7 +60,7 @@ export function LogMaintenanceDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {kind === 'modification' ? 'Log modification' : 'Log maintenance'}
+            {kind === 'modification' ? 'Log Modification' : 'Log Maintenance'}
           </DialogTitle>
         </DialogHeader>
         {categories && (

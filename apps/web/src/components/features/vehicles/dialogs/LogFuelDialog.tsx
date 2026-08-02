@@ -42,7 +42,7 @@ export function LogFuelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Log fill-up</DialogTitle>
+          <DialogTitle>Log Fill-Up</DialogTitle>
         </DialogHeader>
         <FuelForm
           defaultMileage={defaultMileage}

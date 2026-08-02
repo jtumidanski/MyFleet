@@ -41,7 +41,7 @@ export function LogMileageDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Log mileage</DialogTitle>
+          <DialogTitle>Log Mileage</DialogTitle>
         </DialogHeader>
         <MileageForm
           defaultMileage={defaultMileage}

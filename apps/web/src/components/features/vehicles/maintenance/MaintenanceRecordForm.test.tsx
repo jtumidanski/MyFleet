@@ -45,6 +45,22 @@ function renderForm(ui: React.ReactElement) {
 }
 
 describe('MaintenanceRecordForm', () => {
+  // The combobox is not a native input, so FormControl's generated id has to
+  // reach the trigger button for FormLabel's htmlFor to point at anything.
+  // Asserting on the ids rather than getByLabelText, because the combobox
+  // carries its own aria-label and would satisfy that query even unassociated.
+  it('associates the category label with the combobox trigger', () => {
+    renderForm(
+      <MaintenanceRecordForm categories={categories} kind="maintenance" onSubmit={vi.fn()} />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: /category/i });
+    const label = screen.getByText('Category');
+
+    expect(trigger.id).toBeTruthy();
+    expect(label).toHaveAttribute('for', trigger.id);
+  });
+
   it('offers only the categories of the requested kind', async () => {
     const user = userEvent.setup();
     renderForm(

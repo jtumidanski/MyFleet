@@ -91,13 +91,15 @@ export function MaintenanceRecordForm({
           render={({ field }) => (
             <FormItem>
               <FormLabel>Category</FormLabel>
-              <CategoryCombobox
-                categories={visibleCategories}
-                kind={kind}
-                value={field.value}
-                onChange={field.onChange}
-                ariaLabel="Category"
-              />
+              <FormControl>
+                <CategoryCombobox
+                  categories={visibleCategories}
+                  kind={kind}
+                  value={field.value}
+                  onChange={field.onChange}
+                  ariaLabel="Category"
+                />
+              </FormControl>
               <FormMessage />
             </FormItem>
           )}

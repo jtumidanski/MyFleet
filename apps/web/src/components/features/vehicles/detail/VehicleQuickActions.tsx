@@ -11,12 +11,12 @@ interface VehicleQuickActionsProps {
 }
 
 const WRITE_ACTIONS: ReadonlyArray<{ action: QuickAction; label: string }> = [
-  { action: 'mileage', label: 'Log mileage' },
-  { action: 'fuel', label: 'Log fuel' },
-  { action: 'maintenance', label: 'Log maintenance' },
-  { action: 'modification', label: 'Log modification' },
-  { action: 'schedule', label: 'Add schedule' },
-  { action: 'upload', label: 'Upload photo' },
+  { action: 'mileage', label: 'Log Mileage' },
+  { action: 'fuel', label: 'Log Fuel' },
+  { action: 'maintenance', label: 'Log Maintenance' },
+  { action: 'modification', label: 'Log Modification' },
+  { action: 'schedule', label: 'Add Schedule' },
+  { action: 'upload', label: 'Upload Photo' },
 ];
 
 /**
@@ -28,7 +28,7 @@ const WRITE_ACTIONS: ReadonlyArray<{ action: QuickAction; label: string }> = [
 export function VehicleQuickActions({ canWrite, canDelete, onAction }: VehicleQuickActionsProps) {
   const actions = [
     ...(canWrite ? WRITE_ACTIONS : []),
-    ...(canDelete ? [{ action: 'delete' as const, label: 'Delete vehicle' }] : []),
+    ...(canDelete ? [{ action: 'delete' as const, label: 'Delete Vehicle' }] : []),
   ];
 
   if (actions.length === 0) {

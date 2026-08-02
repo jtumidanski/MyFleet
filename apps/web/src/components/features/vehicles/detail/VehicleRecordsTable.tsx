@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { formatMileage, formatMoney } from '@myfleet/ui-components';
 import { cn } from '../../../../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
@@ -12,6 +13,12 @@ interface VehicleRecordsTableProps {
   total: number;
   hasMore: boolean;
   isLoading: boolean;
+  /**
+   * A fetchNextPage request is in flight. Disables Load More: React Query
+   * cancels and reissues the in-flight request on each call, so sustained
+   * clicking starves the fetch and rows never arrive.
+   */
+  isFetchingNextPage: boolean;
   onLoadMore: () => void;
   onSelectRow: (row: VehicleRecordRow) => void;
 }
@@ -94,6 +101,7 @@ export function VehicleRecordsTable({
   total,
   hasMore,
   isLoading,
+  isFetchingNextPage,
   onLoadMore,
   onSelectRow,
 }: VehicleRecordsTableProps) {
@@ -193,8 +201,15 @@ export function VehicleRecordsTable({
         <div className="mt-3 flex items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">{footerText}</p>
           {hasMore && (
-            <Button type="button" size="sm" variant="outline" onClick={onLoadMore}>
-              Load more
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onLoadMore}
+              disabled={isFetchingNextPage}
+            >
+              {isFetchingNextPage && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Load More
             </Button>
           )}
         </div>

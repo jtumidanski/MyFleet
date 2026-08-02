@@ -1,7 +1,6 @@
 package maintenancecategory
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -49,7 +48,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 		// POST /maintenance-categories — create a free-form category scoped to
 		// the caller's fleet. Idempotent: an existing case-insensitive match is
 		// returned instead of a duplicate.
-		r.Post("/maintenance-categories", func(w http.ResponseWriter, req *http.Request) {
+		r.Post("/maintenance-categories", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs CreateAttributes) {
 			identity := auth.IdentityFromContext(req.Context())
 			if err := authz.RequireWrite(identity); err != nil {
 				server.WriteError(w, err)
@@ -61,29 +60,21 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 				return
 			}
 
-			var body struct {
-				Data struct {
-					Attributes CreateAttributes `json:"attributes"`
-				} `json:"data"`
-			}
-			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-				server.WriteError(w, server.ErrValidation)
-				return
-			}
-
-			kind, err := ParseKind(body.Data.Attributes.Kind)
+			// A create must name its kind: "" is the list endpoint's "no
+			// filter" sentinel, never a storable value.
+			kind, err := ParseKind(attrs.Kind)
 			if err != nil || kind == "" {
 				server.WriteError(w, server.ErrValidation)
 				return
 			}
 
-			m, err := proc.Create(identity.ActiveFleetID, body.Data.Attributes.Name, kind)
+			m, err := proc.Create(identity.ActiveFleetID, attrs.Name, kind)
 			if err != nil {
 				log.WithError(err).Error("create maintenance category")
 				server.WriteError(w, err)
 				return
 			}
 			server.WriteJSON(w, http.StatusCreated, server.Document{Data: Transform(m)})
-		})
+		}))
 	}
 }

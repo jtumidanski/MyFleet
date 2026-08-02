@@ -42,7 +42,7 @@ export function DeleteVehicleDialog({ open, onOpenChange, vehicleId }: DeleteVeh
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete vehicle</DialogTitle>
+          <DialogTitle>Delete Vehicle</DialogTitle>
           <DialogDescription>
             This removes the vehicle from your fleet. This action cannot be undone from the UI.
           </DialogDescription>

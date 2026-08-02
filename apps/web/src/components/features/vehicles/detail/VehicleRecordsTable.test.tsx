@@ -41,6 +41,7 @@ function renderTable(props: Partial<React.ComponentProps<typeof VehicleRecordsTa
       total={41}
       hasMore
       isLoading={false}
+      isFetchingNextPage={false}
       onLoadMore={vi.fn()}
       onSelectRow={vi.fn()}
       {...props}
@@ -94,5 +95,19 @@ describe('VehicleRecordsTable', () => {
   it('hides load more when there is nothing left', () => {
     renderTable({ hasMore: false });
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument();
+  });
+
+  // React Query cancels and reissues an in-flight fetchNextPage on every call,
+  // so an enabled button lets sustained clicking starve the fetch outright.
+  it('disables load more while a page is in flight', async () => {
+    const onLoadMore = vi.fn();
+    const user = userEvent.setup();
+    renderTable({ isFetchingNextPage: true, onLoadMore });
+
+    const button = screen.getByRole('button', { name: /load more/i });
+    expect(button).toBeDisabled();
+
+    await user.click(button);
+    expect(onLoadMore).not.toHaveBeenCalled();
   });
 });

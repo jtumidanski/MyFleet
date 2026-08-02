@@ -44,7 +44,7 @@ export function EditVehicleDialog({ open, onOpenChange, vehicleId }: EditVehicle
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit vehicle</DialogTitle>
+          <DialogTitle>Edit Vehicle</DialogTitle>
         </DialogHeader>
         <VehicleForm
           mode="edit"

@@ -48,3 +48,18 @@ export const maintenanceScheduleSchema = z
   });
 
 export type MaintenanceScheduleFormInput = z.infer<typeof maintenanceScheduleSchema>;
+
+/**
+ * Marking a schedule complete. The odometer is optional because the reading is
+ * auto-filled from the vehicle's latest mileage and the user may clear it.
+ */
+export const completeScheduleSchema = z.object({
+  date: z.string().min(1, 'Date is required'),
+  latestMileage: z
+    .number({ invalid_type_error: 'Odometer must be a number' })
+    .int('Odometer must be a whole number')
+    .min(0, 'Odometer cannot be negative')
+    .optional(),
+});
+
+export type CompleteScheduleFormInput = z.infer<typeof completeScheduleSchema>;

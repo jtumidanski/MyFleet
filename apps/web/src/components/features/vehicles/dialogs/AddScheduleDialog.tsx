@@ -50,7 +50,7 @@ export function AddScheduleDialog({ open, onOpenChange, vehicleId }: AddSchedule
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Add schedule</DialogTitle>
+          <DialogTitle>Add Schedule</DialogTitle>
         </DialogHeader>
         {categories && (
           <MaintenanceScheduleForm

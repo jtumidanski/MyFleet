@@ -1,6 +1,5 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
@@ -11,18 +10,11 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { useCompleteMaintenanceSchedule } from '../../../../lib/hooks/api/maintenance';
 import { useMileageRecords, getLatestMileage } from '../../../../lib/hooks/api/mileage';
 import { useVehicle } from '../../../../lib/hooks/api/vehicles';
+import {
+  completeScheduleSchema,
+  type CompleteScheduleFormInput,
+} from '../../../../lib/schemas/maintenanceSchedule';
 import type { MaintenanceSchedule } from '../../../../types/models/maintenanceSchedule';
-
-const completeScheduleSchema = z.object({
-  date: z.string().min(1, 'Date is required'),
-  latestMileage: z
-    .number({ invalid_type_error: 'Odometer must be a number' })
-    .int('Odometer must be a whole number')
-    .min(0, 'Odometer cannot be negative')
-    .optional(),
-});
-
-type CompleteScheduleFormInput = z.infer<typeof completeScheduleSchema>;
 
 interface CompleteScheduleDialogProps {
   open: boolean;
@@ -80,7 +72,7 @@ export function CompleteScheduleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Mark schedule complete</DialogTitle>
+          <DialogTitle>Mark Schedule Complete</DialogTitle>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
@@ -127,7 +119,7 @@ export function CompleteScheduleDialog({
               </Button>
               <Button type="submit" disabled={completeSchedule.isPending}>
                 {completeSchedule.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Mark complete
+                Mark Complete
               </Button>
             </div>
           </form>
