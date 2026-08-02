@@ -180,7 +180,7 @@ func main() {
 		// Protected routes: JWT required.
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
-				pr.Use(authmw.JWT(keyfn))
+				pr.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
 				membership.InitializeRoutes(log, db)(pr)
 				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited)(pr)
