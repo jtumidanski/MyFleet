@@ -57,7 +57,21 @@ function triggers(): HTMLElement[] {
     .filter((button) => !button.closest('[role="dialog"]'));
 }
 
-const headerTrigger = () => triggers()[0];
+/**
+ * The trigger at `index` in DOM order. Throws rather than returning undefined,
+ * so a test that has miscounted the triggers fails on that fact instead of on a
+ * downstream assertion about a node that was never there.
+ */
+function triggerAt(index: number): HTMLElement {
+  const found = triggers()[index];
+  if (!found) {
+    throw new Error(`expected a trigger at index ${index}; found ${triggers().length}`);
+  }
+  return found;
+}
+
+const headerTrigger = () => triggerAt(0);
+const emptyStateTrigger = () => triggerAt(1);
 const submitButton = () =>
   within(screen.getByRole('dialog')).getByRole('button', { name: 'Add Vehicle' });
 
@@ -94,7 +108,7 @@ describe('VehiclesPage — opening the dialog', () => {
     renderWithProviders(<VehiclesPage />);
     await waitFor(() => expect(triggers()).toHaveLength(2));
 
-    await userEvent.click(triggers()[1]);
+    await userEvent.click(emptyStateTrigger());
     expect(within(screen.getByRole('dialog')).getByLabelText('Make')).toBeInTheDocument();
   });
 
@@ -190,7 +204,7 @@ describe('VehiclesPage — submitting', () => {
 describe('VehiclesPage — dismissing', () => {
   // Typed explicitly: a bare array literal infers a union element type and the
   // callback's `dismiss` parameter stops being callable.
-  const dismissals: Array<[string, () => Promise<void>]> = [
+  const dismissals: Array<[string, () => Promise<unknown>]> = [
     ['Escape', () => userEvent.keyboard('{Escape}')],
     ['the close button', () => userEvent.click(screen.getByRole('button', { name: 'Close' }))],
     [
@@ -294,7 +308,7 @@ describe('VehiclesPage — focus after the empty state unmounts', () => {
     renderWithProviders(<VehiclesPage />);
     await waitFor(() => expect(triggers()).toHaveLength(2));
 
-    await userEvent.click(triggers()[1]);
+    await userEvent.click(emptyStateTrigger());
     await fillRequired();
     await userEvent.click(submitButton());
 
@@ -311,7 +325,7 @@ describe('VehiclesPage — focus after the empty state unmounts', () => {
     renderWithProviders(<VehiclesPage />);
     await waitFor(() => expect(triggers()).toHaveLength(2));
 
-    const emptyTrigger = triggers()[1];
+    const emptyTrigger = emptyStateTrigger();
     await userEvent.click(emptyTrigger);
     await userEvent.keyboard('{Escape}');
 
