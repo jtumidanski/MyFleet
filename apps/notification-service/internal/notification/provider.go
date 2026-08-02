@@ -36,7 +36,7 @@ type dbProvider struct{ db *gorm.DB }
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 func (p *dbProvider) ListByUser(userID string, filter ListFilter, page server.Page) ([]Model, int, error) {
-	q := p.db.Model(&Entity{}).Where("user_id = ?", userID)
+	q := p.db.Model(&Entity{}).Where("user_id = ? AND deleted_at IS NULL", userID)
 	if filter.Type != "" {
 		q = q.Where("type = ?", filter.Type)
 	}
