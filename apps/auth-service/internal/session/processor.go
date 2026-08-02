@@ -22,6 +22,12 @@ type Principal struct {
 	Email         string
 	ActiveFleetID string
 	Role          string
+	// PlatformAdmin is orthogonal to Role: Role is a position inside one fleet,
+	// this is a position above all of them. It is stamped at mint time from
+	// auth.platform_admins, so revoking it does not take effect until the access
+	// token expires or is refreshed — a staleness the console states in plain
+	// words and the purge endpoints re-verify away (FR-ADMIN-AUTH-7).
+	PlatformAdmin bool
 }
 
 // Issued bundles a freshly minted token pair returned to the client. The
@@ -63,6 +69,7 @@ func (p *Processor) MintAccess(pr Principal) (string, error) {
 		"email":           pr.Email,
 		"active_fleet_id": pr.ActiveFleetID,
 		"role":            pr.Role,
+		"platform_admin":  pr.PlatformAdmin,
 		"iss":             p.issuer,
 		"aud":             p.aud,
 		"iat":             now.Unix(),

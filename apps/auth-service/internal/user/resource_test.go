@@ -102,6 +102,32 @@ func TestAuthMe_includesThemePreference(t *testing.T) {
 	}
 }
 
+// FR-ADMIN-AUTH-8: the meta block reports the CALLER's own claim, sourced from
+// the validated token's Identity rather than a second database read — the
+// handler must not consult platformadmin.Provider itself and must not upgrade
+// a non-admin caller's response based on some other signal.
+func TestAuthMe_includesPlatformAdminMeta(t *testing.T) {
+	r, _ := newAuthRouter(t)
+
+	for _, want := range []bool{true, false} {
+		req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+		req = req.WithContext(auth.WithIdentity(req.Context(), auth.Identity{
+			UserID:        testUserID,
+			Email:         "a@b.com",
+			ActiveFleetID: "fleet-1",
+			Role:          "owner",
+			PlatformAdmin: want,
+		}))
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+
+		wantFragment := fmt.Sprintf(`"platformAdmin":%v`, want)
+		if !strings.Contains(rec.Body.String(), wantFragment) {
+			t.Fatalf("GET /auth/me meta missing %s. Body: %s", wantFragment, rec.Body.String())
+		}
+	}
+}
+
 // FR-DATA-4 end to end: a row holding a value the allow-list does not know —
 // written before the column existed, or edited out of band — surfaces as
 // `system` rather than leaking an out-of-range value to the SPA.

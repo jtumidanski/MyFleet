@@ -77,7 +77,7 @@ func main() {
 	// import cycle).
 	fleetClient := membership.NewClient(config.Get("FLEET_SERVICE_URL", "http://fleet-service:8080"))
 	userProv := user.NewProvider(db)
-	resolve := newPrincipalResolver(userProv, fleetClient)
+	resolve := newPrincipalResolver(userProv, fleetClient, adminProv)
 
 	// COOKIE_SECURE controls the Secure flag on every cookie this service sets.
 	// Local dev runs over plaintext HTTP (Traefik :80) where Secure cookies are
@@ -142,10 +142,11 @@ func main() {
 	}
 }
 
-// newPrincipalResolver composes the two sources of identity — the local users
-// table for email, fleet-service for the active membership — into the single
-// construction site for session.Principal. Every access token this service
-// mints, on either path, is built here (FR-1, FR-2).
+// newPrincipalResolver composes the three sources of identity — the local users
+// table for email, fleet-service for the active membership, auth.platform_admins
+// for the platform tier — into the single construction site for
+// session.Principal. Every access token this service mints, on either path, is
+// built here (FR-1, FR-2, FR-ADMIN-AUTH-4).
 //
 // It is a package-level function rather than an inline closure in main() so it
 // can be unit-tested: it is now the sole guarantor that a minted token carries
@@ -159,7 +160,7 @@ func main() {
 // internal user id, while Google's subject is a different identifier. Confusing
 // the two is the mistake this service has already made once — see the doc
 // comment on user.Provider.
-func newPrincipalResolver(users user.Provider, fleet *membership.Client) session.PrincipalResolver {
+func newPrincipalResolver(users user.Provider, fleet *membership.Client, admins platformadmin.Provider) session.PrincipalResolver {
 	return func(ctx context.Context, userID string) (session.Principal, error) {
 		u, err := users.GetByID(userID)
 		if err != nil {
@@ -173,11 +174,19 @@ func newPrincipalResolver(users user.Provider, fleet *membership.Client) session
 		if err != nil {
 			return session.Principal{}, err
 		}
+		// Fail closed: a lookup error must not mint a token that silently
+		// claims false, because the console's absence would then read as
+		// "you are not an admin" rather than "we could not tell".
+		isAdmin, err := admins.IsAdmin(userID)
+		if err != nil {
+			return session.Principal{}, err
+		}
 		return session.Principal{
 			UserID:        userID,
 			Email:         u.Email(),
 			ActiveFleetID: m.FleetID,
 			Role:          m.Role,
+			PlatformAdmin: isAdmin,
 		}, nil
 	}
 }

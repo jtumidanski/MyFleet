@@ -62,7 +62,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 			}
 			server.WriteJSON(w, http.StatusOK, server.Document{
 				Data: Transform(m),
-				Meta: map[string]any{"activeFleetId": id.ActiveFleetID, "role": id.Role},
+				// platformAdmin comes from the validated token's Identity, not
+				// a second database read: the claim IS the authority the request
+				// carried, so reporting anything else would tell the client it
+				// has a capability its own token does not grant.
+				Meta: map[string]any{
+					"activeFleetId": id.ActiveFleetID,
+					"role":          id.Role,
+					"platformAdmin": id.PlatformAdmin,
+				},
 			})
 		})
 
