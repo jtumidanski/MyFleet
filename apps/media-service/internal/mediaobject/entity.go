@@ -17,9 +17,14 @@ type Entity struct {
 	Size             int64
 	OriginalFilename string
 	Status           string `gorm:"not null"`
-	CreatedAt        time.Time
-	DeletedAt        *time.Time `gorm:"index"`
-	PurgeAfter       *time.Time
+	// Standing protection, not a bug fix: ToEntity() already assigns this, so
+	// nothing here was ever corrupted. That correctness is incidental — it holds
+	// only while Model happens to carry createdAt — and two db.Save call sites
+	// (Update and UpdateInTx) depend on it. `<-:create` makes it structural
+	// (task-006 design §5.3).
+	CreatedAt  time.Time  `gorm:"<-:create"`
+	DeletedAt  *time.Time `gorm:"index"`
+	PurgeAfter *time.Time
 }
 
 func (Entity) TableName() string { return "media.media_objects" }
