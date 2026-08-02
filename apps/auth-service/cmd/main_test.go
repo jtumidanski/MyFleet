@@ -105,6 +105,33 @@ func TestNewPrincipalResolver_failsClosedWhenTheMembershipCallFails(t *testing.T
 	}
 }
 
+// TestNewPrincipalResolver_failsClosedWhenFleetServiceErrors is the resolver
+// half of the membership client's non-2xx guard, and the reason that guard
+// matters. fleet-service's error envelope is JSON, so a 500 from
+// /internal/memberships/active used to decode into a zero Membership with no
+// error: the resolver returned a Principal with an empty ActiveFleetID and no
+// error, a valid token was minted claiming the user has no fleet, and the SPA
+// redirected them to /onboarding to create a duplicate one.
+//
+// Compare with TestNewPrincipalResolver_treatsNoMembershipAsEmptyNotError
+// below: an empty ActiveFleetID is a legitimate answer for 404 and ONLY for
+// 404. Anything else must fail closed, which is what the comment on
+// session/resource.go promises.
+func TestNewPrincipalResolver_failsClosedWhenFleetServiceErrors(t *testing.T) {
+	resolve := newPrincipalResolver(
+		usersWith("user-1", "a@b.com"),
+		// A well-formed JSON error envelope, not garbage: garbage already
+		// failed the decode. This is the body that used to slip through.
+		fleetServing(t, http.StatusInternalServerError,
+			`{"errors":[{"status":"500","code":"internal","title":"internal server error"}]}`),
+	)
+
+	p, err := resolve(context.Background(), "user-1")
+	if err == nil {
+		t.Fatalf("a fleet-service 500 must fail closed; got principal %+v with no error", p)
+	}
+}
+
 // TestNewPrincipalResolver_treatsNoMembershipAsEmptyNotError is load-bearing
 // and easy to break. membership.Client maps a 404 to a zero Membership with no
 // error, and the OIDC callback keys its onboarding redirect off an empty
