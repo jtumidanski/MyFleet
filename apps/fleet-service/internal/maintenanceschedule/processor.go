@@ -160,6 +160,46 @@ func (pr *Processor) ListActiveByFleet(fleetID string) ([]QueueRow, error) {
 	return pr.p.ListActiveByFleet(fleetID)
 }
 
+// ScheduleDue is one active schedule's live due-state plus, when the state is
+// non-ok, the per-axis breach detail behind it.
+type ScheduleDue struct {
+	ScheduleID string
+	State      string // ok | upcoming | overdue
+	Breaches   []AxisBreach
+}
+
+// ScheduleDueByVehicle returns the live DueState of every active schedule for a
+// vehicle together with the breach detail behind a non-ok state, computed on
+// read from the vehicle's current mileage and now. Used by the vehicle layer to
+// derive a vehicle's status and the reason behind it.
+//
+// This is the same single ListActiveByVehicle read the narrower
+// ScheduleStatesByVehicle issued: the breach detail was already in hand and was
+// discarded at the return boundary.
+//
+// State and breach magnitude are both computed from AsSchedule(), never from the
+// stored next_due_* columns. Those columns are refreshed by the hourly recompute
+// job, so reading one beside a freshly computed state can contradict — a
+// schedule completed twenty minutes ago reports "ok" from fresh math while the
+// stored next_due_mileage still describes the previous cycle.
+func (pr *Processor) ScheduleDueByVehicle(vehicleID string) ([]ScheduleDue, error) {
+	rows, err := pr.p.ListActiveByVehicle(vehicleID)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	out := make([]ScheduleDue, 0, len(rows))
+	for _, r := range rows {
+		s := r.Schedule.AsSchedule()
+		out = append(out, ScheduleDue{
+			ScheduleID: r.Schedule.ID(),
+			State:      DueState(s, now, r.CurrentMileage, DefaultThresholds),
+			Breaches:   DueBreaches(s, now, r.CurrentMileage, DefaultThresholds),
+		})
+	}
+	return out, nil
+}
+
 // ScheduleStatesByVehicle returns the live DueState ("ok"|"upcoming"|"overdue")
 // of every active schedule for a vehicle, computed on read from the vehicle's
 // current mileage and now (design A5 / §10.2). Used by the vehicle layer to
