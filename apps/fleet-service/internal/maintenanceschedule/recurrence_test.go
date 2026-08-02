@@ -1,11 +1,23 @@
 package maintenanceschedule
 
 import (
+	"math"
 	"testing"
 	"time"
 )
 
 var base = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// urgency is computed at runtime from float64 operands, while a `want` written
+// as an untyped constant expression is folded at arbitrary precision and
+// rounded once. The two can differ by an ULP, so compare within a tolerance
+// rather than exactly.
+func assertUrgency(t *testing.T, got, want float64) {
+	t.Helper()
+	if math.Abs(got-want) > 1e-9 {
+		t.Fatalf("urgency = %v want %v", got, want)
+	}
+}
 
 func TestNextDue(t *testing.T) {
 	cases := []struct {
@@ -99,9 +111,7 @@ func TestDueBreaches_mileageOverdue(t *testing.T) {
 		t.Fatalf("want mileage/1120mi/0d, got %+v", b)
 	}
 	// 1 + 1120/500
-	if want := 1 + 1120.0/500.0; b.Urgency != want {
-		t.Fatalf("urgency = %v want %v", b.Urgency, want)
-	}
+	assertUrgency(t, b.Urgency, 1+1120.0/500.0)
 }
 
 func TestDueBreaches_mileageUpcoming(t *testing.T) {
@@ -114,9 +124,7 @@ func TestDueBreaches_mileageUpcoming(t *testing.T) {
 		t.Fatalf("want mileage/310mi remaining, got %+v", b)
 	}
 	// 1 - 310/500
-	if want := 1 - 310.0/500.0; b.Urgency != want {
-		t.Fatalf("urgency = %v want %v", b.Urgency, want)
-	}
+	assertUrgency(t, b.Urgency, 1-310.0/500.0)
 }
 
 func TestDueBreaches_timeOverdue(t *testing.T) {
@@ -129,9 +137,7 @@ func TestDueBreaches_timeOverdue(t *testing.T) {
 	if b.Axis != "time" || b.Days != 12 || b.Miles != 0 {
 		t.Fatalf("want time/12d/0mi, got %+v", b)
 	}
-	if want := 1 + 12.0/30.0; b.Urgency != want {
-		t.Fatalf("urgency = %v want %v", b.Urgency, want)
-	}
+	assertUrgency(t, b.Urgency, 1+12.0/30.0)
 }
 
 func TestDueBreaches_timeUpcoming(t *testing.T) {
@@ -140,9 +146,7 @@ func TestDueBreaches_timeUpcoming(t *testing.T) {
 	if len(got) != 1 || got[0].Axis != "time" || got[0].Days != 20 {
 		t.Fatalf("want time/20d remaining, got %+v", got)
 	}
-	if want := 1 - 20.0/30.0; got[0].Urgency != want {
-		t.Fatalf("urgency = %v want %v", got[0].Urgency, want)
-	}
+	assertUrgency(t, got[0].Urgency, 1-20.0/30.0)
 }
 
 func TestDueBreaches_overdueByPartOfADayFloorsToOne(t *testing.T) {

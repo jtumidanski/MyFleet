@@ -146,5 +146,5 @@ func upcomingUrgency(remaining, threshold int) float64 {
 	if threshold <= 0 {
 		return 0
 	}
-	return float64(threshold-remaining) / float64(threshold)
+	return 1 - float64(remaining)/float64(threshold)
 }
