@@ -77,3 +77,27 @@ func ValidateInviteEmail(s string) error {
 	}
 	return nil
 }
+
+// CheckCreateLimit enforces the per-fleet invite creation window (FR-RATE-1).
+// Over the limit → server.ErrTooManyRequests (429).
+func (pr *Processor) CheckCreateLimit(fleetID string, limit int, window time.Duration, now time.Time) error {
+	n, err := pr.p.CountByFleetSince(fleetID, now.Add(-window))
+	if err != nil {
+		return err
+	}
+	if n >= int64(limit) {
+		return server.ErrTooManyRequests
+	}
+	return nil
+}
+
+// CheckResendCooldown enforces the per-invite resend cooldown (FR-RATE-2),
+// derived from updated_at — GORM stamps it on the token rotation, so the limit
+// survives a pod restart and holds across replicas. See design §4.4 for why
+// updated_at is preferred over deriving the last rotation from expires_at.
+func (pr *Processor) CheckResendCooldown(inv Model, cooldown time.Duration, now time.Time) error {
+	if now.Sub(inv.UpdatedAt()) < cooldown {
+		return server.ErrTooManyRequests
+	}
+	return nil
+}

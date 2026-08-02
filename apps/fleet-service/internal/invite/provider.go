@@ -2,6 +2,7 @@ package invite
 
 import (
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -13,6 +14,10 @@ type Provider interface {
 	GetByID(id string) (Model, error)
 	GetByToken(token string) (Model, error)
 	ListByFleetID(fleetID string) ([]Model, error)
+	// CountByFleetSince backs the per-fleet creation rate limit. It is a query,
+	// not an in-process counter, because fleet-service runs multiple replicas
+	// and a per-pod limiter enforces nothing (FR-RATE-1).
+	CountByFleetSince(fleetID string, since time.Time) (int64, error)
 }
 
 type dbProvider struct{ db *gorm.DB }
@@ -52,4 +57,12 @@ func (p *dbProvider) ListByFleetID(fleetID string) ([]Model, error) {
 		out = append(out, Make(e))
 	}
 	return out, nil
+}
+
+func (p *dbProvider) CountByFleetSince(fleetID string, since time.Time) (int64, error) {
+	var n int64
+	err := p.db.Model(&Entity{}).
+		Where("fleet_id = ? AND created_at > ?", fleetID, since).
+		Count(&n).Error
+	return n, err
 }

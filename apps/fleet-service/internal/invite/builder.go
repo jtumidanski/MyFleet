@@ -24,6 +24,10 @@ func (b *Builder) SetInvitedByUserID(uid string) *Builder { b.m.invitedByUserID 
 // setAcceptedAt is unexported — used only by white-box tests in package invite.
 func (b *Builder) setAcceptedAt(t *time.Time) *Builder { b.m.acceptedAt = t; return b }
 
+// setUpdatedAt is unexported — used only by white-box tests in package invite,
+// which need a hand-stamped updated_at to exercise the resend cooldown.
+func (b *Builder) setUpdatedAt(t time.Time) *Builder { b.m.updatedAt = t; return b }
+
 // Build returns the Model. No invariants are enforced here; validation is in
 // the handler/processor layer so the builder remains flexible for tests.
 func (b *Builder) Build() Model { return b.m }
