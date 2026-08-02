@@ -14,7 +14,8 @@ import {
   TableRow,
 } from '../../components/ui/table';
 import { BlastRadiusPanel } from '../../components/admin/BlastRadiusPanel';
-import { useAdminFleet, useAdminFleets } from '../../lib/hooks/api/admin';
+import { PurgeConfirmDialog } from '../../components/admin/PurgeConfirmDialog';
+import { useAdminFleet, useAdminFleets, useCreatePurge } from '../../lib/hooks/api/admin';
 import { cn } from '../../lib/utils';
 import type { DeletedFilter } from '../../types/models/admin';
 
@@ -47,6 +48,21 @@ const FILTERS: Array<{ value: DeletedFilter; label: string }> = [
 function daysLeft(purgeAfter: string): number {
   const ms = new Date(purgeAfter).getTime() - Date.now();
   return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+}
+
+/**
+ * The deadline a purge started right now would carry.
+ *
+ * The server is authoritative — it stamps purge_after from its own clock and
+ * its own configured window — so this is only what the dialog SHOWS before the
+ * operation exists. It uses the same 5 days the service defaults to; a
+ * deployment that configures a different window will differ by the drift
+ * between them for the few seconds before the real value comes back.
+ */
+const RECOVERY_WINDOW_DAYS = 5;
+
+function recoveryDeadline(): string {
+  return new Date(Date.now() + RECOVERY_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
 }
 
 function CountdownChip({ purgeAfter }: { purgeAfter: string }) {
@@ -156,6 +172,8 @@ function FleetList({
 
 function FleetDetail({ id }: { id: string }) {
   const { data, isLoading, isError } = useAdminFleet(id);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const createPurge = useCreatePurge();
 
   if (isLoading) {
     return <Skeleton className="h-64" data-testid="fleet-detail-loading" />;
@@ -308,8 +326,30 @@ function FleetDetail({ id }: { id: string }) {
         counts={fleet.counts}
         error={!fleet.counts}
         fleetName={fleet.name}
-        onPurge={() => undefined}
-        disabled={fleet.pending_purge}
+        onPurge={() => setConfirmOpen(true)}
+        disabled={fleet.pending_purge || createPurge.isPending}
+      />
+
+      {/*
+        The phrase is the fleet's own name, which is why the label capture in
+        the API matters: the operator has to read what they are about to destroy
+        in order to type it.
+      */}
+      <PurgeConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        scope="fleet"
+        confirmationPhrase={fleet.name}
+        counts={fleet.counts ?? {}}
+        peopleCount={fleet.members.length}
+        recoveryDeadline={recoveryDeadline()}
+        isPending={createPurge.isPending}
+        onConfirm={() => {
+          createPurge.mutate(
+            { scope: 'fleet', target_type: 'fleet', target_id: id, confirmation: fleet.name },
+            { onSuccess: () => setConfirmOpen(false) },
+          );
+        }}
       />
     </div>
   );

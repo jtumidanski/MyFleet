@@ -1,8 +1,21 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Button } from '../../components/ui/button';
 import { Card } from '../../components/ui/card';
 import { Skeleton } from '../../components/ui/skeleton';
-import { useAdminStats } from '../../lib/hooks/api/admin';
+import { PurgeConfirmDialog } from '../../components/admin/PurgeConfirmDialog';
+import { useAdminStats, useCreatePurge } from '../../lib/hooks/api/admin';
+import { authKeys } from '../../lib/hooks/api/auth';
 import type { AdminStatsAttributes } from '../../types/models/admin';
+
+/** The exact phrase a system purge requires; the server compares it literally. */
+const SYSTEM_CONFIRMATION = 'PURGE EVERYTHING';
+
+/**
+ * The window the service defaults to. Only used to SHOW a deadline before the
+ * operation exists — the server stamps the real purge_after from its own clock.
+ */
+const RECOVERY_WINDOW_DAYS = 5;
 
 /**
  * Platform overview — solution-wide counts (FR-ADMIN-STATS-1).
@@ -69,6 +82,29 @@ function StatTile({
 
 export function AdminOverviewPage() {
   const { data, isLoading, isError } = useAdminStats();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const createPurge = useCreatePurge();
+  const queryClient = useQueryClient();
+
+  /**
+   * FR-ADMIN-UI-14 — what happens after the platform deletes itself.
+   *
+   * The admin STAYS in the console. That works only because of the sibling
+   * route branch: RequirePlatformAdmin does not require a fleet, and /admin is
+   * not nested under RequireAuth's fleetless redirect (risks.md R5).
+   */
+  async function confirmSystemPurge() {
+    await createPurge.mutateAsync({ scope: 'system', confirmation: SYSTEM_CONFIRMATION });
+    // Clear rather than invalidate: everything the cache holds is now
+    // soft-deleted, and invalidating would render a frame of stale fleet data
+    // between the purge and the refetch.
+    queryClient.clear();
+    // The admin's own fleet is gone, so /auth/me now returns a null
+    // activeFleetId. Refetching it here means the shell reflects that
+    // immediately instead of on the next navigation.
+    await queryClient.refetchQueries({ queryKey: authKeys.me() });
+    setConfirmOpen(false);
+  }
 
   if (isLoading) {
     return (
@@ -152,6 +188,61 @@ export function AdminOverviewPage() {
           />
         ))}
       </div>
+
+      {/*
+        The system purge lives at the bottom of the overview, behind its own
+        card, because it is the one control here that can destroy the whole
+        platform. Its confirmation phrase is a fixed literal rather than
+        anything derivable, so it cannot be typed by muscle memory from another
+        screen.
+      */}
+      <Card className="border-danger-border p-4">
+        <h2 className="text-lg font-semibold">Delete everything</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Removes every fleet, vehicle and record on this platform. User accounts and sign-ins
+          survive. Recoverable for a limited window, then permanent.
+        </p>
+        <div className="mt-4">
+          <Button
+            type="button"
+            variant="destructive"
+            onClick={() => setConfirmOpen(true)}
+            disabled={createPurge.isPending}
+          >
+            Purge everything
+          </Button>
+        </div>
+      </Card>
+
+      <PurgeConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        scope="system"
+        confirmationPhrase={SYSTEM_CONFIRMATION}
+        counts={systemCounts(stats)}
+        peopleCount={stats.users ?? 0}
+        recoveryDeadline={new Date(
+          Date.now() + RECOVERY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+        ).toISOString()}
+        isPending={createPurge.isPending}
+        onConfirm={() => void confirmSystemPurge()}
+      />
     </div>
   );
+}
+
+/**
+ * The stats the dialog restates as a blast radius.
+ *
+ * Only counts this console could actually read: a null means the source was
+ * unreachable, and listing "0 notifications" for a service nobody could ask
+ * would understate what is about to be deleted.
+ */
+function systemCounts(stats: AdminStatsAttributes): Record<string, number> {
+  const out: Record<string, number> = { vehicles: stats.vehicles.active };
+  for (const { key } of TILES) {
+    const v = stats[key];
+    if (typeof v === 'number') out[key] = v;
+  }
+  return out;
 }

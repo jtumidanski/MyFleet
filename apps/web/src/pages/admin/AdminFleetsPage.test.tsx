@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
 import { AdminFleetsPage } from './AdminFleetsPage';
@@ -11,9 +12,11 @@ import type {
 
 const useAdminFleets = vi.fn();
 const useAdminFleet = vi.fn();
+const createPurgeMutate = vi.fn();
 vi.mock('../../lib/hooks/api/admin', () => ({
   useAdminFleets: () => useAdminFleets(),
   useAdminFleet: () => useAdminFleet(),
+  useCreatePurge: () => ({ mutate: createPurgeMutate, isPending: false }),
 }));
 
 const futureIso = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -82,6 +85,7 @@ describe('AdminFleetsPage', () => {
   beforeEach(() => {
     useAdminFleets.mockReset();
     useAdminFleet.mockReset();
+    createPurgeMutate.mockReset();
     mockFleets([{ id: 'f1' }]);
     mockFleet();
   });
@@ -129,5 +133,25 @@ describe('AdminFleetsPage', () => {
     mockFleet({ warnings: ['auth-service unreachable; member names omitted'] });
     renderAt('/admin/fleets/f1');
     expect(await screen.findByRole('status')).toHaveTextContent(/auth-service unreachable/i);
+  });
+
+  // The purge control opens the confirmation rather than firing the mutation:
+  // the phrase gate is the whole point, and a one-click purge from the panel
+  // would bypass it (FR-ADMIN-UI-10).
+  it('opens the confirmation dialog instead of purging directly', async () => {
+    const user = userEvent.setup();
+    renderAt('/admin/fleets/f1');
+    await user.click(await screen.findByRole('button', { name: /purge this fleet/i }));
+    expect(createPurgeMutate).not.toHaveBeenCalled();
+    expect(await screen.findByLabelText(/type the fleet name/i)).toBeInTheDocument();
+  });
+
+  // FR-ADMIN-UI-9 again, at the page level: a fleet whose counts are missing
+  // gets no purge control at all.
+  it('withholds the purge control when the server sent no counts', async () => {
+    mockFleet({ counts: undefined as unknown as Record<string, number> });
+    renderAt('/admin/fleets/f1');
+    expect(await screen.findByTestId('fleet-detail')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /purge this fleet/i })).not.toBeInTheDocument();
   });
 });
