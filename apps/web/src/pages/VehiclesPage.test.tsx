@@ -240,3 +240,47 @@ describe('VehiclesPage — dismissing', () => {
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });
+
+describe('VehiclesPage — locked while the create request is in flight', () => {
+  /**
+   * Opens the dialog and submits with a create that never settles, so the page
+   * is parked in the pending state for the assertion.
+   */
+  async function submitAndHang(): Promise<void> {
+    // Never settles, so the page stays parked in the pending state.
+    vi.mocked(vehicleService.createInFleet).mockReturnValue(new Promise<Vehicle>(() => {}));
+    renderWithProviders(<VehiclesPage />);
+    await userEvent.click(headerTrigger());
+    await fillRequired();
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled());
+  }
+
+  // Each route is asserted on its own: wiring two of the three and calling it
+  // done is the regression this block exists to catch.
+  it('ignores Escape', async () => {
+    await submitAndHang();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('ignores an outside pointer-down', async () => {
+    await submitAndHang();
+    fireEvent.pointerDown(document.body);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('disables the close button', async () => {
+    await submitAndHang();
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled();
+  });
+
+  it('disables Cancel', async () => {
+    // A Cancel that looks live but does nothing reads as a broken app; a
+    // Cancel that works would abandon a vehicle that still gets created.
+    await submitAndHang();
+    expect(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }),
+    ).toBeDisabled();
+  });
+});

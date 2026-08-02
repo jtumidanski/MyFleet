@@ -178,7 +178,7 @@ export function VehicleForm({
 
         <div className="flex justify-end gap-2">
           {onCancel && (
-            <Button type="button" variant="outline" onClick={onCancel}>
+            <Button type="button" variant="outline" onClick={onCancel} disabled={submitting}>
               Cancel
             </Button>
           )}

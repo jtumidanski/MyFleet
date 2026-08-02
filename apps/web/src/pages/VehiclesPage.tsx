@@ -63,10 +63,19 @@ export function VehiclesPage() {
       </div>
 
       {canWrite && (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+          open={open}
+          onOpenChange={(next) => {
+            // Backstop: `dismissible` already blocks the three user-facing
+            // routes, but this guarantees no dismissal path Radix grows later
+            // can close the dialog out from under an in-flight create.
+            if (!next && createVehicle.isPending) return;
+            setOpen(next);
+          }}
+        >
           {/* Unmounted on close, which is what discards the form state — do not
               add forceMount. */}
-          <DialogContent>
+          <DialogContent dismissible={!createVehicle.isPending}>
             <DialogHeader>
               <DialogTitle>Add Vehicle</DialogTitle>
               <DialogDescription>Make, model, and year are required.</DialogDescription>
