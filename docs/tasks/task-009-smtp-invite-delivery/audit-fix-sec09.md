@@ -221,3 +221,162 @@ which this task's scope explicitly excludes.
 - **No frontend change.** `packages/shared-ts/src/errors.ts:30` passes `title` through
   generically and nothing in `apps/web` asserts on a 500 title, so the redacted string flows
   through unchanged.
+
+---
+
+# Follow-up: 5xx logging
+
+Closing concern #1 above rather than deferring it. Confirmed the coordinator's reading first:
+neither `packages/shared-go/server` nor `packages/shared-go/telemetry` wraps the response
+writer or observes status — `grep -rn "WrapResponseWriter\|middleware.Logger\|Recoverer"` over
+`apps/` and `packages/` returns nothing. Nothing else in the stack saw a 5xx, so redacting the
+body really did make ~141 failures invisible to everyone.
+
+## Bootstrap wiring: it worked out
+
+No fallback needed, and no caller churn. `server.New(log logrus.FieldLogger)`
+(`packages/shared-go/server/handler.go:17-25`) already receives the service logger and is
+called exactly once per service:
+
+```
+$ grep -rn "server.New(" --include='*.go' apps/ packages/
+apps/fleet-service/cmd/main.go:191:	if err := server.New(log).
+apps/auth-service/cmd/main.go:81:	if err := server.New(log).
+apps/notification-service/cmd/main.go:89:	if err := server.New(log).
+apps/media-service/cmd/main.go:129:	if err := server.New(log).
+```
+
+`New` now calls `SetErrorLogger(log)` before building the `Server`. All four services get 5xx
+logging — with their own configured logger, formatter and level — from this one line. Zero
+files outside `packages/shared-go/server` were touched, still.
+
+## What changed
+
+**`packages/shared-go/server/jsonapi.go:33-70`** — the seam:
+
+- `var errorLog atomic.Pointer[logrus.FieldLogger]` (jsonapi.go:43).
+- `SetErrorLogger(logrus.FieldLogger)` (jsonapi.go:52-58) — exported for handlers mounted
+  outside the shared bootstrap and for tests. `nil` restores the fallback.
+- `errorLogger()` (jsonapi.go:65-70) — **never returns nil**. An unset seam falls back to
+  `logrus.StandardLogger()`, which writes to stderr, i.e. where a container's logs already go.
+  The error is surfaced, never silently discarded, and a missing logger cannot panic an error
+  path.
+
+**`packages/shared-go/server/jsonapi.go:95-98`** — `WriteError` logs at Error level when
+`status >= 500`, immediately before writing the redacted body:
+
+```go
+errorLogger().WithError(err).WithField("status", status).
+	Error("request failed; error text redacted from the response body")
+```
+
+Only the error value and the status. No request body, no headers, no credentials, no user or
+fleet ids. Sub-500 logs nothing.
+
+**`packages/shared-go/server/handler.go:17-25`** — `New` installs the logger.
+
+The response contract established above is untouched: 5xx still renders the generic
+`InternalErrorTitle` and no `detail`. The log and the body deliberately diverge.
+
+## Why atomic.Pointer, not a mutex
+
+The value is written once at startup and read on every erroring request. A `sync.RWMutex`
+would put a lock on the hot path to guard a write that happens once per process; an atomic
+load is race-free with no contention and no critical section. `atomic.Pointer` holds
+`*logrus.FieldLogger` because the generic needs a pointer type — hence the `p != nil && *p != nil`
+guard in `errorLogger`, which also covers someone storing a typed-nil interface.
+
+**I verified the race test has teeth rather than assuming it.** Temporarily demoting
+`errorLog` to a plain `var errorLogUnsafe logrus.FieldLogger` and re-running only
+`TestSetErrorLogger_isSafeUnderConcurrentUse` under `-race` produced:
+
+```
+WARNING: DATA RACE
+Write at 0x000000abd270 by goroutine 20:
+  ...server.SetErrorLogger()  jsonapi.go:54
+Previous read at 0x000000abd270 by goroutine 11:
+  ...server.errorLogger()     jsonapi.go:62
+  ...server.WriteError()      jsonapi.go:98
+```
+
+The atomic version was then restored and the test passes. So the construction is not merely
+"probably fine" — the guard demonstrably fails on the unsafe variant.
+
+## Tests added
+
+- `TestWriteError_500LogsTheErrorItRedacts` — the required both-halves-in-one test. Asserts
+  the hook captured exactly one Error-level entry whose `error` field equals the **full**
+  `pq: relation "fleet.fleet_invites" ... (SQLSTATE 42P01)` text and whose `status` field is
+  500, **and** that the response body contains none of `pq:`, `relation`,
+  `fleet.fleet_invites`, `SQLSTATE`, `42P01`. The divergence is the whole point, so both are
+  pinned in one test.
+- `TestWriteError_4xxLogsNothing` — all ten sentinels plus a `Detailed` 409; each must produce
+  zero log entries.
+- `TestWriteError_withNoLoggerInstalledDoesNotPanic` — clears the seam, captures
+  `logrus.StandardLogger().Out`, and asserts the error **still reaches the log** while still
+  not reaching the body. Stronger than "does not panic": it proves the fallback surfaces
+  rather than swallows.
+- `TestNew_installsTheErrorLogger` — pins the zero-caller-churn property. If `New` stops
+  installing, every service silently drops to the stderr fallback and loses its log fields.
+- `TestSetErrorLogger_isSafeUnderConcurrentUse` — 8 goroutines × 200 `WriteError` calls
+  against 4 goroutines × 200 `SetErrorLogger` calls.
+- `TestMain` parks a null logger so the 5xx tests do not spray simulated failures over the
+  test output; tests that assert on the log install their own and restore on cleanup.
+
+## Verification (real output)
+
+```
+$ go build github.com/jtumidanski/myfleet/... && go vet github.com/jtumidanski/myfleet/...
+BUILD_VET_OK
+```
+
+```
+$ go test github.com/jtumidanski/myfleet/... -race
+GO_TEST_RACE_EXIT=0
+46 packages ok; no failures, no data races
+```
+
+```
+$ export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && make ci
+(make ci runs: go test -race github.com/jtumidanski/myfleet/...)
+manifest checks passed
+carfax template check passed
+MAKE_CI_EXIT=0
+```
+
+Nothing failed anywhere, including `apps/fleet-service/internal/invite`, which another agent
+is editing concurrently. I stayed out of that package.
+
+## Re-answering concern #1: is the gap closed?
+
+**Yes, and for all of them — including the ~141 that log nothing themselves.**
+
+Every 5xx response in every service now produces an Error-level log entry carrying the full
+underlying error, because the log happens inside `WriteError` itself rather than depending on
+the caller remembering. The measurement that motivated the concern — 141 of 190 raw-`err`
+call sites with no nearby log — is no longer the relevant number: those sites are covered by
+the boundary, exactly as the redaction is. The information moved from the response body to
+the server log; it was not destroyed.
+
+Two honest residuals, neither reopening the concern:
+
+1. **Handlers that already log now log twice** for the same failure (fleet-service's invite
+   and media-service's mediaobject resources, among others). Duplication, not loss — and the
+   handler's entry is the richer one because it carries `fleet_id` / `trace_id` /
+   `correlation_id` context that `WriteError` deliberately does not gather. Worth
+   de-duplicating eventually by dropping the redundant handler-side log, but that is caller
+   churn and out of scope here. It does not affect correctness.
+2. **The shared entry has no request context** — no correlation id, route or method, since
+   `WriteError` only receives an `http.ResponseWriter` and an `error`. For the 141 previously
+   silent sites this is still a large net gain (a stack-less "something failed with this
+   driver error" beats nothing). Threading the correlation id through would need either a
+   `*http.Request` parameter — a signature change at 253 call sites — or the response-status
+   middleware the coordinator confirmed is absent. That middleware is the better long-term
+   answer and is worth raising as its own item.
+
+## Deliberately not done (follow-up)
+
+- No caller edits, again — still zero files touched outside `packages/shared-go/server`.
+- No de-duplication of the handler-side logs described above.
+- No response-status/correlation-id logging middleware. It would subsume both residuals but
+  is a new component, not a fix to this finding.

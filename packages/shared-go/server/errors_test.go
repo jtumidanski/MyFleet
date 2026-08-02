@@ -1,13 +1,29 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 )
+
+// TestMain parks a null logger in the error seam so the tests that exercise the
+// 5xx path do not spray the real failures they simulate across the test output.
+// Tests that care about the log install their own; the one that covers the
+// unwired fallback clears it explicitly.
+func TestMain(m *testing.M) {
+	quiet, _ := logrustest.NewNullLogger()
+	SetErrorLogger(quiet)
+	os.Exit(m.Run())
+}
 
 // writeErrorBody renders err through WriteError and returns the recorder plus
 // the decoded single APIError, failing the test if the envelope is malformed.
@@ -291,4 +307,165 @@ func TestWriteError_4xxDetailSurvivesTheRedaction(t *testing.T) {
 			t.Fatalf("detail = %q, want %q", got.Detail, detail)
 		}
 	}
+}
+
+// installErrorLogger swaps in a capturing logger for the duration of one test
+// and restores whatever was there before, so tests that assert on the log do
+// not leak a logger into the tests that assert nothing was logged.
+func installErrorLogger(t *testing.T) *logrustest.Hook {
+	t.Helper()
+	prev := errorLog.Load()
+	t.Cleanup(func() { errorLog.Store(prev) })
+
+	log, hook := logrustest.NewNullLogger()
+	log.SetLevel(logrus.DebugLevel)
+	SetErrorLogger(log)
+	return hook
+}
+
+// TestWriteError_500LogsTheErrorItRedacts is the point of the whole exercise:
+// the log and the response body must DIVERGE. Redacting the body (SEC-09) took
+// away the only copy of the failure anyone could see, so both halves are
+// asserted together — a change that re-leaks the body, or one that stops
+// logging, fails right here.
+func TestWriteError_500LogsTheErrorItRedacts(t *testing.T) {
+	hook := installErrorLogger(t)
+	leaky := errors.New(`pq: relation "fleet.fleet_invites" does not exist (SQLSTATE 42P01)`)
+
+	rec, got := writeErrorBody(t, leaky)
+
+	// Half one: the operator can see everything.
+	entries := hook.AllEntries()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d, want exactly 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Level != logrus.ErrorLevel {
+		t.Fatalf("level = %v, want error", entry.Level)
+	}
+	logged, ok := entry.Data[logrus.ErrorKey].(error)
+	if !ok || logged == nil {
+		t.Fatalf("log entry carries no error field: %+v", entry.Data)
+	}
+	if logged.Error() != leaky.Error() {
+		t.Fatalf("logged error = %q, want the full underlying text %q", logged.Error(), leaky.Error())
+	}
+	if entry.Data["status"] != 500 {
+		t.Fatalf("log status field = %v, want 500", entry.Data["status"])
+	}
+
+	// Half two: the client can see none of it.
+	if rec.Code != 500 || got.Title != InternalErrorTitle {
+		t.Fatalf("status/title = %d/%q, want 500/%q", rec.Code, got.Title, InternalErrorTitle)
+	}
+	body := rec.Body.String()
+	for _, secret := range []string{"pq:", "relation", "fleet.fleet_invites", "SQLSTATE", "42P01"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("500 body leaked %q despite the redaction: %s", secret, body)
+		}
+	}
+}
+
+// TestWriteError_4xxLogsNothing: a 404 or a 422 is the client being wrong, not
+// the server failing. At ~190 WriteError call sites, logging those at Error
+// would bury the 5xx entries the test above depends on.
+func TestWriteError_4xxLogsNothing(t *testing.T) {
+	for _, err := range []error{
+		ErrBadRequest, ErrUnauthorized, ErrForbidden, ErrNotFound, ErrConflict,
+		ErrGone, ErrRequestEntityTooLarge, ErrUnsupportedMediaType, ErrValidation,
+		ErrTooManyRequests, Detailed(ErrConflict, "invite has expired"),
+	} {
+		t.Run(err.Error(), func(t *testing.T) {
+			hook := installErrorLogger(t)
+			writeErrorBody(t, err)
+			if n := len(hook.AllEntries()); n != 0 {
+				t.Fatalf("a %d response wrote %d log entries, want 0: %+v",
+					StatusFor(err), n, hook.AllEntries())
+			}
+		})
+	}
+}
+
+// TestWriteError_withNoLoggerInstalledDoesNotPanic: a nil logger on the error
+// path would turn every 500 into a crash, which is strictly worse than the
+// disclosure this package is fixing. The fallback must also still surface the
+// error rather than dropping it, so the standard logger's output is captured
+// rather than merely silenced.
+func TestWriteError_withNoLoggerInstalledDoesNotPanic(t *testing.T) {
+	prev := errorLog.Load()
+	t.Cleanup(func() { errorLog.Store(prev) })
+	errorLog.Store(nil)
+
+	std := logrus.StandardLogger()
+	prevOut, prevFmt := std.Out, std.Formatter
+	t.Cleanup(func() { std.Out, std.Formatter = prevOut, prevFmt })
+	var captured bytes.Buffer
+	std.Out = &captured
+	std.Formatter = &logrus.TextFormatter{DisableColors: true}
+
+	rec, got := writeErrorBody(t, errors.New("boom from an unwired service"))
+
+	if rec.Code != 500 || got.Title != InternalErrorTitle {
+		t.Fatalf("status/title = %d/%q, want 500/%q", rec.Code, got.Title, InternalErrorTitle)
+	}
+	if !strings.Contains(captured.String(), "boom from an unwired service") {
+		t.Fatalf("the fallback logger discarded the error instead of surfacing it: %q", captured.String())
+	}
+	if strings.Contains(rec.Body.String(), "boom from an unwired service") {
+		t.Fatalf("the fallback path leaked the error into the body: %s", rec.Body.String())
+	}
+}
+
+// TestNew_installsTheErrorLogger pins the zero-caller-churn property: the four
+// service mains each call server.New(log) once and nothing else, so if New
+// stops installing the logger every 5xx across every service silently falls
+// back to stderr and the per-service log fields vanish.
+func TestNew_installsTheErrorLogger(t *testing.T) {
+	prev := errorLog.Load()
+	t.Cleanup(func() { errorLog.Store(prev) })
+	errorLog.Store(nil)
+
+	log, hook := logrustest.NewNullLogger()
+	_ = New(log)
+
+	writeErrorBody(t, errors.New("failure after bootstrap"))
+
+	if n := len(hook.AllEntries()); n != 1 {
+		t.Fatalf("entries = %d, want 1 — New must install its logger for WriteError", n)
+	}
+}
+
+// TestSetErrorLogger_isSafeUnderConcurrentUse is the test that fails under
+// -race if errorLog is ever demoted from atomic.Pointer to a plain global: a
+// startup/reconfiguration write racing the per-request reads is exactly the
+// access pattern of the real thing. Verified to fail that way before being
+// committed — see the report.
+func TestSetErrorLogger_isSafeUnderConcurrentUse(t *testing.T) {
+	prev := errorLog.Load()
+	t.Cleanup(func() { errorLog.Store(prev) })
+
+	quiet, _ := logrustest.NewNullLogger()
+	SetErrorLogger(quiet)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				WriteError(httptest.NewRecorder(), errors.New("concurrent failure"))
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				next, _ := logrustest.NewNullLogger()
+				SetErrorLogger(next)
+			}
+		}()
+	}
+	wg.Wait()
 }
