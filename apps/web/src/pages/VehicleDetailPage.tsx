@@ -1,53 +1,90 @@
-import { useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
-import { StatusBadge, formatMileage, type VehicleStatus } from '@myfleet/ui-components';
 import { useAuth } from '../context/AuthContext';
+import { useVehicle, useRestoreVehicle } from '../lib/hooks/api/vehicles';
+import { useMaintenanceSchedules, useMaintenanceCategories } from '../lib/hooks/api/maintenance';
+import { useVehicleRecords } from '../lib/hooks/api/vehicleRecords';
+import { deriveOdometer } from '../lib/vehicleStats';
+import { VehicleIdentityRail } from '../components/features/vehicles/detail/VehicleIdentityRail';
 import {
-  useVehicle,
-  useUpdateVehicle,
-  useSoftDeleteVehicle,
-  useRestoreVehicle,
-} from '../lib/hooks/api/vehicles';
-import { VehicleForm } from '../components/features/vehicles/VehicleForm';
-import { VehicleMediaGallery } from '../components/features/vehicles/media/VehicleMediaGallery';
-import { VehicleMileageSection } from '../components/features/vehicles/mileage/VehicleMileageSection';
-import { VehicleMaintenanceSection } from '../components/features/vehicles/maintenance/VehicleMaintenanceSection';
-import { VehicleFuelSection } from '../components/features/vehicles/fuel/VehicleFuelSection';
-import { VehicleActivityTimeline } from '../components/features/activity/VehicleActivityTimeline';
+  VehicleQuickActions,
+  type QuickAction,
+} from '../components/features/vehicles/detail/VehicleQuickActions';
+import { VehicleStatStrip } from '../components/features/vehicles/detail/VehicleStatStrip';
+import { UpcomingScheduleStrip } from '../components/features/vehicles/detail/UpcomingScheduleStrip';
+import { VehicleRecordsTable } from '../components/features/vehicles/detail/VehicleRecordsTable';
+import { VehicleRecordDrawer } from '../components/features/vehicles/detail/VehicleRecordDrawer';
+import { VehicleTrends } from '../components/features/vehicles/detail/VehicleTrends';
+import { EditVehicleDialog } from '../components/features/vehicles/dialogs/EditVehicleDialog';
+import { LogMileageDialog } from '../components/features/vehicles/dialogs/LogMileageDialog';
+import { LogFuelDialog } from '../components/features/vehicles/dialogs/LogFuelDialog';
+import { LogMaintenanceDialog } from '../components/features/vehicles/dialogs/LogMaintenanceDialog';
+import { AddScheduleDialog } from '../components/features/vehicles/dialogs/AddScheduleDialog';
+import { CompleteScheduleDialog } from '../components/features/vehicles/dialogs/CompleteScheduleDialog';
+import { DeleteVehicleDialog } from '../components/features/vehicles/dialogs/DeleteVehicleDialog';
+import { PhotoGalleryDialog } from '../components/features/vehicles/dialogs/PhotoGalleryDialog';
 import { Skeleton } from '../components/ui/skeleton';
 import { Button } from '../components/ui/button';
-import { Card, CardContent } from '../components/ui/card';
-import type { VehicleFormInput } from '../lib/schemas/vehicle';
-import type { UpdateVehicleAttributes } from '../types/models/vehicle';
+import type { VehicleRecordRow } from '../lib/vehicleRecords';
+import type { MaintenanceSchedule } from '../types/models/maintenanceSchedule';
 
-const KNOWN_STATUSES: readonly VehicleStatus[] = [
-  'Healthy',
-  'Upcoming Maintenance',
-  'Overdue',
-  'Inactive',
-];
-
-function asVehicleStatus(value: string | undefined): VehicleStatus | null {
-  return value && (KNOWN_STATUSES as readonly string[]).includes(value)
-    ? (value as VehicleStatus)
-    : null;
-}
+/** Which single dialog, if any, is open. Only one at a time — opening a new one replaces whatever was open. */
+type OpenDialog = QuickAction | 'edit' | 'gallery' | 'complete' | null;
 
 export function VehicleDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
   const { role } = useAuth();
   const { data: vehicle, isLoading } = useVehicle(id);
-  const updateVehicle = useUpdateVehicle();
-  const softDelete = useSoftDeleteVehicle();
   const restore = useRestoreVehicle();
-  const [editing, setEditing] = useState(false);
+
+  const [openDialog, setOpenDialog] = useState<OpenDialog>(null);
+  const [selectedRow, setSelectedRow] = useState<VehicleRecordRow | null>(null);
+  const [completingSchedule, setCompletingSchedule] = useState<MaintenanceSchedule | null>(null);
+
+  const schedulesQuery = useMaintenanceSchedules(vehicle?.id);
+  const categoriesQuery = useMaintenanceCategories();
+  // Pass the whole query result, not categoriesQuery.data — useVehicleRecords
+  // needs the loading/error state to tell "categories not loaded yet" apart
+  // from "no categories", which is what keeps modification records from
+  // rendering as maintenance during the cold-mount window.
+  const recordsState = useVehicleRecords(vehicle?.id ?? '', categoriesQuery);
+
+  const categoryNames = useMemo(
+    () => new Map((categoriesQuery.data ?? []).map((c) => [c.id, c.attributes.name])),
+    [categoriesQuery.data],
+  );
 
   // Viewers are read-only. Restore is owner-only (server still enforces).
   const canWrite = role === 'owner' || role === 'member';
   const canRestore = role === 'owner';
+
+  const odometer = deriveOdometer(recordsState.rows, vehicle?.attributes.currentMileage);
+
+  const closeDialog = () => setOpenDialog(null);
+
+  const handleQuickAction = (action: QuickAction) => {
+    // 'upload' has no dedicated dialog of its own — it opens the gallery,
+    // which already carries the upload button.
+    setOpenDialog(action === 'upload' ? 'gallery' : action);
+  };
+
+  const handleComplete = (schedule: MaintenanceSchedule) => {
+    setCompletingSchedule(schedule);
+    setOpenDialog('complete');
+  };
+
+  const handleRestore = async () => {
+    if (!vehicle) return;
+    try {
+      await restore.mutateAsync(vehicle.id);
+      toast.success('Vehicle restored');
+    } catch (err) {
+      const apiError = createErrorFromUnknown(err);
+      toast.error(apiError.message || 'Could not restore vehicle');
+    }
+  };
 
   if (isLoading) {
     return (
@@ -62,158 +99,130 @@ export function VehicleDetailPage() {
     return <p className="text-muted-foreground">Vehicle not found.</p>;
   }
 
-  const { attributes } = vehicle;
-  const status = asVehicleStatus(attributes.status);
-  const title =
-    attributes.nickname?.trim() || `${attributes.year} ${attributes.make} ${attributes.model}`;
-
-  const handleUpdate = async (values: VehicleFormInput) => {
-    const patch: UpdateVehicleAttributes = {
-      nickname: values.nickname || undefined,
-      currentMileage: values.currentMileage,
-      notes: values.notes || undefined,
-    };
-    try {
-      await updateVehicle.mutateAsync({ id: vehicle.id, attributes: patch });
-      toast.success('Vehicle updated');
-      setEditing(false);
-    } catch (err) {
-      const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not update vehicle');
-    }
-  };
-
-  const handleDelete = async () => {
-    try {
-      await softDelete.mutateAsync(vehicle.id);
-      toast.success('Vehicle deleted');
-      navigate('/vehicles', { replace: true });
-    } catch (err) {
-      const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not delete vehicle');
-    }
-  };
-
-  const handleRestore = async () => {
-    try {
-      await restore.mutateAsync(vehicle.id);
-      toast.success('Vehicle restored');
-    } catch (err) {
-      const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not restore vehicle');
-    }
-  };
+  const maintenanceDialogOpen = openDialog === 'maintenance' || openDialog === 'modification';
+  const maintenanceDialogKind = openDialog === 'modification' ? 'modification' : 'maintenance';
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold">{title}</h1>
-            {status && <StatusBadge status={status} />}
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {attributes.year} {attributes.make} {attributes.model}
-            {attributes.trim ? ` ${attributes.trim}` : ''}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {canWrite && !editing && (
-            <Button type="button" variant="outline" onClick={() => setEditing(true)}>
-              Edit
-            </Button>
-          )}
-          {canWrite && (
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => void handleDelete()}
-              disabled={softDelete.isPending}
-            >
-              Delete
-            </Button>
-          )}
+    <div className="mx-auto w-full max-w-[1600px]">
+      {!!recordsState.categoriesError && (
+        <p className="mb-4 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-subtle-foreground">
+          {createErrorFromUnknown(recordsState.categoriesError).message ||
+            'Could not load maintenance categories — modification records may appear misfiled until this is retried.'}
+        </p>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)] lg:items-start">
+        <aside className="grid gap-4 lg:sticky lg:top-16 lg:self-start">
+          <VehicleIdentityRail
+            vehicle={vehicle}
+            odometer={odometer}
+            canWrite={canWrite}
+            onEdit={() => setOpenDialog('edit')}
+            onViewGallery={() => setOpenDialog('gallery')}
+          />
           {canRestore && (
             <Button
               type="button"
               variant="outline"
+              className="w-full"
               onClick={() => void handleRestore()}
               disabled={restore.isPending}
             >
               Restore
             </Button>
           )}
+          <VehicleQuickActions
+            canWrite={canWrite}
+            canDelete={canWrite}
+            onAction={handleQuickAction}
+          />
+        </aside>
+
+        <div className="grid gap-4">
+          <VehicleStatStrip
+            rows={recordsState.rows}
+            schedules={schedulesQuery.data ?? []}
+            currentMileage={vehicle.attributes.currentMileage}
+            partial={recordsState.hasMore}
+          />
+          <UpcomingScheduleStrip
+            schedules={schedulesQuery.data ?? []}
+            categoryNames={categoryNames}
+            canWrite={canWrite}
+            onAddSchedule={() => setOpenDialog('schedule')}
+            onComplete={handleComplete}
+          />
+          <VehicleRecordsTable
+            rows={recordsState.rows}
+            total={recordsState.total}
+            hasMore={recordsState.hasMore}
+            isLoading={recordsState.isLoading}
+            onLoadMore={recordsState.loadMore}
+            onSelectRow={setSelectedRow}
+          />
+          <VehicleTrends vehicleId={vehicle.id} />
         </div>
       </div>
 
-      <Card>
-        <CardContent className="pt-6">
-          {editing ? (
-            <VehicleForm
-              mode="edit"
-              defaultValues={{
-                make: attributes.make,
-                model: attributes.model,
-                year: attributes.year,
-                nickname: attributes.nickname ?? '',
-                trim: attributes.trim ?? '',
-                vin: attributes.vin ?? '',
-                currentMileage: attributes.currentMileage,
-                notes: attributes.notes ?? '',
-              }}
-              onSubmit={handleUpdate}
-              onCancel={() => setEditing(false)}
-              submitting={updateVehicle.isPending}
-            />
-          ) : (
-            <dl className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <dt className="text-muted-foreground">Mileage</dt>
-                <dd className="text-foreground">
-                  {typeof attributes.currentMileage === 'number'
-                    ? formatMileage(attributes.currentMileage)
-                    : '—'}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-muted-foreground">VIN</dt>
-                <dd className="text-foreground">{attributes.vin || '—'}</dd>
-              </div>
-              <div className="col-span-2">
-                <dt className="text-muted-foreground">Notes</dt>
-                <dd className="whitespace-pre-wrap text-foreground">{attributes.notes || '—'}</dd>
-              </div>
-            </dl>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Task 15.1 — Vehicle media gallery */}
-      <VehicleMediaGallery vehicleId={vehicle.id} canWrite={canWrite} />
-
-      {/* Task 15.2 — Mileage history + trend */}
-      <VehicleMileageSection
+      <EditVehicleDialog
+        open={openDialog === 'edit'}
+        onOpenChange={(open) => !open && closeDialog()}
         vehicleId={vehicle.id}
-        currentMileage={attributes.currentMileage}
+      />
+      <LogMileageDialog
+        open={openDialog === 'mileage'}
+        onOpenChange={(open) => !open && closeDialog()}
+        vehicleId={vehicle.id}
+        defaultMileage={odometer}
+      />
+      <LogFuelDialog
+        open={openDialog === 'fuel'}
+        onOpenChange={(open) => !open && closeDialog()}
+        vehicleId={vehicle.id}
+        defaultMileage={odometer}
+      />
+      <LogMaintenanceDialog
+        open={maintenanceDialogOpen}
+        onOpenChange={(open) => !open && closeDialog()}
+        vehicleId={vehicle.id}
+        kind={maintenanceDialogKind}
+        defaultMileage={odometer}
+      />
+      <AddScheduleDialog
+        open={openDialog === 'schedule'}
+        onOpenChange={(open) => !open && closeDialog()}
+        vehicleId={vehicle.id}
+      />
+      {completingSchedule && (
+        <CompleteScheduleDialog
+          open={openDialog === 'complete'}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeDialog();
+              setCompletingSchedule(null);
+            }
+          }}
+          schedule={completingSchedule}
+        />
+      )}
+      <DeleteVehicleDialog
+        open={openDialog === 'delete'}
+        onOpenChange={(open) => !open && closeDialog()}
+        vehicleId={vehicle.id}
+      />
+      <PhotoGalleryDialog
+        open={openDialog === 'gallery'}
+        onOpenChange={(open) => !open && closeDialog()}
+        vehicleId={vehicle.id}
         canWrite={canWrite}
       />
 
-      {/* Task 15.3 — Maintenance records, schedules and modifications */}
-      <VehicleMaintenanceSection
+      <VehicleRecordDrawer
+        row={selectedRow}
+        onClose={() => setSelectedRow(null)}
         vehicleId={vehicle.id}
-        currentMileage={attributes.currentMileage}
         canWrite={canWrite}
       />
-
-      {/* Task 15.4 — Fuel logs */}
-      <VehicleFuelSection
-        vehicleId={vehicle.id}
-        currentMileage={attributes.currentMileage}
-        canWrite={canWrite}
-      />
-
-      {/* Task 15.5 — Per-vehicle activity timeline */}
-      <VehicleActivityTimeline vehicleId={vehicle.id} />
     </div>
   );
 }
