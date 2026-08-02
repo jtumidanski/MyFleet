@@ -71,6 +71,10 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
+      # Seeds auth.platform_admins at startup and at first login; never consulted
+      # per request (FR-ADMIN-AUTH-3). Empty by default so a local stack has no
+      # platform admin unless one is asked for.
+      PLATFORM_ADMIN_BOOTSTRAP_EMAILS: ${PLATFORM_ADMIN_BOOTSTRAP_EMAILS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
@@ -101,6 +105,11 @@ services:
       JWKS_URL: http://auth-service:8080/.well-known/jwks.json
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       MEDIA_INTERNAL_URL: http://media-service:8080
+      # Platform admin console: the purge fan-out targets and how long a purge
+      # stays cancellable. Same values as the base ConfigMap.
+      AUTH_INTERNAL_URL: http://auth-service:8080
+      NOTIFICATION_INTERNAL_URL: http://notification-service:8080
+      ADMIN_PURGE_RECOVERY_WINDOW: 120h
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:

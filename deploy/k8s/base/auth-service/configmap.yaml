@@ -16,3 +16,7 @@ data:
   GOOGLE_REDIRECT_URL: "http://localhost/api/auth/callback"
   FLEET_SERVICE_URL: "http://fleet-service:8080"
   COOKIE_SECURE: "false"
+  # Seeds auth.platform_admins at startup and at first login; NEVER consulted
+  # per request (FR-ADMIN-AUTH-3). The table is the runtime source of truth, so
+  # revoking an admin is a DELETE with no redeploy.
+  PLATFORM_ADMIN_BOOTSTRAP_EMAILS: "jtumidanski@gmail.com"

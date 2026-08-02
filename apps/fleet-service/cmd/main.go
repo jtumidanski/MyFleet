@@ -23,6 +23,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/activity"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/admin"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/adminclient"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/dashboard"
 	fleetevents "github.com/jtumidanski/myfleet/apps/fleet-service/internal/events"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
@@ -202,6 +203,51 @@ func main() {
 	// internal-deny rule in the main overlay's ingressroute.
 	mediaClient := mediaclient.NewClient(config.Get("MEDIA_INTERNAL_URL", "http://media-service:8080"))
 
+	// ---- Platform admin console ------------------------------------------
+	//
+	// Registered as its OWN chi group below, a sibling of the authenticated
+	// group. Nothing is shared but the JWT middleware: the separation from the
+	// ordinary tree is the entire safety argument for a cross-fleet API, and
+	// internal/admin/arch_test.go enforces it in both directions (risks.md R7).
+	authAdmin := adminclient.NewAuthClient(config.Get("AUTH_INTERNAL_URL", "http://auth-service:8080"))
+	mediaAdmin := adminclient.NewMediaClient(config.Get("MEDIA_INTERNAL_URL", "http://media-service:8080"))
+	notifAdmin := adminclient.NewNotificationClient(
+		config.Get("NOTIFICATION_INTERNAL_URL", "http://notification-service:8080"))
+
+	adminProc := admin.NewProcessor(log, admin.Deps{
+		DB:            db,
+		Provider:      admin.NewProvider(db),
+		Administrator: admin.NewAdministrator(db),
+		Auth:          authAdmin,
+		AuthUsers:     authAdmin,
+		Downstream: []admin.Downstream{
+			admin.NamedDownstream{Label: "media", Client: mediaAdmin},
+			admin.NamedDownstream{Label: "notification", Client: notifAdmin},
+		},
+		StatsSources: []admin.StatsSource{
+			admin.NamedStatsSource{AttrKey: "users", Service: "auth-service", Fn: authAdmin.Stats},
+			admin.NamedStatsSource{AttrKey: "media_objects", Service: "media-service", Fn: mediaAdmin.Stats},
+			admin.NamedStatsSource{AttrKey: "notifications", Service: "notification-service", Fn: notifAdmin.Stats},
+		},
+		VehicleStatus: adminVehicleStatus{vehicles: vehicleProc, deps: vehicleStatusDeps},
+		Window:        admin.RecoveryWindow(config.Get("ADMIN_PURGE_RECOVERY_WINDOW", "120h")),
+	}, admin.NewTargetResolver(db))
+
+	// Admin purge reaper: hard-delete operations past their recovery window.
+	// Hourly for the same reason as the vehicle sweep — jobs.Every's first tick
+	// is at T+interval — and additionally because the console shows a countdown
+	// to permanence, which a daily cadence would make wrong by up to a day
+	// (design OQ-5).
+	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
+		_, err := database.WithLeaderLock(db, "admin-purge-reap", func() error {
+			return adminProc.ReapDue(ctx)
+		})
+		if err != nil {
+			log.WithError(err).Warn("admin purge reaper failed")
+		}
+		return err
+	})
+
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
 		// Internal routes: no JWT, network-restricted (consumed by other services).
@@ -223,6 +269,17 @@ func main() {
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)
 				activity.InitializeRoutes(log, db, vehicleProc)(pr)
 				dashboard.InitializeRoutes(log, db, scheduleProc, activityProc, vehicleProc)(pr)
+			})
+		}).
+		// The admin tree: its own group, JWT and nothing else shared. Every
+		// handler calls authz.RequirePlatformAdmin; none calls RequireSameFleet.
+		// Public paths are gateway-prefixed /api/fleet/admin/…, which match the
+		// existing priority-100 /api/fleet router and are NOT matched by the
+		// priority-200 internal-deny regex.
+		AddRouteInitializer(func(r chi.Router) {
+			r.Group(func(ar chi.Router) {
+				ar.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
+				admin.InitializeRoutes(log, adminProc)(ar)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {
@@ -255,4 +312,25 @@ func mustJWKSKeyfunc(log *logrus.Logger, jwksURL string, maxAttempts int, delay 
 	}
 	log.WithError(err).Fatal("JWKS keyfunc init failed after all attempts")
 	return nil // unreachable
+}
+
+// adminVehicleStatus adapts the vehicle domain's status machinery to the admin
+// console's port. The adapter lives here, in the composition root, because it is
+// the only place that knows both sides — internal/admin must not import the
+// vehicle domain and call its internals directly.
+//
+// A vehicle that cannot be loaded yields no status rather than an error: the
+// fleet inspector should still render the row, which is the same call
+// StatusDeps.DeriveStatus already makes on a gather failure.
+type adminVehicleStatus struct {
+	vehicles *vehicle.Processor
+	deps     vehicle.StatusDeps
+}
+
+func (a adminVehicleStatus) DeriveStatusByID(vehicleID string, now time.Time) string {
+	m, err := a.vehicles.GetByID(vehicleID)
+	if err != nil {
+		return ""
+	}
+	return a.deps.DeriveStatus(m, now)
 }
