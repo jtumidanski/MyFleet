@@ -876,3 +876,319 @@ func TestContent_lookupErrorIsReturned(t *testing.T) {
 		t.Fatalf("Content = %v, want the lookup error propagated", err)
 	}
 }
+
+// fakeCardGenerator records what was scheduled, so a test can assert both that
+// eligible objects schedule and that ineligible ones do not.
+type fakeCardGenerator struct{ scheduled []CardSource }
+
+func (f *fakeCardGenerator) Generate(src CardSource) { f.scheduled = append(f.scheduled, src) }
+
+// ★ The downgrade matrix (NFR-15). The display case is the one that matters
+// most: it proves the rule did NOT generalise into a next-smaller-available
+// ladder, which would let a detail view asking for display silently receive a
+// 768px image with no way to detect it.
+func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
+	t.Run("card missing, thumbnail present, serves the thumbnail bytes", func(t *testing.T) {
+		db := newConfirmTestDB(t)
+		store := &fakeStore{
+			bucket:    "myfleet-media",
+			getBody:   []byte("original-bytes"),
+			getBodies: map[string][]byte{"fleet-a/thumb.jpg": []byte("thumb-bytes")},
+		}
+		variants := &fakeVariants{refs: map[string]VariantRef{
+			"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+		}}
+		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
+		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+		info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+		if err != nil {
+			t.Fatalf("Content(card) = %v, want the thumbnail downgrade", err)
+		}
+		if got := readAllAndClose(t, rc); got != "thumb-bytes" {
+			t.Fatalf("body = %q, want thumb-bytes", got)
+		}
+		// The response must describe the bytes actually sent, resolved through
+		// the allowlist exactly as the normal variant path does.
+		if info.ContentType != "image/jpeg" {
+			t.Fatalf("ContentType = %q, want the thumbnail row's image/jpeg", info.ContentType)
+		}
+		if info.Size != 0 {
+			t.Fatalf("Size = %d, want 0 — no variant response carries Content-Length", info.Size)
+		}
+	})
+
+	t.Run("card missing and thumbnail missing is 404", func(t *testing.T) {
+		db := newConfirmTestDB(t)
+		store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+		variants := &fakeVariants{} // no rows at all
+		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
+		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+		_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+		if !errors.Is(err, server.ErrNotFound) {
+			t.Fatalf("Content(card) = %v, want ErrNotFound", err)
+		}
+		if rc != nil {
+			_ = rc.Close()
+			t.Fatal("Content returned a body alongside the 404")
+		}
+	})
+
+	t.Run("display missing still 404s even with a thumbnail present", func(t *testing.T) {
+		db := newConfirmTestDB(t)
+		store := &fakeStore{
+			bucket:    "myfleet-media",
+			getBody:   []byte("original-bytes"),
+			getBodies: map[string][]byte{"fleet-a/thumb.jpg": []byte("thumb-bytes")},
+		}
+		variants := &fakeVariants{refs: map[string]VariantRef{
+			"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+		}}
+		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
+		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+		_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentDisplay)
+		if !errors.Is(err, server.ErrNotFound) {
+			t.Fatalf("Content(display) = %v, want ErrNotFound — the downgrade must not generalise", err)
+		}
+		if rc != nil {
+			_ = rc.Close()
+			t.Fatal("a missing display served bytes; only card downgrades")
+		}
+	})
+
+	t.Run("card row present but object missing downgrades AND reschedules", func(t *testing.T) {
+		// Store/DB drift. Regenerating repairs it: Upsert rewrites the row and
+		// PutObject restores the bytes. Scheduling only on a MISSING row would
+		// leave a permanently broken card row that downgrades on every request
+		// forever, with no path back.
+		db := newConfirmTestDB(t)
+		store := &fakeStore{
+			bucket:    "myfleet-media",
+			getBody:   []byte("original-bytes"),
+			getBodies: map[string][]byte{"fleet-a/thumb.jpg": []byte("thumb-bytes")},
+			missing:   map[string]bool{"fleet-a/card.jpg": true},
+		}
+		variants := &fakeVariants{refs: map[string]VariantRef{
+			"card":      {ObjectKey: "fleet-a/card.jpg", ContentType: "image/jpeg"},
+			"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+		}}
+		cards := &fakeCardGenerator{}
+		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants,
+			testAllowlist(t), WithCardGenerator(cards))
+		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+		ready, err := pr.a.Update(obj.WithStatus(StatusReady))
+		if err != nil {
+			t.Fatalf("mark ready: %v", err)
+		}
+
+		_, rc, err := pr.Content(context.Background(), ready.ID(), "fleet-a", ContentCard)
+		if err != nil {
+			t.Fatalf("Content(card) with store drift = %v, want the thumbnail downgrade", err)
+		}
+		if got := readAllAndClose(t, rc); got != "thumb-bytes" {
+			t.Fatalf("body = %q, want thumb-bytes", got)
+		}
+		if len(cards.scheduled) != 1 {
+			t.Fatalf("scheduled %d generations for a card row whose object is gone, want 1 — "+
+				"regeneration is what repairs the drift", len(cards.scheduled))
+		}
+	})
+}
+
+// A present card is served directly — the downgrade is a fallback, not a
+// redirect, and it must not fire when there is nothing to fall back from.
+func TestContent_cardPresentServesTheCardBytes(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{
+		bucket:    "myfleet-media",
+		getBody:   []byte("original-bytes"),
+		getBodies: map[string][]byte{"fleet-a/card.jpg": []byte("card-bytes")},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"card": {ObjectKey: "fleet-a/card.jpg", ContentType: "image/jpeg"},
+	}}
+	cards := &fakeCardGenerator{}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants,
+		testAllowlist(t), WithCardGenerator(cards))
+	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+	_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+	if err != nil {
+		t.Fatalf("Content(card): %v", err)
+	}
+	if got := readAllAndClose(t, rc); got != "card-bytes" {
+		t.Fatalf("body = %q, want card-bytes", got)
+	}
+	if len(cards.scheduled) != 0 {
+		t.Fatalf("scheduled %d generations for a card that already exists, want 0", len(cards.scheduled))
+	}
+}
+
+// A database error is a fault, not a miss: it must still 500, with no downgrade
+// attempted. A 404 here would hide a real problem, and GetByID just read the
+// same database successfully.
+func TestContent_cardLookupErrorIs500WithNoDowngrade(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	boom := errors.New("database is on fire")
+	variants := &fakeVariants{err: boom}
+	cards := &fakeCardGenerator{}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants,
+		testAllowlist(t), WithCardGenerator(cards))
+	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+	_, _, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+	if !errors.Is(err, boom) {
+		t.Fatalf("Content(card) = %v, want the underlying lookup error", err)
+	}
+	if len(variants.calls) != 1 {
+		t.Fatalf("lookup ran %v; a fault must not trigger a second, downgrading lookup", variants.calls)
+	}
+	if len(cards.scheduled) != 0 {
+		t.Fatalf("scheduled %d generations on a database fault, want 0", len(cards.scheduled))
+	}
+}
+
+// Scheduling eligibility (FR-3.2, FR-3.3, NFR-18).
+func TestContent_schedulesCardGenerationOnlyWhenEligible(t *testing.T) {
+	t.Run("a ready image schedules, with the source the generator needs", func(t *testing.T) {
+		db := newConfirmTestDB(t)
+		store := &fakeStore{
+			bucket:    "myfleet-media",
+			getBody:   []byte("original-bytes"),
+			getBodies: map[string][]byte{"fleet-a/thumb.jpg": []byte("thumb-bytes")},
+		}
+		variants := &fakeVariants{refs: map[string]VariantRef{
+			"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+		}}
+		cards := &fakeCardGenerator{}
+		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants,
+			testAllowlist(t), WithCardGenerator(cards))
+		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+		ready, err := pr.a.Update(obj.WithStatus(StatusReady))
+		if err != nil {
+			t.Fatalf("mark ready: %v", err)
+		}
+
+		_, rc, err := pr.Content(context.Background(), ready.ID(), "fleet-a", ContentCard)
+		if err != nil {
+			t.Fatalf("Content(card): %v", err)
+		}
+		_ = rc.Close()
+
+		if len(cards.scheduled) != 1 {
+			t.Fatalf("scheduled %d generations, want 1", len(cards.scheduled))
+		}
+		got := cards.scheduled[0]
+		if got.MediaObjectID != ready.ID() || got.FleetID != "fleet-a" ||
+			got.ObjectKey != ready.ObjectKey() || got.ContentType != "image/png" {
+			t.Fatalf("CardSource = %+v, want the object's own id/fleet/key/type", got)
+		}
+	})
+
+	t.Run("a non-ready object schedules nothing", func(t *testing.T) {
+		db := newConfirmTestDB(t)
+		store := &fakeStore{
+			bucket:    "myfleet-media",
+			getBody:   []byte("original-bytes"),
+			getBodies: map[string][]byte{"fleet-a/thumb.jpg": []byte("thumb-bytes")},
+		}
+		variants := &fakeVariants{refs: map[string]VariantRef{
+			"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+		}}
+		cards := &fakeCardGenerator{}
+		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants,
+			testAllowlist(t), WithCardGenerator(cards))
+		// seedReadyObject leaves the object in the uploaded state; that is
+		// exactly the ineligible case.
+		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+		_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+		if err != nil {
+			t.Fatalf("Content(card): %v", err)
+		}
+		_ = rc.Close()
+
+		if len(cards.scheduled) != 0 {
+			t.Fatalf("scheduled %d generations for a non-ready object, want 0", len(cards.scheduled))
+		}
+	})
+
+	t.Run("a document schedules nothing", func(t *testing.T) {
+		db := newConfirmTestDB(t)
+		store := &fakeStore{bucket: "myfleet-media", getBody: []byte("pdf-bytes")}
+		variants := &fakeVariants{}
+		cards := &fakeCardGenerator{}
+		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants,
+			testAllowlist(t), WithCardGenerator(cards))
+
+		created, err := pr.InitUpload("fleet-a", "u1", "application/pdf", "manual.pdf")
+		if err != nil {
+			t.Fatalf("init upload: %v", err)
+		}
+		stored, err := pr.StoreContent(context.Background(), created.ID(), "fleet-a",
+			bytes.NewReader([]byte("pdf-bytes")), int64(len("pdf-bytes")))
+		if err != nil {
+			t.Fatalf("store content: %v", err)
+		}
+		if _, err := pr.a.Update(stored.WithStatus(StatusReady)); err != nil {
+			t.Fatalf("mark ready: %v", err)
+		}
+
+		_, _, err = pr.Content(context.Background(), created.ID(), "fleet-a", ContentCard)
+		if !errors.Is(err, server.ErrNotFound) {
+			t.Fatalf("Content(card) on a document = %v, want ErrNotFound", err)
+		}
+		if len(cards.scheduled) != 0 {
+			t.Fatalf("scheduled %d generations for a document, want 0", len(cards.scheduled))
+		}
+	})
+
+	t.Run("a cross-fleet caller schedules nothing and never reaches the lookup", func(t *testing.T) {
+		db := newConfirmTestDB(t)
+		store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+		variants := &fakeVariants{}
+		cards := &fakeCardGenerator{}
+		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants,
+			testAllowlist(t), WithCardGenerator(cards))
+		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+		_, _, err := pr.Content(context.Background(), obj.ID(), "fleet-b", ContentCard)
+		if !errors.Is(err, server.ErrNotFound) {
+			t.Fatalf("cross-fleet Content(card) = %v, want ErrNotFound — never 403", err)
+		}
+		if len(variants.calls) != 0 {
+			t.Fatalf("variant lookup ran %v for a cross-fleet caller; authorization must come first", variants.calls)
+		}
+		if len(cards.scheduled) != 0 {
+			t.Fatalf("a caller who cannot read the object scheduled %d generations, want 0", len(cards.scheduled))
+		}
+	})
+}
+
+// With no generator wired — MEDIA_LAZY_VARIANT_CONCURRENCY=0, a supported
+// deployment — the downgrade still works and Content does not panic on a nil
+// dependency.
+func TestContent_downgradesWithNoGeneratorWired(t *testing.T) {
+	db := newConfirmTestDB(t)
+	store := &fakeStore{
+		bucket:    "myfleet-media",
+		getBody:   []byte("original-bytes"),
+		getBodies: map[string][]byte{"fleet-a/thumb.jpg": []byte("thumb-bytes")},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+	}}
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
+	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
+
+	_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+	if err != nil {
+		t.Fatalf("Content(card) with no generator = %v, want the thumbnail downgrade", err)
+	}
+	if got := readAllAndClose(t, rc); got != "thumb-bytes" {
+		t.Fatalf("body = %q, want thumb-bytes", got)
+	}
+}
