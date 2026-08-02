@@ -42,13 +42,30 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          # This is a go.work workspace with no go.sum at the repo root, so
-          # setup-go's default lookup finds no dependency file, silently skips
-          # both cache restore and save, and every run recompiles the whole
-          # dependency graph from cold. Point it at the per-module sums.
-          cache-dependency-path: |
-            **/go.sum
-            go.work.sum
+          # Cache handled explicitly below. setup-go's built-in cache derives
+          # its key from OS/arch/go-version/file-hash only, with no way to
+          # namespace it and no restore-keys fallback — so every Go job in the
+          # repo computes the same key and races to save. Observed on run
+          # 30760611639: lint-go won, backend logged "Failed to save: Unable to
+          # reserve cache … another job may be creating this cache", and the
+          # cache that landed was golangci-lint's GOCACHE, which holds no -race
+          # objects and so does nothing for `make test`.
+          cache: false
+
+      # Keyed per workload, so the race-instrumented objects `make test` needs
+      # are not overwritten by a lint job's cache. The restore-keys fallback
+      # means a dependency bump degrades to a warm-ish cache rather than a cold
+      # one. Shares a prefix with pr.yml's backend job on purpose: they do the
+      # same work, so a PR run should restore what main last built.
+      - name: Cache Go build and module caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-
 
       - name: Vet
         run: make vet

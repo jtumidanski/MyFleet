@@ -13,13 +13,19 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          # This is a go.work workspace with no go.sum at the repo root, so
-          # setup-go's default lookup finds no dependency file, silently skips
-          # both cache restore and save, and every run recompiles the whole
-          # dependency graph from cold. Point it at the per-module sums.
-          cache-dependency-path: |
-            **/go.sum
-            go.work.sum
+          cache: false          # see main.yml's backend job for why
+
+      # Same key prefix as main.yml's backend job, deliberately: a PR run should
+      # restore the cache main last built for identical work.
+      - name: Cache Go build and module caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-
 
       - name: Vet
         run: make vet
@@ -42,12 +48,21 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
-          # golangci-lint type-checks every package, so it benefits from the
-          # same build cache the `backend` job needs. See the note there for why
-          # the default lookup misses in a go.work workspace.
-          cache-dependency-path: |
-            **/go.sum
-            go.work.sum
+          cache: false          # see main.yml's backend job for why
+
+      # golangci-lint type-checks every package, so it wants a Go build cache
+      # too — but its own, under a distinct prefix. Sharing one with the test
+      # jobs means whichever finishes first decides whether the cache holds
+      # -race objects or lint objects.
+      - name: Cache Go build and module caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-lint-${{ runner.os }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-lint-${{ runner.os }}-
 
       - name: Cache lint tooling
         uses: actions/cache@v4
