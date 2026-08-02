@@ -30,6 +30,10 @@ func (f *fakeProvider) GetBySub(sub string) (Model, error) {
 	return Model{}, ErrNotFound
 }
 
+func (f *fakeProvider) ListByIDs(ids []string) ([]Model, error) {
+	return nil, nil
+}
+
 type fakeAdmin struct{ created, updated int }
 
 func (f *fakeAdmin) Insert(m Model) (Model, error) { f.created++; return m, nil }

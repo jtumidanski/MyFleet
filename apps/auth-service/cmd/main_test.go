@@ -35,6 +35,10 @@ func (f *fakeUsers) GetBySub(string) (user.Model, error) {
 	return user.Model{}, errors.New("resolver must look users up by internal id, not google_sub")
 }
 
+func (f *fakeUsers) ListByIDs([]string) ([]user.Model, error) {
+	return nil, nil
+}
+
 func usersWith(id, email string) *fakeUsers {
 	return &fakeUsers{byID: map[string]user.Model{
 		id: user.NewBuilder().SetEmail(email).Build(),
