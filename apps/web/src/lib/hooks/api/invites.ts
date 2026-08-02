@@ -69,6 +69,26 @@ export function useCreateInvite(fleetId: string) {
 }
 
 /**
+ * Maps invite API failures to copy a person can act on (FR-UI-4).
+ *
+ * Kept here rather than in a shared error module: this is invite-specific copy,
+ * and the two 429s need different sentences, which a generic status-to-string
+ * map could not express.
+ */
+export function inviteErrorMessage(err: unknown, action: 'create' | 'resend'): string {
+  const apiError = createErrorFromUnknown(err);
+  if (apiError.status === 429) {
+    return action === 'create'
+      ? "You've sent too many invites today. Try again tomorrow."
+      : 'You just resent this invite. Wait a few minutes before trying again.';
+  }
+  if (apiError.status === 409 && action === 'resend') {
+    return 'That invite has already been accepted.';
+  }
+  return apiError.message || `Could not ${action} invite`;
+}
+
+/**
  * DELETE /api/fleet/invites/{id} — revoke invite (owner-only).
  * Invalidates inviteKeys.lists() on settle.
  */
@@ -102,6 +122,28 @@ export function useAcceptInvite() {
     onError: (err) => {
       const apiError = createErrorFromUnknown(err);
       toast.error(apiError.message || 'Could not accept invite');
+    },
+  });
+}
+
+/**
+ * POST /api/fleet/fleets/{fleetId}/invites/{inviteId}/resend — owner-only.
+ *
+ * Invalidating the list is REQUIRED, not cosmetic: resend rotates the token, so
+ * a stale cache would hand the copy-link button a dead token.
+ */
+export function useResendInvite(fleetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) => inviteService.resendInvite(fleetId, inviteId),
+    onSuccess: () => {
+      toast.success('Invite resent');
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: inviteKeys.lists() });
+    },
+    onError: (err) => {
+      toast.error(inviteErrorMessage(err, 'resend'));
     },
   });
 }
