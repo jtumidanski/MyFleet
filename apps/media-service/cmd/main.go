@@ -20,6 +20,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/admin"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/mediaobject"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processedevents"
@@ -130,10 +131,12 @@ func main() {
 
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
-		// Internal route: no JWT, network-restricted (consumed by fleet-service
-		// to validate documentMediaIds). Kept off the public internet by the
-		// priority-200 internal-deny rule in the main overlay's ingressroute.
+		// Internal routes: no JWT, network-restricted. mediaobject's is consumed
+		// by fleet-service to validate documentMediaIds; admin's is its slice of
+		// the platform purge protocol. Both are kept off the public internet by
+		// the priority-200 internal-deny rule in the main overlay's ingressroute.
 		AddRouteInitializer(mediaobject.InitializeInternalRoutes(log, db)).
+		AddRouteInitializer(admin.InitializeInternalRoutes(log, db, store)).
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))
