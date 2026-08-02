@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/png"
 	"io"
 	"testing"
 
@@ -59,11 +61,18 @@ func (f *fakeObjectAdmin) SoftDelete(_ string) (mediaobject.Model, error) {
 	return mediaobject.Model{}, nil
 }
 
-// fakeVariantAdmin implements mediavariant.Administrator; records calls.
-type fakeVariantAdmin struct{ called bool }
+// fakeVariantAdmin implements mediavariant.Administrator; records calls and the
+// models it was handed, so a test can assert exactly which variants were built.
+type fakeVariantAdmin struct {
+	called       bool
+	replaceCalls int
+	replaced     []mediavariant.Model
+}
 
-func (f *fakeVariantAdmin) ReplaceForMediaObject(_ string, _ []mediavariant.Model) error {
+func (f *fakeVariantAdmin) ReplaceForMediaObject(_ string, variants []mediavariant.Model) error {
 	f.called = true
+	f.replaceCalls++
+	f.replaced = variants
 	return nil
 }
 
@@ -264,6 +273,25 @@ func TestResizeDims_squareExactEdge(t *testing.T) {
 	}
 }
 
+// The card variant's max edge, exercised on the four shapes that matter: a
+// landscape original, a portrait one, one already exactly at the edge, and one
+// smaller than the edge — which must NOT be upscaled, because inventing pixels
+// costs bytes and buys nothing (NFR-12).
+func TestResizeDims_cardMaxEdge(t *testing.T) {
+	if w, h := ResizeDims(4000, 3000, cardMaxEdge); w != 768 || h != 576 {
+		t.Fatalf("landscape card dims: want (768,576), got (%d,%d)", w, h)
+	}
+	if w, h := ResizeDims(3000, 4000, cardMaxEdge); w != 576 || h != 768 {
+		t.Fatalf("portrait card dims: want (576,768), got (%d,%d)", w, h)
+	}
+	if w, h := ResizeDims(768, 768, cardMaxEdge); w != 768 || h != 768 {
+		t.Fatalf("square at edge: want (768,768), got (%d,%d)", w, h)
+	}
+	if w, h := ResizeDims(600, 400, cardMaxEdge); w != 600 || h != 400 {
+		t.Fatalf("must not upscale below the card edge: want (600,400), got (%d,%d)", w, h)
+	}
+}
+
 // bytesStore returns fixed bytes from GetObject so the decode path can be
 // exercised with content that is not a valid image.
 type bytesStore struct{ data []byte }
@@ -342,5 +370,117 @@ func TestHandle_missingOriginalMarksFailedAndProcessed(t *testing.T) {
 	}
 	if !recorded {
 		t.Fatal("event was not marked processed")
+	}
+}
+
+// pngBytes encodes a blank PNG of the requested size. The worker decodes
+// whatever bytes the store returns, so a real encoded image is the only way to
+// exercise the resize path end to end.
+func pngBytes(t *testing.T, w, h int) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, w, h))); err != nil {
+		t.Fatalf("encode png: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// TestHandle_generatesThumbnailCardAndDisplay pins the whole derived set: one
+// decode of the original produces exactly three renditions, each scaled to its
+// own max edge, persisted in ONE ReplaceForMediaObject call — which is what
+// keeps a redelivered event idempotent (NFR-13). A second delivery of the same
+// event does no work at all, because the ledger short-circuits it.
+func TestHandle_generatesThumbnailCardAndDisplay(t *testing.T) {
+	db := newWorkerTestDB(t)
+	dedupe := processedevents.New(logrus.New(), db)
+
+	obj := buildProcessingObj(t)
+	objStore := &bytesStore{data: pngBytes(t, 2000, 1000)}
+	varAdmin := &fakeVariantAdmin{}
+
+	worker := NewWorker(logrus.New(), objStore, &fakeProvider{m: obj}, &fakeObjectAdmin{}, varAdmin, dedupe)
+
+	env := events.Envelope{
+		EventID: "evt-three-variants",
+		Type:    mediaobject.EventTypeMediaUploaded,
+		Data:    map[string]any{"media_id": "media-1"},
+	}
+	if err := worker.handle(context.Background(), env); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+
+	if len(varAdmin.replaced) != 3 {
+		t.Fatalf("persisted %d variants, want exactly 3", len(varAdmin.replaced))
+	}
+	got := map[mediavariant.Variant][2]int{}
+	for _, v := range varAdmin.replaced {
+		got[v.Variant()] = [2]int{v.Width(), v.Height()}
+	}
+	want := map[mediavariant.Variant][2]int{
+		mediavariant.VariantThumbnail: {320, 160},
+		mediavariant.VariantCard:      {768, 384},
+		mediavariant.VariantDisplay:   {1280, 640},
+	}
+	for kind, dims := range want {
+		if got[kind] != dims {
+			t.Fatalf("%s dims = %v, want %v", kind, got[kind], dims)
+		}
+	}
+
+	// Redelivery: the object is not re-fetched as processing, and no second
+	// write happens. One ReplaceForMediaObject call, total.
+	if err := worker.handle(context.Background(), env); err != nil {
+		t.Fatalf("handle on redelivery: %v", err)
+	}
+	if varAdmin.replaceCalls != 1 {
+		t.Fatalf("ReplaceForMediaObject ran %d times across two deliveries, want 1", varAdmin.replaceCalls)
+	}
+}
+
+// A PNG original keeps its encoding through every variant, card included:
+// re-encoding a PNG as JPEG would introduce artefacts on exactly the flat-colour
+// images PNG is chosen for.
+func TestHandle_pngOriginalProducesPngCard(t *testing.T) {
+	db := newWorkerTestDB(t)
+	dedupe := processedevents.New(logrus.New(), db)
+
+	obj, err := mediaobject.NewBuilder().
+		SetID("media-png").
+		SetFleetID("fleet-1").
+		SetUploadedByUserID("user-1").
+		SetBucket("bucket").
+		SetObjectKey("fleet-1/media-png/original.png").
+		SetContentType("image/png").
+		SetOriginalFilename("original.png").
+		SetStatus(mediaobject.StatusProcessing).
+		Build()
+	if err != nil {
+		t.Fatalf("build media object: %v", err)
+	}
+
+	varAdmin := &fakeVariantAdmin{}
+	worker := NewWorker(logrus.New(), &bytesStore{data: pngBytes(t, 1000, 1000)},
+		&fakeProvider{m: obj}, &fakeObjectAdmin{}, varAdmin, dedupe)
+
+	env := events.Envelope{
+		EventID: "evt-png",
+		Type:    mediaobject.EventTypeMediaUploaded,
+		Data:    map[string]any{"media_id": "media-png"},
+	}
+	if err := worker.handle(context.Background(), env); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+
+	var card mediavariant.Model
+	for _, v := range varAdmin.replaced {
+		if v.Variant() == mediavariant.VariantCard {
+			card = v
+		}
+	}
+	if card.ContentType() != "image/png" {
+		t.Fatalf("card ContentType = %q, want image/png", card.ContentType())
+	}
+	if card.ObjectKey() != "fleet-1/media-png/card.png" {
+		t.Fatalf("card ObjectKey = %q, want fleet-1/media-png/card.png", card.ObjectKey())
 	}
 }

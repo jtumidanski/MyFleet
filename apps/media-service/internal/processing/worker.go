@@ -1,5 +1,5 @@
 // Package processing implements the in-process Kafka worker pool that turns an
-// uploaded original image into derived variants (thumbnail, display) and marks
+// uploaded original image into derived variants (thumbnail, card, display) and marks
 // the media object ready (design A7 / §7 / §8.3). The pool is self-contained
 // within media-service: it uses a real Kafka consumer group and does not depend
 // on any other service's outbox.
@@ -28,7 +28,11 @@ import (
 
 const (
 	thumbnailMaxEdge = 320
-	displayMaxEdge   = 1280
+	// 768 covers the vehicles-list hero at 1x out to roughly a 2600px viewport
+	// and at 2x out to roughly 1450px, while staying ~2.8x cheaper in pixels
+	// than display. See the task-013 PRD §8.1 for the arithmetic.
+	cardMaxEdge    = 768
+	displayMaxEdge = 1280
 )
 
 // ErrPermanent marks a processing failure that cannot plausibly succeed on a
@@ -165,12 +169,13 @@ func (w *Worker) handle(ctx context.Context, e events.Envelope) error {
 		return fmt.Errorf("decode original %s: %w", obj.ObjectKey(), err)
 	}
 
-	built := make([]mediavariant.Model, 0, 2)
+	built := make([]mediavariant.Model, 0, 3)
 	for _, spec := range []struct {
 		kind    mediavariant.Variant
 		maxEdge int
 	}{
 		{mediavariant.VariantThumbnail, thumbnailMaxEdge},
+		{mediavariant.VariantCard, cardMaxEdge},
 		{mediavariant.VariantDisplay, displayMaxEdge},
 	} {
 		v, err := w.generateVariant(ctx, obj, src, spec.kind, spec.maxEdge)
