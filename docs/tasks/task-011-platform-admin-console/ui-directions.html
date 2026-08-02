@@ -1,0 +1,1215 @@
+<title>MyFleet Admin Console — UI Directions</title>
+
+<style>
+  /* ─────────────────────────────────────────────────────────────
+     TOKENS
+     --mf-*  : copied verbatim from apps/web/src/index.css so the
+               mockups are literally the product's palette.
+     --doc-* : chrome for this document only.
+     ───────────────────────────────────────────────────────────── */
+  :root {
+    color-scheme: light;
+
+    --mf-background: 0 0% 100%;
+    --mf-foreground: 222.2 84% 4.9%;
+    --mf-card: 0 0% 100%;
+    --mf-muted: 210 40% 96.1%;
+    --mf-muted-foreground: 215.4 16.3% 46.9%;
+    --mf-accent: 210 40% 96.1%;
+    --mf-accent-foreground: 222.2 47.4% 11.2%;
+    --mf-primary: 222.2 47.4% 11.2%;
+    --mf-primary-foreground: 210 40% 98%;
+    --mf-destructive: 0 84.2% 60.2%;
+    --mf-destructive-foreground: 210 40% 98%;
+    --mf-border: 214.3 31.8% 91.4%;
+    --mf-input: 214.3 31.8% 91.4%;
+
+    --mf-success: 142.4 71.8% 29.2%;
+    --mf-success-subtle: 140.6 84.2% 92.5%;
+    --mf-success-subtle-foreground: 142.8 64.2% 24.1%;
+    --mf-success-border: 141 78.9% 85.1%;
+    --mf-warning: 26 90.5% 37.1%;
+    --mf-warning-subtle: 48 96.5% 88.8%;
+    --mf-warning-subtle-foreground: 22.7 82.5% 31.4%;
+    --mf-warning-border: 48 96.6% 76.7%;
+    --mf-danger: 0 72.2% 41.1%;
+    --mf-danger-subtle: 0 93.3% 94.1%;
+    --mf-danger-subtle-foreground: 0 70% 35.3%;
+    --mf-danger-border: 0 96.3% 89.4%;
+    --mf-info: 224.3 76.3% 48%;
+    --mf-info-subtle: 214.3 94.6% 92.7%;
+    --mf-info-subtle-foreground: 226 70.7% 40.2%;
+    --mf-info-border: 213.3 96.9% 87.3%;
+
+    --doc-ground: hsl(220 22% 96%);
+    --doc-surface: hsl(0 0% 100%);
+    --doc-sunken: hsl(220 20% 98%);
+    --doc-ink: hsl(222 47% 11%);
+    --doc-ink-soft: hsl(215 16% 44%);
+    --doc-ink-faint: hsl(215 14% 58%);
+    --doc-rule: hsl(214 25% 88%);
+    --doc-rule-soft: hsl(214 28% 93%);
+    --doc-accent: hsl(224 76% 44%);
+    --doc-shadow: 0 1px 2px hsl(222 47% 11% / .06), 0 8px 24px -12px hsl(222 47% 11% / .18);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+
+      --mf-background: 222.2 84% 4.9%;
+      --mf-foreground: 210 40% 98%;
+      --mf-card: 222.2 84% 4.9%;
+      --mf-muted: 217.2 32.6% 17.5%;
+      --mf-muted-foreground: 215 20.2% 65.1%;
+      --mf-accent: 217.2 32.6% 17.5%;
+      --mf-accent-foreground: 210 40% 98%;
+      --mf-primary: 210 40% 98%;
+      --mf-primary-foreground: 222.2 47.4% 11.2%;
+      --mf-destructive: 0 62.8% 30.6%;
+      --mf-destructive-foreground: 210 40% 98%;
+      --mf-border: 217.2 32.6% 17.5%;
+      --mf-input: 217.2 32.6% 17.5%;
+
+      --mf-success: 141.7 76.6% 73.1%;
+      --mf-success-subtle: 142 40% 14%;
+      --mf-success-subtle-foreground: 142 70% 78%;
+      --mf-success-border: 142 35% 24%;
+      --mf-warning: 43.3 96.4% 56.3%;
+      --mf-warning-subtle: 30 45% 14%;
+      --mf-warning-subtle-foreground: 43 90% 76%;
+      --mf-warning-border: 32 40% 25%;
+      --mf-danger: 0 90.6% 70.8%;
+      --mf-danger-subtle: 0 45% 15%;
+      --mf-danger-subtle-foreground: 0 90% 80%;
+      --mf-danger-border: 0 40% 26%;
+      --mf-info: 213.1 93.9% 67.8%;
+      --mf-info-subtle: 217 45% 17%;
+      --mf-info-subtle-foreground: 213 92% 80%;
+      --mf-info-border: 217 40% 28%;
+
+      --doc-ground: hsl(222 47% 6%);
+      --doc-surface: hsl(222 40% 9%);
+      --doc-sunken: hsl(222 44% 7%);
+      --doc-ink: hsl(210 40% 96%);
+      --doc-ink-soft: hsl(215 20% 64%);
+      --doc-ink-faint: hsl(215 18% 52%);
+      --doc-rule: hsl(217 30% 20%);
+      --doc-rule-soft: hsl(217 32% 15%);
+      --doc-accent: hsl(213 94% 68%);
+      --doc-shadow: 0 1px 2px hsl(0 0% 0% / .3), 0 8px 24px -12px hsl(0 0% 0% / .6);
+    }
+  }
+
+  /* Viewer toggle must beat the media query in BOTH directions. */
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --mf-background: 0 0% 100%; --mf-foreground: 222.2 84% 4.9%; --mf-card: 0 0% 100%;
+    --mf-muted: 210 40% 96.1%; --mf-muted-foreground: 215.4 16.3% 46.9%;
+    --mf-accent: 210 40% 96.1%; --mf-accent-foreground: 222.2 47.4% 11.2%;
+    --mf-primary: 222.2 47.4% 11.2%; --mf-primary-foreground: 210 40% 98%;
+    --mf-destructive: 0 84.2% 60.2%; --mf-destructive-foreground: 210 40% 98%;
+    --mf-border: 214.3 31.8% 91.4%; --mf-input: 214.3 31.8% 91.4%;
+    --mf-success: 142.4 71.8% 29.2%; --mf-success-subtle: 140.6 84.2% 92.5%;
+    --mf-success-subtle-foreground: 142.8 64.2% 24.1%; --mf-success-border: 141 78.9% 85.1%;
+    --mf-warning: 26 90.5% 37.1%; --mf-warning-subtle: 48 96.5% 88.8%;
+    --mf-warning-subtle-foreground: 22.7 82.5% 31.4%; --mf-warning-border: 48 96.6% 76.7%;
+    --mf-danger: 0 72.2% 41.1%; --mf-danger-subtle: 0 93.3% 94.1%;
+    --mf-danger-subtle-foreground: 0 70% 35.3%; --mf-danger-border: 0 96.3% 89.4%;
+    --mf-info: 224.3 76.3% 48%; --mf-info-subtle: 214.3 94.6% 92.7%;
+    --mf-info-subtle-foreground: 226 70.7% 40.2%; --mf-info-border: 213.3 96.9% 87.3%;
+    --doc-ground: hsl(220 22% 96%); --doc-surface: hsl(0 0% 100%); --doc-sunken: hsl(220 20% 98%);
+    --doc-ink: hsl(222 47% 11%); --doc-ink-soft: hsl(215 16% 44%); --doc-ink-faint: hsl(215 14% 58%);
+    --doc-rule: hsl(214 25% 88%); --doc-rule-soft: hsl(214 28% 93%); --doc-accent: hsl(224 76% 44%);
+    --doc-shadow: 0 1px 2px hsl(222 47% 11% / .06), 0 8px 24px -12px hsl(222 47% 11% / .18);
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --mf-background: 222.2 84% 4.9%; --mf-foreground: 210 40% 98%; --mf-card: 222.2 84% 4.9%;
+    --mf-muted: 217.2 32.6% 17.5%; --mf-muted-foreground: 215 20.2% 65.1%;
+    --mf-accent: 217.2 32.6% 17.5%; --mf-accent-foreground: 210 40% 98%;
+    --mf-primary: 210 40% 98%; --mf-primary-foreground: 222.2 47.4% 11.2%;
+    --mf-destructive: 0 62.8% 30.6%; --mf-destructive-foreground: 210 40% 98%;
+    --mf-border: 217.2 32.6% 17.5%; --mf-input: 217.2 32.6% 17.5%;
+    --mf-success: 141.7 76.6% 73.1%; --mf-success-subtle: 142 40% 14%;
+    --mf-success-subtle-foreground: 142 70% 78%; --mf-success-border: 142 35% 24%;
+    --mf-warning: 43.3 96.4% 56.3%; --mf-warning-subtle: 30 45% 14%;
+    --mf-warning-subtle-foreground: 43 90% 76%; --mf-warning-border: 32 40% 25%;
+    --mf-danger: 0 90.6% 70.8%; --mf-danger-subtle: 0 45% 15%;
+    --mf-danger-subtle-foreground: 0 90% 80%; --mf-danger-border: 0 40% 26%;
+    --mf-info: 213.1 93.9% 67.8%; --mf-info-subtle: 217 45% 17%;
+    --mf-info-subtle-foreground: 213 92% 80%; --mf-info-border: 217 40% 28%;
+    --doc-ground: hsl(222 47% 6%); --doc-surface: hsl(222 40% 9%); --doc-sunken: hsl(222 44% 7%);
+    --doc-ink: hsl(210 40% 96%); --doc-ink-soft: hsl(215 20% 64%); --doc-ink-faint: hsl(215 18% 52%);
+    --doc-rule: hsl(217 30% 20%); --doc-rule-soft: hsl(217 32% 15%); --doc-accent: hsl(213 94% 68%);
+    --doc-shadow: 0 1px 2px hsl(0 0% 0% / .3), 0 8px 24px -12px hsl(0 0% 0% / .6);
+  }
+
+  /* ───────────────────────── DOCUMENT CHROME ───────────────────────── */
+
+  body {
+    background: var(--doc-ground);
+    color: var(--doc-ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px 96px; }
+  .col { max-width: 72ch; }
+
+  .masthead {
+    padding: 72px 0 40px;
+    border-bottom: 1px solid var(--doc-rule);
+    margin-bottom: 48px;
+  }
+  .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--doc-accent); margin: 0 0 16px;
+  }
+  h1 {
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    font-size: clamp(32px, 5vw, 46px); line-height: 1.1; font-weight: 500;
+    letter-spacing: -.02em; text-wrap: balance; margin: 0 0 20px;
+  }
+  .standfirst { font-size: 18px; color: var(--doc-ink-soft); margin: 0; text-wrap: pretty; }
+
+  h2 {
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+    font-size: 28px; font-weight: 500; letter-spacing: -.015em;
+    margin: 0 0 8px; text-wrap: balance;
+  }
+  h3 {
+    font-size: 15px; font-weight: 650; letter-spacing: -.005em;
+    margin: 32px 0 8px;
+  }
+  p { margin: 0 0 16px; text-wrap: pretty; }
+  a { color: var(--doc-accent); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .875em; background: var(--doc-sunken);
+    border: 1px solid var(--doc-rule-soft); border-radius: 4px; padding: .1em .35em;
+  }
+  strong { font-weight: 650; }
+
+  .option { margin: 0 0 88px; }
+  .option-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 20px; }
+  .option-tag {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--doc-ink-faint);
+  }
+  .thesis {
+    font-size: 17px; color: var(--doc-ink-soft); margin: 0 0 24px;
+    max-width: 72ch; text-wrap: pretty;
+  }
+
+  .ledger {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1px; background: var(--doc-rule); border: 1px solid var(--doc-rule);
+    border-radius: 8px; overflow: hidden; margin: 24px 0 0;
+  }
+  .ledger > div { background: var(--doc-surface); padding: 16px 18px; }
+  .ledger dt {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--doc-ink-faint); margin: 0 0 6px;
+  }
+  .ledger dd { margin: 0; font-size: 14.5px; line-height: 1.55; color: var(--doc-ink-soft); }
+
+  .note {
+    border-left: 2px solid var(--doc-accent);
+    padding: 2px 0 2px 18px; margin: 24px 0; max-width: 72ch;
+    color: var(--doc-ink-soft); font-size: 15px;
+  }
+  .note strong { color: var(--doc-ink); }
+
+  /* ───────────────────────── MOCKUP FRAME ───────────────────────── */
+
+  .shot { margin: 28px 0 0; }
+  .shot-frame {
+    border: 1px solid var(--doc-rule); border-radius: 10px;
+    background: var(--doc-surface); box-shadow: var(--doc-shadow); overflow: hidden;
+  }
+  .shot-bar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 14px; border-bottom: 1px solid var(--doc-rule);
+    background: var(--doc-sunken);
+  }
+  .dots { display: flex; gap: 6px; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--doc-rule); display: block; }
+  .shot-url {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px; color: var(--doc-ink-faint);
+  }
+  .shot-scroll { overflow-x: auto; }
+  .shot-cap {
+    font-size: 13.5px; color: var(--doc-ink-faint); margin: 10px 0 0;
+    max-width: 78ch; text-wrap: pretty;
+  }
+  .shot-cap b { color: var(--doc-ink-soft); font-weight: 600; }
+
+  /* ───────────────────────── MYFLEET APP SURFACE ─────────────────────────
+     Everything below renders inside a mockup and uses only --mf-* tokens. */
+
+  .mf {
+    background: hsl(var(--mf-background)); color: hsl(var(--mf-foreground));
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.5; min-width: 860px;
+    display: flex; min-height: 520px;
+  }
+  .mf * { box-sizing: border-box; }
+
+  .mf-side {
+    width: 224px; flex-shrink: 0; border-right: 1px solid hsl(var(--mf-border));
+    background: hsl(var(--mf-card)); padding: 16px;
+  }
+  .mf-brand {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 17px; font-weight: 600; margin-bottom: 24px;
+  }
+  .mf-brand svg { width: 20px; height: 20px; }
+  .mf-nav { display: flex; flex-direction: column; gap: 4px; }
+  .mf-nav a {
+    border-radius: 6px; padding: 8px 12px; font-size: 14px; font-weight: 500;
+    color: hsl(var(--mf-muted-foreground)); text-decoration: none; display: block;
+  }
+  .mf-nav a.on { background: hsl(var(--mf-accent)); color: hsl(var(--mf-accent-foreground)); }
+  .mf-nav a.admin { color: hsl(var(--mf-danger)); }
+  .mf-nav a.admin.on { background: hsl(var(--mf-danger-subtle)); color: hsl(var(--mf-danger-subtle-foreground)); }
+  .mf-navgroup {
+    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: hsl(var(--mf-muted-foreground)); margin: 20px 0 8px; padding: 0 12px; font-weight: 600;
+  }
+
+  .mf-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .mf-top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 11px 24px; border-bottom: 1px solid hsl(var(--mf-border));
+  }
+  .mf-top-user { font-size: 13.5px; color: hsl(var(--mf-muted-foreground)); }
+  .mf-body { flex: 1; padding: 24px; min-width: 0; }
+
+  /* Admin-mode band — Options B and C */
+  .mf-modebar {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 9px 24px; font-size: 12.5px; font-weight: 500;
+    background: hsl(var(--mf-danger-subtle));
+    color: hsl(var(--mf-danger-subtle-foreground));
+    border-bottom: 1px solid hsl(var(--mf-danger-border));
+  }
+  .mf-modebar .lhs { display: flex; align-items: center; gap: 9px; }
+  .mf-modebar svg { width: 14px; height: 14px; flex-shrink: 0; }
+  .mf-modebar .exit {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; text-decoration: underline; text-underline-offset: 2px;
+  }
+
+  .mf-h1 { font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0 0 4px; }
+  .mf-sub { font-size: 13.5px; color: hsl(var(--mf-muted-foreground)); margin: 0 0 20px; }
+  .mf-h2 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+
+  /* Stat tiles */
+  .mf-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .mf-tile {
+    border: 1px solid hsl(var(--mf-border)); border-radius: 8px;
+    padding: 14px 16px; background: hsl(var(--mf-card));
+  }
+  .mf-tile .lab {
+    font-size: 11px; letter-spacing: .06em; text-transform: uppercase;
+    color: hsl(var(--mf-muted-foreground)); margin-bottom: 6px; font-weight: 500;
+  }
+  .mf-tile .num {
+    font-size: 26px; font-weight: 600; letter-spacing: -.02em;
+    font-variant-numeric: tabular-nums; line-height: 1.15;
+  }
+  .mf-tile .sub {
+    font-size: 11.5px; color: hsl(var(--mf-muted-foreground));
+    margin-top: 5px; font-variant-numeric: tabular-nums;
+  }
+  .mf-tile .num.dim { color: hsl(var(--mf-muted-foreground)); }
+
+  /* Chips */
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    border-radius: 999px; padding: 2px 9px; font-size: 11.5px; font-weight: 500;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .chip.warn { background: hsl(var(--mf-warning-subtle)); color: hsl(var(--mf-warning-subtle-foreground)); border-color: hsl(var(--mf-warning-border)); }
+  .chip.danger { background: hsl(var(--mf-danger-subtle)); color: hsl(var(--mf-danger-subtle-foreground)); border-color: hsl(var(--mf-danger-border)); }
+  .chip.ok { background: hsl(var(--mf-success-subtle)); color: hsl(var(--mf-success-subtle-foreground)); border-color: hsl(var(--mf-success-border)); }
+  .chip.info { background: hsl(var(--mf-info-subtle)); color: hsl(var(--mf-info-subtle-foreground)); border-color: hsl(var(--mf-info-border)); }
+  .chip.mute { background: hsl(var(--mf-muted)); color: hsl(var(--mf-muted-foreground)); border-color: hsl(var(--mf-border)); }
+
+  /* Banner */
+  .mf-banner {
+    display: flex; gap: 10px; align-items: flex-start;
+    border-radius: 8px; padding: 11px 14px; font-size: 13px; margin-bottom: 18px;
+    background: hsl(var(--mf-warning-subtle)); color: hsl(var(--mf-warning-subtle-foreground));
+    border: 1px solid hsl(var(--mf-warning-border));
+  }
+  .mf-banner svg { width: 15px; height: 15px; flex-shrink: 0; margin-top: 2px; }
+
+  /* Tables */
+  .mf-tablewrap { overflow-x: auto; border: 1px solid hsl(var(--mf-border)); border-radius: 8px; }
+  table.mf-t { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.mf-t th {
+    text-align: left; font-size: 11px; letter-spacing: .05em; text-transform: uppercase;
+    color: hsl(var(--mf-muted-foreground)); font-weight: 600;
+    padding: 9px 14px; border-bottom: 1px solid hsl(var(--mf-border));
+    background: hsl(var(--mf-muted)); white-space: nowrap;
+  }
+  table.mf-t td {
+    padding: 10px 14px; border-bottom: 1px solid hsl(var(--mf-border)); vertical-align: middle;
+  }
+  table.mf-t tr:last-child td { border-bottom: 0; }
+  table.mf-t td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  table.mf-t th.n { text-align: right; }
+  table.mf-t .name { font-weight: 550; }
+  table.mf-t .soft { color: hsl(var(--mf-muted-foreground)); }
+  table.mf-t .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+    color: hsl(var(--mf-muted-foreground));
+  }
+  tr.struck td .name { text-decoration: line-through; color: hsl(var(--mf-muted-foreground)); }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; border-radius: 6px;
+    font-size: 13px; font-weight: 500; padding: 6px 12px; border: 1px solid transparent;
+    background: hsl(var(--mf-primary)); color: hsl(var(--mf-primary-foreground)); white-space: nowrap;
+  }
+  .btn.outline { background: transparent; color: hsl(var(--mf-foreground)); border-color: hsl(var(--mf-border)); }
+  .btn.ghost { background: transparent; color: hsl(var(--mf-muted-foreground)); }
+  .btn.destr { background: hsl(var(--mf-destructive)); color: hsl(var(--mf-destructive-foreground)); }
+  .btn.destr-out { background: transparent; color: hsl(var(--mf-danger)); border-color: hsl(var(--mf-danger-border)); }
+  .btn.sm { font-size: 12px; padding: 4px 9px; }
+  .btn.dead { opacity: .45; }
+
+  /* Search + toolbar */
+  .mf-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .mf-input {
+    border: 1px solid hsl(var(--mf-input)); border-radius: 6px; padding: 6px 11px;
+    font-size: 13px; background: hsl(var(--mf-background)); color: hsl(var(--mf-foreground));
+    min-width: 220px;
+  }
+  .mf-input.ph { color: hsl(var(--mf-muted-foreground)); }
+  .mf-spacer { flex: 1; }
+
+  /* Two-pane (Option C) */
+  .mf-split { display: flex; gap: 0; border: 1px solid hsl(var(--mf-border)); border-radius: 8px; overflow: hidden; min-height: 400px; }
+  .mf-pane-l { width: 290px; flex-shrink: 0; border-right: 1px solid hsl(var(--mf-border)); background: hsl(var(--mf-card)); }
+  .mf-pane-r { flex: 1; padding: 18px; min-width: 0; }
+  .mf-listitem {
+    padding: 11px 14px; border-bottom: 1px solid hsl(var(--mf-border)); cursor: default;
+  }
+  .mf-listitem.on { background: hsl(var(--mf-accent)); }
+  .mf-listitem .t { font-size: 13.5px; font-weight: 550; margin-bottom: 2px; }
+  .mf-listitem .m {
+    font-size: 11.5px; color: hsl(var(--mf-muted-foreground));
+    font-variant-numeric: tabular-nums;
+  }
+  .mf-searchrow { padding: 11px 12px; border-bottom: 1px solid hsl(var(--mf-border)); }
+  .mf-searchrow .mf-input { width: 100%; min-width: 0; }
+
+  /* Blast-radius panel */
+  .mf-blast {
+    border: 1px solid hsl(var(--mf-danger-border)); border-radius: 8px;
+    background: hsl(var(--mf-danger-subtle)); padding: 14px 16px;
+  }
+  .mf-blast h4 {
+    margin: 0 0 4px; font-size: 13px; font-weight: 650;
+    color: hsl(var(--mf-danger-subtle-foreground));
+  }
+  .mf-blast p { margin: 0 0 12px; font-size: 12.5px; color: hsl(var(--mf-danger-subtle-foreground)); opacity: .9; }
+  .mf-blastgrid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 16px; margin-bottom: 14px;
+  }
+  .mf-blastgrid div {
+    display: flex; justify-content: space-between; gap: 10px; font-size: 12px;
+    color: hsl(var(--mf-danger-subtle-foreground));
+    border-bottom: 1px dotted hsl(var(--mf-danger-border)); padding-bottom: 3px;
+  }
+  .mf-blastgrid b { font-variant-numeric: tabular-nums; font-weight: 650; }
+
+  /* Dialog */
+  .mf-scrim {
+    background: hsl(var(--mf-background)); padding: 28px;
+    display: flex; align-items: center; justify-content: center; min-height: 460px;
+    background-image: linear-gradient(hsl(var(--mf-foreground) / .06), hsl(var(--mf-foreground) / .06));
+  }
+  .mf-dialog {
+    width: 100%; max-width: 480px; background: hsl(var(--mf-card));
+    border: 1px solid hsl(var(--mf-border)); border-radius: 10px; padding: 22px;
+    box-shadow: 0 18px 48px -18px hsl(222 47% 4% / .5);
+  }
+  .mf-dialog h3 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }
+  .mf-dialog .lede { font-size: 13px; color: hsl(var(--mf-muted-foreground)); margin: 0 0 16px; }
+  .mf-field { margin: 16px 0 0; }
+  .mf-field label { display: block; font-size: 12.5px; font-weight: 550; margin-bottom: 6px; }
+  .mf-field .hint { font-size: 12px; color: hsl(var(--mf-muted-foreground)); margin-top: 6px; }
+  .mf-confirm-input {
+    width: 100%; border: 1px solid hsl(var(--mf-input)); border-radius: 6px;
+    padding: 8px 11px; font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: hsl(var(--mf-background)); color: hsl(var(--mf-foreground));
+  }
+  .mf-confirm-input.matched { border-color: hsl(var(--mf-success)); }
+  .mf-caret { border-right: 2px solid hsl(var(--mf-foreground)); padding-right: 1px; }
+  .mf-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  .mf-recover {
+    display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px;
+    background: hsl(var(--mf-info-subtle)); color: hsl(var(--mf-info-subtle-foreground));
+    border: 1px solid hsl(var(--mf-info-border)); border-radius: 7px; padding: 10px 12px; margin-top: 16px;
+  }
+  .mf-recover svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 2px; }
+
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .pair { grid-template-columns: 1fr; } }
+
+  .statelabel {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--doc-ink-faint); margin: 0 0 8px;
+  }
+
+  /* Matrix */
+  .matrix-wrap { overflow-x: auto; border: 1px solid var(--doc-rule); border-radius: 8px; background: var(--doc-surface); }
+  table.matrix { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 660px; }
+  table.matrix th, table.matrix td {
+    text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--doc-rule-soft);
+    vertical-align: top;
+  }
+  table.matrix thead th {
+    font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--doc-ink-faint); font-weight: 600; background: var(--doc-sunken);
+    border-bottom: 1px solid var(--doc-rule);
+  }
+  table.matrix tbody th { font-weight: 600; color: var(--doc-ink); width: 27%; }
+  table.matrix td { color: var(--doc-ink-soft); }
+  table.matrix tr:last-child th, table.matrix tr:last-child td { border-bottom: 0; }
+  .verdict { font-weight: 650; color: var(--doc-ink); }
+
+  ul.tight { margin: 0 0 16px; padding-left: 20px; }
+  ul.tight li { margin-bottom: 7px; }
+
+  hr.rule { border: 0; border-top: 1px solid var(--doc-rule); margin: 64px 0 48px; }
+
+  :where(a, button, [tabindex]):focus-visible {
+    outline: 2px solid var(--doc-accent); outline-offset: 2px; border-radius: 3px;
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">task-011 · platform admin console</p>
+    <h1>Three directions for the admin&nbsp;UI</h1>
+    <p class="standfirst col">
+      Mockups rendered in MyFleet's own tokens — the shadcn slate scale plus the
+      semantic <code>success</code>&thinsp;/&thinsp;<code>warning</code>&thinsp;/&thinsp;<code>danger</code>&thinsp;/&thinsp;<code>info</code>
+      families from task-003. Both themes included, so you can see how the destructive
+      surfaces hold up on each ground.
+    </p>
+  </header>
+
+  <div class="col">
+    <p>
+      The console has to do two quite different jobs. Most of the time it is a
+      <em>read</em> tool — counts, a fleet list, drill-down. Occasionally it is a
+      <em>demolition</em> tool. The three directions below differ mainly in how far they
+      separate those two modes, and in whether the console is organised around
+      <strong>fleets</strong> (browse, then act) or around <strong>operations</strong>
+      (act, then watch).
+    </p>
+    <p>
+      Everything shown assumes the soft-delete model from the PRD: a purge stamps
+      <code>deleted_at</code>, data stays recoverable for five days, and a background
+      sweep makes it permanent. That single decision is what lets the UI show a countdown
+      and a cancel button instead of a point of no return.
+    </p>
+    <div class="note">
+      <strong>One gap worth naming up front.</strong> The UI kit at
+      <code>apps/web/src/components/ui/</code> has nine components — button, card, form,
+      input, label, select, skeleton, switch, textarea. There is no <code>dialog</code>,
+      no <code>table</code>, and no <code>badge</code>. Every direction below needs all
+      three, so that cost is common to all of them and shouldn't sway the choice.
+    </div>
+  </div>
+
+  <!-- ══════════════════════════ OPTION A ══════════════════════════ -->
+  <section class="option" id="option-a">
+    <div class="option-head">
+      <span class="option-tag">Direction A</span>
+      <h2>In-shell section</h2>
+    </div>
+    <p class="thesis">
+      Admin is one more entry in the existing sidebar. Same <code>AppLayout</code>, same
+      chrome, same table patterns as the rest of the app. The cheapest thing that works —
+      and the one that most easily lets a destructive action feel routine.
+    </p>
+
+    <div class="shot">
+      <div class="shot-frame">
+        <div class="shot-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="shot-url">myfleet.app/admin</span>
+        </div>
+        <div class="shot-scroll">
+          <div class="mf">
+            <aside class="mf-side">
+              <div class="mf-brand">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h3l2-5h8l2 5h3"/><path d="M5 12v5h14v-5"/><circle cx="8" cy="17" r="1.6"/><circle cx="16" cy="17" r="1.6"/></svg>
+                MyFleet
+              </div>
+              <nav class="mf-nav">
+                <a href="#option-a">Dashboard</a>
+                <a href="#option-a">Vehicles</a>
+                <a href="#option-a">Activity</a>
+                <a href="#option-a">Notifications</a>
+                <a href="#option-a">Settings</a>
+                <a href="#option-a" class="admin on">Admin</a>
+              </nav>
+            </aside>
+            <div class="mf-main">
+              <div class="mf-top">
+                <span class="mf-top-user">Jason Tumidanski</span>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <span class="btn ghost sm">Theme</span>
+                  <span class="btn outline sm">Sign out</span>
+                </div>
+              </div>
+              <div class="mf-body">
+                <h1 class="mf-h1">Platform overview</h1>
+                <p class="mf-sub">Every fleet on this deployment. You are seeing data outside your own fleet.</p>
+
+                <div class="mf-banner">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+                  <span>Notification service didn't respond, so its count is missing. Everything else is current.</span>
+                </div>
+
+                <div class="mf-tiles">
+                  <div class="mf-tile"><div class="lab">Fleets</div><div class="num">12</div><div class="sub">3 created this month</div></div>
+                  <div class="mf-tile"><div class="lab">Vehicles</div><div class="num">47</div><div class="sub"><span class="chip warn">3 pending purge</span></div></div>
+                  <div class="mf-tile"><div class="lab">Users</div><div class="num">21</div><div class="sub">1 platform admin</div></div>
+                  <div class="mf-tile"><div class="lab">Notifications</div><div class="num dim">—</div><div class="sub">Service unreachable</div></div>
+                </div>
+                <div class="mf-tiles">
+                  <div class="mf-tile"><div class="lab">Maintenance records</div><div class="num">431</div><div class="sub">88 schedules</div></div>
+                  <div class="mf-tile"><div class="lab">Fuel logs</div><div class="num">1,204</div><div class="sub">across 47 vehicles</div></div>
+                  <div class="mf-tile"><div class="lab">Mileage records</div><div class="num">1,893</div><div class="sub">manual, fuel, maintenance</div></div>
+                  <div class="mf-tile"><div class="lab">Media objects</div><div class="num">260</div><div class="sub">1.4 GB stored</div></div>
+                </div>
+
+                <h2 class="mf-h2" style="margin-top:24px">Fleets</h2>
+                <div class="mf-tablewrap">
+                  <table class="mf-t">
+                    <thead><tr>
+                      <th>Fleet</th><th>Owner</th><th class="n">Members</th>
+                      <th class="n">Vehicles</th><th>Created</th><th></th>
+                    </tr></thead>
+                    <tbody>
+                      <tr>
+                        <td class="name">The Tumidanski Fleet</td>
+                        <td class="soft">jtumidanski@gmail.com</td>
+                        <td class="n">3</td><td class="n">4</td>
+                        <td class="soft">24 May 2026</td>
+                        <td style="text-align:right"><span class="btn destr-out sm">Purge</span></td>
+                      </tr>
+                      <tr>
+                        <td class="name">Riverside Rentals</td>
+                        <td class="soft">dana.k@riverside.co</td>
+                        <td class="n">6</td><td class="n">14</td>
+                        <td class="soft">2 Jun 2026</td>
+                        <td style="text-align:right"><span class="btn destr-out sm">Purge</span></td>
+                      </tr>
+                      <tr class="struck">
+                        <td><span class="name">Test Fleet Alpha</span> <span class="chip warn">purging in 4d</span></td>
+                        <td class="soft">jtumidanski@gmail.com</td>
+                        <td class="n">1</td><td class="n">3</td>
+                        <td class="soft">11 Jul 2026</td>
+                        <td style="text-align:right"><span class="btn outline sm">Cancel</span></td>
+                      </tr>
+                      <tr>
+                        <td class="name">Kowalski Household</td>
+                        <td class="soft">m.kowalski@proton.me</td>
+                        <td class="n">2</td><td class="n">5</td>
+                        <td class="soft">19 Jun 2026</td>
+                        <td style="text-align:right"><span class="btn destr-out sm">Purge</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="shot-cap">
+        The only signals that this screen is different from the rest of the app are the red
+        nav label and the red outline buttons. <b>A fleet pending purge stays in the list,
+        struck through, with a countdown</b> — that's the soft-delete window made visible,
+        and it's the pattern all three directions share.
+      </p>
+    </div>
+
+    <dl class="ledger">
+      <div><dt>Buys you</dt><dd>Lowest build cost. Reuses <code>AppLayout</code>, existing nav, existing page conventions. One new route group, five pages, no new layout component.</dd></div>
+      <div><dt>Costs you</dt><dd>No mode boundary. "Purge" sits in the same visual register as "Add vehicle", and the sidebar offers a one-click path from ordinary use to a system wipe.</dd></div>
+      <div><dt>Fits if</dt><dd>You're the only admin, you trust yourself, and you'd rather ship the capability than the ceremony around it.</dd></div>
+    </dl>
+  </section>
+
+  <!-- ══════════════════════════ OPTION B ══════════════════════════ -->
+  <section class="option" id="option-b">
+    <div class="option-head">
+      <span class="option-tag">Direction B</span>
+      <h2>Dedicated console, operations-first</h2>
+    </div>
+    <p class="thesis">
+      <code>/admin</code> swaps to its own layout with a persistent mode band across the top.
+      The landing screen is the purge queue, not the fleet list — because the thing that
+      actually needs watching is work already in flight, inside its recovery window.
+    </p>
+
+    <div class="shot">
+      <div class="shot-frame">
+        <div class="shot-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="shot-url">myfleet.app/admin/purges</span>
+        </div>
+        <div class="shot-scroll">
+          <div class="mf">
+            <aside class="mf-side">
+              <div class="mf-brand">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+                Platform
+              </div>
+              <nav class="mf-nav">
+                <a href="#option-b">Overview</a>
+                <a href="#option-b" class="on">Purges</a>
+                <a href="#option-b">Fleets</a>
+                <a href="#option-b">Users</a>
+                <a href="#option-b">Audit log</a>
+              </nav>
+              <div class="mf-navgroup">Back to</div>
+              <nav class="mf-nav">
+                <a href="#option-b">My fleet</a>
+              </nav>
+            </aside>
+            <div class="mf-main">
+              <div class="mf-modebar">
+                <span class="lhs">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+                  Platform admin — you can see and delete data across all 12 fleets
+                </span>
+                <a href="#option-b" class="exit">Leave admin</a>
+              </div>
+              <div class="mf-body">
+                <h1 class="mf-h1">Purges</h1>
+                <p class="mf-sub">Deleted data is recoverable until the countdown ends. After that it's gone for good.</p>
+
+                <div class="mf-toolbar">
+                  <span class="btn outline sm">All</span>
+                  <span class="btn sm">Pending · 2</span>
+                  <span class="btn outline sm">Needs attention · 1</span>
+                  <span class="btn outline sm">Completed</span>
+                  <span class="mf-spacer"></span>
+                  <span class="btn destr-out sm">Purge everything…</span>
+                </div>
+
+                <div class="mf-tablewrap">
+                  <table class="mf-t">
+                    <thead><tr>
+                      <th>What was deleted</th><th>Status</th><th>Started by</th>
+                      <th class="n">Rows</th><th>Permanent in</th><th></th>
+                    </tr></thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          <div class="name">Test Fleet Alpha</div>
+                          <div class="mono">whole fleet · 3 vehicles</div>
+                        </td>
+                        <td><span class="chip warn">Recoverable</span></td>
+                        <td class="soft">you</td>
+                        <td class="n">642</td>
+                        <td class="soft">4d 6h</td>
+                        <td style="text-align:right"><span class="btn outline sm">Restore</span></td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <div class="name">Riverside Rentals</div>
+                          <div class="mono">whole fleet · 14 vehicles</div>
+                        </td>
+                        <td><span class="chip danger">Media not deleted</span></td>
+                        <td class="soft">you</td>
+                        <td class="n">3,108</td>
+                        <td class="soft">4d 21h</td>
+                        <td style="text-align:right;white-space:nowrap">
+                          <span class="btn sm">Retry</span>
+                          <span class="btn outline sm">Restore</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <div class="name">2019 Subaru Outback</div>
+                          <div class="mono">one vehicle · Kowalski Household</div>
+                        </td>
+                        <td><span class="chip mute">Deleted for good</span></td>
+                        <td class="soft">you</td>
+                        <td class="n">211</td>
+                        <td class="soft">—</td>
+                        <td style="text-align:right"><span class="btn ghost sm dead">Restore</span></td>
+                      </tr>
+                      <tr>
+                        <td>
+                          <div class="name">Fuel log · 14 Jul</div>
+                          <div class="mono">one record · The Tumidanski Fleet</div>
+                        </td>
+                        <td><span class="chip ok">Restored</span></td>
+                        <td class="soft">you</td>
+                        <td class="n">1</td>
+                        <td class="soft">—</td>
+                        <td></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <p class="mf-sub" style="margin:14px 0 0">
+                  <span class="chip danger">Media not deleted</span>
+                  &nbsp;means the fleet data is gone but media service couldn't be reached. Retry is safe to run as often as you like.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="shot-cap">
+        The mode band is the whole point of this direction — it's present on every admin
+        screen and states the blast radius in plain words. <b>Status copy avoids system
+        vocabulary</b>: "Recoverable" and "Media not deleted" rather than
+        <code>pending</code> and <code>partial</code>, which is what the API actually calls them.
+      </p>
+    </div>
+
+    <dl class="ledger">
+      <div><dt>Buys you</dt><dd>Unmistakable mode. Partial failures get a first-class home instead of hiding in a toast, and the recovery window is the organising idea rather than a footnote.</dd></div>
+      <div><dt>Costs you</dt><dd>A second layout component and its own nav. Fleet browsing — the thing you asked for first — becomes a secondary screen.</dd></div>
+      <div><dt>Fits if</dt><dd>You expect purges to be routine enough that watching them matters more than finding fleets.</dd></div>
+    </dl>
+  </section>
+
+  <!-- ══════════════════════════ OPTION C ══════════════════════════ -->
+  <section class="option" id="option-c">
+    <div class="option-head">
+      <span class="option-tag">Direction C</span>
+      <h2>Dedicated console, fleet inspector</h2>
+    </div>
+    <p class="thesis">
+      Same dedicated chrome as B, but the organising object is the fleet. A persistent list
+      on the left, detail on the right, and the delete control sits directly beneath a live
+      count of exactly what it would destroy. You cannot reach the button without passing
+      the blast radius.
+    </p>
+
+    <div class="shot">
+      <div class="shot-frame">
+        <div class="shot-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="shot-url">myfleet.app/admin/fleets/3f2a1c8e</span>
+        </div>
+        <div class="shot-scroll">
+          <div class="mf">
+            <aside class="mf-side">
+              <div class="mf-brand">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/></svg>
+                Platform
+              </div>
+              <nav class="mf-nav">
+                <a href="#option-c">Overview</a>
+                <a href="#option-c" class="on">Fleets</a>
+                <a href="#option-c">Users</a>
+                <a href="#option-c">Purges</a>
+                <a href="#option-c">Audit log</a>
+              </nav>
+              <div class="mf-navgroup">Back to</div>
+              <nav class="mf-nav">
+                <a href="#option-c">My fleet</a>
+              </nav>
+            </aside>
+            <div class="mf-main">
+              <div class="mf-modebar">
+                <span class="lhs">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+                  Platform admin — you can see and delete data across all 12 fleets
+                </span>
+                <a href="#option-c" class="exit">Leave admin</a>
+              </div>
+              <div class="mf-body">
+                <div class="mf-split">
+                  <div class="mf-pane-l">
+                    <div class="mf-searchrow">
+                      <span class="mf-input ph" style="display:block">Search fleets or owners</span>
+                    </div>
+                    <div class="mf-listitem on">
+                      <div class="t">The Tumidanski Fleet</div>
+                      <div class="m">3 members · 4 vehicles</div>
+                    </div>
+                    <div class="mf-listitem">
+                      <div class="t">Riverside Rentals</div>
+                      <div class="m">6 members · 14 vehicles</div>
+                    </div>
+                    <div class="mf-listitem">
+                      <div class="t">Kowalski Household</div>
+                      <div class="m">2 members · 5 vehicles</div>
+                    </div>
+                    <div class="mf-listitem">
+                      <div class="t" style="text-decoration:line-through;color:hsl(var(--mf-muted-foreground))">Test Fleet Alpha</div>
+                      <div class="m"><span class="chip warn">purging in 4d</span></div>
+                    </div>
+                    <div class="mf-listitem">
+                      <div class="t">Beckett &amp; Sons Haulage</div>
+                      <div class="m">4 members · 9 vehicles</div>
+                    </div>
+                  </div>
+                  <div class="mf-pane-r">
+                    <h1 class="mf-h1">The Tumidanski Fleet</h1>
+                    <p class="mf-sub">
+                      Owned by jtumidanski@gmail.com · created 24 May 2026 ·
+                      <span class="mono" style="font-family:ui-monospace,Menlo,monospace">3f2a1c8e</span>
+                    </p>
+
+                    <h2 class="mf-h2">Members</h2>
+                    <div class="mf-tablewrap" style="margin-bottom:18px">
+                      <table class="mf-t">
+                        <thead><tr><th>Person</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+                        <tbody>
+                          <tr>
+                            <td class="name">jtumidanski@gmail.com</td>
+                            <td><span class="chip info">Owner</span></td>
+                            <td class="soft">24 May 2026</td>
+                            <td style="text-align:right"><span class="btn ghost sm dead">Remove</span></td>
+                          </tr>
+                          <tr>
+                            <td class="name">sarah.t@gmail.com</td>
+                            <td><span class="chip mute">Member</span></td>
+                            <td class="soft">26 May 2026</td>
+                            <td style="text-align:right"><span class="btn destr-out sm">Remove</span></td>
+                          </tr>
+                          <tr>
+                            <td class="name">nate.t@gmail.com</td>
+                            <td><span class="chip mute">Viewer</span></td>
+                            <td class="soft">3 Jun 2026</td>
+                            <td style="text-align:right"><span class="btn destr-out sm">Remove</span></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <h2 class="mf-h2">Vehicles</h2>
+                    <div class="mf-tablewrap" style="margin-bottom:20px">
+                      <table class="mf-t">
+                        <thead><tr><th>Vehicle</th><th>Status</th><th class="n">Mileage</th><th class="n">Records</th><th></th></tr></thead>
+                        <tbody>
+                          <tr>
+                            <td class="name">2019 Subaru Outback</td>
+                            <td><span class="chip ok">Healthy</span></td>
+                            <td class="n">84,210</td><td class="n">96</td>
+                            <td style="text-align:right"><span class="btn destr-out sm">Delete</span></td>
+                          </tr>
+                          <tr>
+                            <td class="name">2022 Ford Maverick</td>
+                            <td><span class="chip warn">Service due</span></td>
+                            <td class="n">31,884</td><td class="n">44</td>
+                            <td style="text-align:right"><span class="btn destr-out sm">Delete</span></td>
+                          </tr>
+                          <tr>
+                            <td class="name">2014 Honda Odyssey</td>
+                            <td><span class="chip danger">Overdue</span></td>
+                            <td class="n">156,902</td><td class="n">188</td>
+                            <td style="text-align:right"><span class="btn destr-out sm">Delete</span></td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div class="mf-blast">
+                      <h4>Purging this fleet deletes</h4>
+                      <p>Everything below, across all four services. Recoverable for 5 days.</p>
+                      <div class="mf-blastgrid">
+                        <div><span>Vehicles</span><b>4</b></div>
+                        <div><span>Mileage records</span><b>210</b></div>
+                        <div><span>Fuel logs</span><b>130</b></div>
+                        <div><span>Maintenance records</span><b>44</b></div>
+                        <div><span>Schedules</span><b>9</b></div>
+                        <div><span>Photos &amp; documents</span><b>12</b></div>
+                        <div><span>Members</span><b>3</b></div>
+                        <div><span>Activity entries</span><b>380</b></div>
+                        <div><span>Notifications</span><b>6</b></div>
+                      </div>
+                      <span class="btn destr">Purge this fleet…</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="shot-cap">
+        The blast-radius panel is the distinguishing move: <b>the counts are rendered from
+        the same query the purge itself would run</b>, so what you read is what you'd
+        destroy. Owner's "Remove" is inert — a fleet can't lose its only owner.
+      </p>
+    </div>
+
+    <dl class="ledger">
+      <div><dt>Buys you</dt><dd>Browsing and deleting are the same motion, and the consequence is always on screen. Best answer to "see a list of fleets, and information relevant to them".</dd></div>
+      <div><dt>Costs you</dt><dd>Two-pane layout needs a real responsive story on narrow screens. The blast-radius counts need a dedicated endpoint that's exact rather than approximate.</dd></div>
+      <div><dt>Fits if</dt><dd>Inspection is the common case and deletion is the occasional consequence of it — which matches how you described wanting to use this.</dd></div>
+    </dl>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══════════════════════════ SHARED: DIALOG ══════════════════════════ -->
+  <section class="option" id="confirm">
+    <div class="option-head">
+      <span class="option-tag">Shared across all three</span>
+      <h2>The confirmation gate</h2>
+    </div>
+    <p class="thesis">
+      Identical in every direction, and the highest-stakes screen in the feature. Below,
+      the same dialog before and after the typed phrase matches. The disabled button is a
+      courtesy; the real control is the server returning 409 on a mismatch.
+    </p>
+
+    <div class="pair">
+      <div>
+        <p class="statelabel">Phrase incomplete — action unavailable</p>
+        <div class="shot-frame">
+          <div class="mf-scrim">
+            <div class="mf-dialog">
+              <h3>Purge “Riverside Rentals”?</h3>
+              <p class="lede">
+                This deletes 14 vehicles and 3,108 related records belonging to 6 people.
+                They'll lose access immediately.
+              </p>
+              <div class="mf-field">
+                <label>Type the fleet name to continue</label>
+                <input class="mf-confirm-input" value="Riverside Rent" readonly>
+                <div class="hint">Must match <b>Riverside Rentals</b> exactly.</div>
+              </div>
+              <div class="mf-recover">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+                <span>You can undo this until <b>7 August, 2:03 pm</b>. After that it's permanent.</span>
+              </div>
+              <div class="mf-dialog-actions">
+                <span class="btn outline">Cancel</span>
+                <span class="btn destr dead">Purge fleet</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <p class="statelabel">Phrase matched — action armed</p>
+        <div class="shot-frame">
+          <div class="mf-scrim">
+            <div class="mf-dialog">
+              <h3>Purge “Riverside Rentals”?</h3>
+              <p class="lede">
+                This deletes 14 vehicles and 3,108 related records belonging to 6 people.
+                They'll lose access immediately.
+              </p>
+              <div class="mf-field">
+                <label>Type the fleet name to continue</label>
+                <input class="mf-confirm-input matched" value="Riverside Rentals" readonly>
+                <div class="hint" style="color:hsl(var(--mf-success))">Matches.</div>
+              </div>
+              <div class="mf-recover">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+                <span>You can undo this until <b>7 August, 2:03 pm</b>. After that it's permanent.</span>
+              </div>
+              <div class="mf-dialog-actions">
+                <span class="btn outline">Cancel</span>
+                <span class="btn destr">Purge fleet</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="shot-cap" style="margin-top:14px">
+      For a system purge the same dialog asks for <code>PURGE EVERYTHING</code> and names
+      what survives — user accounts, sign-ins, and the seeded maintenance categories — because
+      "everything" is otherwise a frightening and inaccurate word.
+    </p>
+
+    <div class="col">
+      <h3>Why the copy reads the way it does</h3>
+      <ul class="tight">
+        <li><strong>Consequence before mechanism.</strong> "14 vehicles and 3,108 related records belonging to 6 people" — the people are the part that matters, and it's the part a row-count alone hides.</li>
+        <li><strong>An explicit expiry, not a duration.</strong> "until 7 August, 2:03 pm" beats "for 5 days" because you can act on a date without doing arithmetic.</li>
+        <li><strong>No apology, no hedging.</strong> The dialog states what happens and offers a way out. It doesn't ask whether you're sure — the typed phrase already answered that.</li>
+      </ul>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══════════════════════════ AUDIT ══════════════════════════ -->
+  <section class="option" id="audit">
+    <div class="option-head">
+      <span class="option-tag">Shared across all three</span>
+      <h2>Audit log</h2>
+    </div>
+    <p class="thesis">
+      Append-only, and deliberately outside the purge blast radius — a system purge doesn't
+      erase the record of itself.
+    </p>
+
+    <div class="shot">
+      <div class="shot-frame">
+        <div class="shot-bar">
+          <span class="dots"><i></i><i></i><i></i></span>
+          <span class="shot-url">myfleet.app/admin/audit</span>
+        </div>
+        <div class="shot-scroll">
+          <div class="mf" style="min-height:auto">
+            <div class="mf-main">
+              <div class="mf-body">
+                <h1 class="mf-h1">Audit log</h1>
+                <p class="mf-sub">Every administrative action, oldest entries kept forever.</p>
+                <div class="mf-tablewrap">
+                  <table class="mf-t">
+                    <thead><tr>
+                      <th>When</th><th>Who</th><th>Did what</th><th>To what</th>
+                      <th class="n">Rows</th><th>Trace</th>
+                    </tr></thead>
+                    <tbody>
+                      <tr>
+                        <td class="soft">2 Aug, 14:03</td>
+                        <td class="soft">jtumidanski@gmail.com</td>
+                        <td><span class="chip danger">Started purge</span></td>
+                        <td class="name">Riverside Rentals</td>
+                        <td class="n">3,108</td>
+                        <td class="mono">c1f4…9ab2</td>
+                      </tr>
+                      <tr>
+                        <td class="soft">2 Aug, 14:03</td>
+                        <td class="soft">jtumidanski@gmail.com</td>
+                        <td><span class="chip warn">Retried media</span></td>
+                        <td class="name">Riverside Rentals</td>
+                        <td class="n">12</td>
+                        <td class="mono">c1f4…9ab2</td>
+                      </tr>
+                      <tr>
+                        <td class="soft">1 Aug, 09:41</td>
+                        <td class="soft">jtumidanski@gmail.com</td>
+                        <td><span class="chip ok">Restored</span></td>
+                        <td class="name">Fuel log · 14 Jul</td>
+                        <td class="n">1</td>
+                        <td class="mono">8e07…4d31</td>
+                      </tr>
+                      <tr>
+                        <td class="soft">28 Jul, 03:00</td>
+                        <td class="soft">system</td>
+                        <td><span class="chip mute">Made permanent</span></td>
+                        <td class="name">2019 Subaru Outback</td>
+                        <td class="n">211</td>
+                        <td class="mono">5b2c…77e0</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="shot-cap">
+        The reaper writes its own rows as <b>system</b>, so the log distinguishes what you
+        did from what the five-day timer did on your behalf. <b>Trace</b> is the correlation
+        id, which is what ties a row back to the service logs.
+      </p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ══════════════════════════ COMPARISON ══════════════════════════ -->
+  <section id="compare">
+    <h2 style="margin-bottom:20px">Side by side</h2>
+    <div class="matrix-wrap">
+      <table class="matrix">
+        <thead>
+          <tr><th></th><th>A · In-shell</th><th>B · Operations-first</th><th>C · Fleet inspector</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Organising object</th>
+            <td>Fleets, in a flat list</td><td>Purge operations</td><td>Fleets, with detail alongside</td>
+          </tr>
+          <tr>
+            <th>Mode signal</th>
+            <td>Red nav label only</td><td>Persistent band + own chrome</td><td>Persistent band + own chrome</td>
+          </tr>
+          <tr>
+            <th>New frontend pieces</th>
+            <td>5 pages, 3 UI primitives</td><td>5 pages, 3 primitives, 1 layout</td><td>5 pages, 3 primitives, 1 layout, 2-pane responsive work</td>
+          </tr>
+          <tr>
+            <th>Blast radius shown</th>
+            <td>In the dialog only</td><td>In the dialog only</td><td>Always, next to the control</td>
+          </tr>
+          <tr>
+            <th>Partial-failure handling</th>
+            <td>Toast, easy to miss</td><td>First-class queue row with retry</td><td>Queue section, one nav click away</td>
+          </tr>
+          <tr>
+            <th>Reachable with no fleet</th>
+            <td>Needs the <code>RequireAuth</code> exemption</td><td>Natural — separate shell</td><td>Natural — separate shell</td>
+          </tr>
+          <tr>
+            <th>Risk it invites</th>
+            <td>Destruction feels routine</td><td>Fleet browsing gets demoted</td><td>Most build effort of the three</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="col" style="margin-top:36px">
+      <h3>Recommendation</h3>
+      <p>
+        <span class="verdict">C, with B's purge queue kept as a peer section</span> — which
+        is roughly what the nav in the C mockup already shows. The reasoning:
+      </p>
+      <ul class="tight">
+        <li><strong>You asked for fleet browsing first.</strong> "See a list of fleets, and information relevant to them" was the granular requirement; C makes that the centre and B makes it a side trip.</li>
+        <li><strong>The separate shell solves a real routing problem for free.</strong> After a system purge you have no fleet, and <code>RequireAuth</code> currently bounces fleetless users to <code>/onboarding</code>. A dedicated console makes the exemption structural rather than a special case bolted onto the shared guard.</li>
+        <li><strong>The blast-radius panel is cheap insurance.</strong> It needs the counts the purge endpoint computes anyway, so it's presentation of data you already have — and it turns "delete this fleet" from a leap into a read.</li>
+      </ul>
+      <p>
+        A is the honest fallback if the two-pane responsive work looks like too much for a
+        first pass. It's a real option, not a straw man — you'd be trading the mode boundary
+        for maybe a third less frontend work.
+      </p>
+      <div class="note">
+        <strong>Still unresolved, and it shows up in the mockups.</strong> Direction C's blast-radius
+        panel lists "Notifications · 6", but notifications look user-scoped rather than fleet-scoped.
+        If a person belongs to two fleets, that number — and the delete behind it — could reach into
+        a fleet you never targeted. That's open question 2 in the PRD and R4 in the risk register,
+        and it needs settling at <code>/design-task</code> before any of these screens get built.
+      </div>
+    </div>
+  </section>
+
+</div>

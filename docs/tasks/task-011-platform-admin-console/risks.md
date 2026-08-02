@@ -98,16 +98,23 @@ the single most important thing to settle at `/design-task`.
 
 ## R5 — The admin console is unreachable exactly when it is most needed
 
-**Severity: moderate. Likelihood: high without the exemption.**
+**Severity: moderate. Likelihood: largely designed out.**
 
 `RequireAuth` (`apps/web/src/components/RequireAuth.tsx:29`) redirects any authenticated user
 without an `activeFleetId` to `/onboarding`. After a successful system purge the admin has no
-fleet. Without an explicit exemption they are bounced to onboarding and cannot return to `/admin`
-to inspect the result, cancel the purge, or read the audit log — during the recovery window when
-cancellation is still possible.
+fleet. Bounced to onboarding, they cannot return to `/admin` to inspect the result, cancel the
+purge, or read the audit log — precisely during the window when cancellation is still possible.
 
-**Control:** FR-ADMIN-UI-3. Cheap to implement, easy to forget, and only discovered by testing the
-post-purge state rather than the purge itself.
+**Control:** the chosen UI direction (PRD §4.9) puts admin routes in a dedicated `AdminLayout`
+outside the fleet-requiring branch of the route tree, so the redirect never applies. This is a
+structural fix rather than an exemption flag, which matters because an exemption is the kind of
+thing a later refactor silently drops. `RequireAuth` needs no modification at all.
+
+**Residual risk:** if a future change nests admin routes back under the shared guard for
+convenience, the bug returns silently. The acceptance criterion asserting a fleetless admin can
+reach every admin screen is what catches that, and it must be tested against the *post-purge*
+state rather than a merely fleetless account — they are the same condition, but only the former
+gets exercised by accident.
 
 ---
 

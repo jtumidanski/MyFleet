@@ -305,32 +305,76 @@ existing query over them. It is the highest-risk requirement group in this task.
 
 ### 4.9 Web console
 
-- **FR-ADMIN-UI-1** — `AuthContext` exposes `platformAdmin` from `/auth/me`.
-- **FR-ADMIN-UI-2** — An "Admin" nav entry appears in `AppLayout` **only** when `platformAdmin` is
-  true. Its absence is a convenience, not a control; the server remains authoritative.
-- **FR-ADMIN-UI-3** — Admin routes are guarded by a `RequirePlatformAdmin` route wrapper that
-  redirects non-admins to `/`. It must also bypass the existing fleetless-user redirect in
-  `RequireAuth` (`apps/web/src/components/RequireAuth.tsx:29`), which today sends any user without
-  an `activeFleetId` to `/onboarding` — otherwise the console becomes unreachable in exactly the
-  situation it is most needed, immediately after a system purge.
-- **FR-ADMIN-UI-4** — `/admin` shows the aggregate stat tiles from `GET /admin/stats`, with any
-  `warnings` rendered as a non-blocking banner naming the unreachable service.
-- **FR-ADMIN-UI-5** — `/admin/fleets` shows the searchable, paginated fleet list; each row links to
-  detail.
-- **FR-ADMIN-UI-6** — `/admin/fleets/:id` shows fleet detail with members, vehicles, and record
-  counts, plus per-row delete actions and a "Purge this fleet" action.
-- **FR-ADMIN-UI-7** — Fleet and system purges open a confirmation dialog that requires typing the
-  exact confirmation phrase; the confirm button stays disabled until the typed value matches. The
-  dialog states plainly what will be deleted, that it is recoverable for N days, and when it will
-  become permanent.
-- **FR-ADMIN-UI-8** — `/admin/purges` lists purge operations with status, countdown to
-  `purge_after`, and a cancel action for pending ones. `partial` operations show which services
-  failed and offer retry.
-- **FR-ADMIN-UI-9** — `/admin/audit` shows the audit log.
-- **FR-ADMIN-UI-10** — After a successful system purge the client clears its React Query cache and
-  refetches `/auth/me`, so the UI reflects the now-fleetless state rather than rendering stale data.
-- **FR-ADMIN-UI-11** — All admin mutations invalidate the relevant React Query keys on success, and
-  surface API error detail in the toast, consistent with existing error handling on this branch.
+**Chosen direction: a dedicated admin shell organised around fleets, with the purge queue as a
+peer section.** Three directions were mocked up in the platform's own tokens and compared in
+`ui-directions.html` alongside this PRD; that file is the visual reference for everything below and
+should be opened before implementing any screen.
+
+The dedicated shell was chosen over reusing `AppLayout` for three reasons: it gives destructive
+tooling an unmistakable mode boundary; it makes fleet browsing — the primary stated requirement —
+the centre of the console rather than a side trip; and it resolves the fleetless-admin routing
+problem structurally rather than by special-casing the shared guard (FR-ADMIN-UI-4).
+
+- **FR-ADMIN-UI-1** — `AuthContext` exposes `platformAdmin`, sourced from `/auth/me`.
+- **FR-ADMIN-UI-2** — Admin routes render inside a new `AdminLayout` component, **not** `AppLayout`.
+  It has its own sidebar — Overview, Fleets, Users, Purges, Audit log, plus a "Back to my fleet"
+  link — and its own brand treatment, so the console is visually distinct from the product at a
+  glance.
+- **FR-ADMIN-UI-3** — Every admin screen carries a persistent mode band immediately below the
+  header, stating the caller's scope in plain words ("Platform admin — you can see and delete data
+  across all N fleets") and offering an explicit exit. It uses the `danger-subtle` /
+  `danger-subtle-foreground` / `danger-border` token trio, not `--destructive`, which is reserved
+  for destructive *controls* per the task-003 token contract.
+- **FR-ADMIN-UI-4** — Admin routes are guarded by a `RequirePlatformAdmin` wrapper requiring
+  authentication and `platformAdmin`, and redirecting non-admins to `/`. It must **not** require an
+  `activeFleetId`. Because `AdminLayout` is not nested under the fleet-requiring branch of the route
+  tree, the existing fleetless redirect in `RequireAuth`
+  (`apps/web/src/components/RequireAuth.tsx:29`) never applies to it — this is the structural
+  resolution of R5, and no change to `RequireAuth` itself is required.
+- **FR-ADMIN-UI-5** — The entry point is an "Admin" nav entry in `AppLayout`, rendered **only** when
+  `platformAdmin` is true. Its absence is a convenience, not a control; the server remains
+  authoritative.
+- **FR-ADMIN-UI-6** — `/admin` shows aggregate stat tiles from `GET /admin/stats`. A `null` count
+  renders as an em dash with the reason beneath it, never as `0`. Any `warnings` render as a
+  non-blocking banner naming the unreachable service.
+- **FR-ADMIN-UI-7** — `/admin/fleets` is a two-pane inspector: a persistent, searchable fleet list
+  on the left, detail on the right. Below the `md` breakpoint it collapses to a single column where
+  the list and detail are separate views with back-navigation. Fleets pending purge appear struck
+  through with a countdown chip rather than vanishing from the list.
+- **FR-ADMIN-UI-8** — Fleet detail shows members (with role), vehicles (with derived status and
+  record counts), pending invites, and per-domain counts, each row carrying its own delete action.
+  The owner's remove action is permanently inert — a fleet must never lose its only owner.
+- **FR-ADMIN-UI-9** — Fleet detail ends with a **blast-radius panel**: a per-domain breakdown of
+  exactly what a fleet purge would delete, with the "Purge this fleet" control beneath it. The
+  counts must come from the same query the purge itself executes, so the displayed figures and the
+  affected rows cannot diverge. If the counts cannot be computed, the panel shows an error and the
+  purge control is unavailable rather than showing stale or approximate numbers.
+- **FR-ADMIN-UI-10** — Fleet and system purges open a confirmation dialog requiring the exact
+  confirmation phrase to be typed. The confirm control stays unavailable until the typed value
+  matches exactly. The dialog states what will be deleted in terms of people as well as rows, and
+  gives the recovery deadline as an **absolute date and time**, not a duration. A system purge
+  additionally names what survives — user accounts, sign-ins, and seeded maintenance categories.
+  The disabled control is a courtesy; the server-side 409 (FR-ADMIN-PURGE-7) is the real control.
+- **FR-ADMIN-UI-11** — `/admin/purges` is a peer nav section listing purge operations with status
+  filters, a countdown to `purge_after`, a restore action for recoverable operations, and a retry
+  action for operations that failed downstream. Retry must be presented as safe to repeat.
+- **FR-ADMIN-UI-12** — Purge status is rendered in user-facing language, not API vocabulary:
+  `pending` → "Recoverable", `partial` → a specific failure such as "Media not deleted",
+  `reaped` → "Deleted for good", `cancelled` → "Restored". The mapping lives in one module so the
+  API and the UI can diverge without drift.
+- **FR-ADMIN-UI-13** — `/admin/audit` shows the audit log newest-first, distinguishing actions taken
+  by an administrator from those taken by the reaper (actor rendered as "system"), and surfacing the
+  correlation id so a row can be tied back to service logs.
+- **FR-ADMIN-UI-14** — After a successful system purge the client clears its React Query cache and
+  refetches `/auth/me`. The administrator remains inside the admin console rather than being
+  redirected, so they can immediately verify the result and cancel within the recovery window.
+- **FR-ADMIN-UI-15** — All admin mutations invalidate the relevant React Query keys on success and
+  surface API error detail in the toast, consistent with the error handling established on the
+  `fix/invite-accept-flow` branch.
+- **FR-ADMIN-UI-16** — The console requires three UI primitives the kit does not yet have:
+  `dialog`, `table`, and `badge`. They must be added to `apps/web/src/components/ui/` following the
+  existing shadcn conventions of the nine components already there, and must be theme-token driven
+  rather than carrying hard-coded colours.
 
 ## 5. API Surface
 
@@ -592,10 +636,14 @@ confirm each service can resolve its rows from those inputs; see §9.
 - New internal admin routes: stats, stamp, restore, reap.
 
 **`web`**
-- `AuthContext` exposes `platformAdmin`; `RequireAuth` gains an admin-route exemption.
-- New `RequirePlatformAdmin` route wrapper, admin nav entry, and five pages: overview, fleets,
-  fleet detail, purges, audit.
-- New admin API service module and React Query hooks.
+- `AuthContext` exposes `platformAdmin`. `RequireAuth` is **unchanged** — the dedicated admin shell
+  sits outside the fleet-requiring branch of the route tree, so no exemption is needed.
+- New `AdminLayout` (own sidebar, persistent mode band) and a `RequirePlatformAdmin` route wrapper.
+- Admin nav entry in `AppLayout`, conditional on `platformAdmin`.
+- Five admin screens: overview, fleets (two-pane inspector), users, purges, audit.
+- Three new UI primitives — `dialog`, `table`, `badge` — in `apps/web/src/components/ui/`.
+- New admin API service module, React Query hooks, and a purge-status vocabulary module.
+- Visual reference: `ui-directions.html` in this task folder.
 
 **`deploy/k8s`**
 - `PLATFORM_ADMIN_BOOTSTRAP_EMAILS` and `ADMIN_PURGE_RECOVERY_WINDOW` added to the appropriate
@@ -711,9 +759,27 @@ Data integrity
 
 Console
 - [ ] The Admin nav entry is invisible to non-admins and the routes redirect them to `/`.
-- [ ] Fleet and system purge dialogs keep the confirm button disabled until the typed phrase matches
-      exactly.
-- [ ] `/admin/purges` shows a countdown to permanence and a working cancel action.
+- [ ] Admin screens render in `AdminLayout` with the persistent mode band, not in `AppLayout`.
+- [ ] `RequireAuth` is unmodified, and an admin with no fleet still reaches every admin screen
+      without being redirected to `/onboarding`.
+- [ ] The fleet inspector shows list and detail side by side above `md`, and collapses to
+      single-column with back-navigation below it.
+- [ ] The blast-radius panel's counts match the row counts the resulting purge operation reports,
+      exactly, for the same fleet.
+- [ ] The blast-radius panel shows an error and withholds the purge control when counts cannot be
+      computed.
+- [ ] The owner row's remove action is inert; a fleet cannot lose its only owner through the console.
+- [ ] Fleet and system purge dialogs keep the confirm control unavailable until the typed phrase
+      matches exactly, and show the recovery deadline as an absolute date and time.
+- [ ] The system purge dialog names what survives the purge.
+- [ ] `/admin/purges` shows a countdown to permanence, a working restore action, and a retry for
+      operations that failed downstream.
+- [ ] Purge status renders in user-facing language per FR-ADMIN-UI-12, with the mapping in one module.
+- [ ] The audit log distinguishes administrator actions from reaper actions.
+- [ ] `dialog`, `table`, and `badge` are added to the UI kit, are token-driven, and carry no
+      hard-coded colours.
+- [ ] Every admin surface is legible in both themes, with the destructive surfaces verified on the
+      dark ground where `--danger` sits in the 400 band.
 
 Build and deploy
 - [ ] `make ci` passes.
