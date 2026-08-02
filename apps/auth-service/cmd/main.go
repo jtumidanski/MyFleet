@@ -40,11 +40,15 @@ func main() {
 	// seeded admins, not a specific address holding purge-every-fleet
 	// authority. Boot continues regardless — an empty bootstrap list is a
 	// valid, if unusual, deployment.
-	rawBootstrapEmails := config.Get("PLATFORM_ADMIN_BOOTSTRAP_EMAILS", "")
-	if rawBootstrapEmails == "" {
+	//
+	// The warning is keyed off the PARSED set, not the raw string: a value like
+	// " , " is non-empty but parses to zero emails (ParseBootstrapEmails drops
+	// empty segments), and that operator mistake deserves the same loud warning
+	// as leaving the variable unset entirely.
+	bootstrapAdmins := platformadmin.ParseBootstrapEmails(config.Get("PLATFORM_ADMIN_BOOTSTRAP_EMAILS", ""))
+	if len(bootstrapAdmins) == 0 {
 		log.Warn("no PLATFORM_ADMIN_BOOTSTRAP_EMAILS set; no platform admin will be seeded")
 	}
-	bootstrapAdmins := platformadmin.ParseBootstrapEmails(rawBootstrapEmails)
 	adminProv := platformadmin.NewProvider(db)
 	adminAdm := platformadmin.NewAdministrator(db)
 

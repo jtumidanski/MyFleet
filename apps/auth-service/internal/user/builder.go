@@ -18,4 +18,5 @@ func (b *Builder) SetEmail(e string) *Builder           { b.m.email = e; return 
 func (b *Builder) SetDisplayName(n string) *Builder     { b.m.displayName = n; return b }
 func (b *Builder) SetAvatarURL(a string) *Builder       { b.m.avatarURL = a; return b }
 func (b *Builder) SetThemePreference(p string) *Builder { b.m.themePreference = p; return b }
+func (b *Builder) SetEmailVerified(v bool) *Builder     { b.m.emailVerified = v; return b }
 func (b *Builder) Build() Model                         { return b.m }

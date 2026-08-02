@@ -43,6 +43,7 @@ func newTestDB(t *testing.T) *gorm.DB {
 		avatar_url       text,
 		theme_preference text not null default 'system',
 		last_login_at    datetime,
+		email_verified   boolean not null default 0,
 		created_at       datetime,
 		updated_at       datetime
 	)`).Error; err != nil {

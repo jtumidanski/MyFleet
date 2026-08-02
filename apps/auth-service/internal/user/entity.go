@@ -18,6 +18,15 @@ type Entity struct {
 	// (design §3.4), so no insert path depends on it.
 	ThemePreference string `gorm:"not null;default:'system'"`
 	LastLoginAt     time.Time
+	// EmailVerified persists Google's id_token email_verified claim so it
+	// survives past the login request that observed it. platformadmin.SeedFromEmails
+	// runs at boot with no id_token in hand — this column is the only way it can
+	// honor the same verification gate user.Processor.maybeGrantAdmin applies at
+	// login time (FR-ADMIN-AUTH-2's escalation risk otherwise resurfaces on every
+	// restart). Defaults false so a row written before this column existed is
+	// never silently treated as verified; it is refreshed on the user's next
+	// login (ProvisionFromGoogle), same as ThemePreference's backfill above.
+	EmailVerified bool `gorm:"not null;default:false"`
 	// ToEntity never populates CreatedAt (Model carries no such field), so a
 	// full-column gorm.Save from Administrator.Update would otherwise clobber
 	// this with the zero value on every write — including the login-time
@@ -40,9 +49,9 @@ func Make(e Entity) Model {
 	if !IsValidTheme(theme) {
 		theme = ThemeSystem
 	}
-	return Model{id: e.ID, googleSub: e.GoogleSub, email: e.Email, displayName: e.DisplayName, avatarURL: e.AvatarURL, themePreference: theme, lastLoginAt: e.LastLoginAt}
+	return Model{id: e.ID, googleSub: e.GoogleSub, email: e.Email, displayName: e.DisplayName, avatarURL: e.AvatarURL, themePreference: theme, lastLoginAt: e.LastLoginAt, emailVerified: e.EmailVerified}
 }
 
 func (m Model) ToEntity() Entity {
-	return Entity{ID: m.id, GoogleSub: m.googleSub, Email: m.email, DisplayName: m.displayName, AvatarURL: m.avatarURL, ThemePreference: m.themePreference, LastLoginAt: m.lastLoginAt}
+	return Entity{ID: m.id, GoogleSub: m.googleSub, Email: m.email, DisplayName: m.displayName, AvatarURL: m.avatarURL, ThemePreference: m.themePreference, LastLoginAt: m.lastLoginAt, EmailVerified: m.emailVerified}
 }

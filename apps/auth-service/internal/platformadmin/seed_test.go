@@ -20,6 +20,7 @@ func newSeedDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE auth.users (
 			id TEXT PRIMARY KEY, google_sub TEXT, email TEXT, display_name TEXT,
 			avatar_url TEXT, theme_preference TEXT, last_login_at DATETIME,
+			email_verified BOOLEAN NOT NULL DEFAULT 0,
 			created_at DATETIME, updated_at DATETIME)`,
 		`CREATE TABLE auth.platform_admins (
 			user_id TEXT PRIMARY KEY, granted_by TEXT, granted_at DATETIME, revoked_at DATETIME)`,
@@ -52,8 +53,8 @@ func TestParseBootstrapEmails_normalises(t *testing.T) {
 // and re-running it changes nothing.
 func TestSeedFromEmails_grantsExistingUsersAndIsIdempotent(t *testing.T) {
 	db := newSeedDB(t)
-	if err := db.Exec(`INSERT INTO auth.users (id, google_sub, email)
-	                   VALUES ('u1', 'sub-1', 'jtumidanski@gmail.com')`).Error; err != nil {
+	if err := db.Exec(`INSERT INTO auth.users (id, google_sub, email, email_verified)
+	                   VALUES ('u1', 'sub-1', 'jtumidanski@gmail.com', 1)`).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	emails := ParseBootstrapEmails("jtumidanski@gmail.com,absent@example.com")
@@ -87,8 +88,8 @@ func TestSeedFromEmails_grantsExistingUsersAndIsIdempotent(t *testing.T) {
 // allow-list is hand-written in a ConfigMap.
 func TestSeedFromEmails_isCaseInsensitive(t *testing.T) {
 	db := newSeedDB(t)
-	if err := db.Exec(`INSERT INTO auth.users (id, google_sub, email)
-	                   VALUES ('u1', 'sub-1', 'JTumidanski@GMAIL.com')`).Error; err != nil {
+	if err := db.Exec(`INSERT INTO auth.users (id, google_sub, email, email_verified)
+	                   VALUES ('u1', 'sub-1', 'JTumidanski@GMAIL.com', 1)`).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	if _, err := SeedFromEmails(db, ParseBootstrapEmails("jtumidanski@gmail.com")); err != nil {
@@ -124,8 +125,8 @@ func TestProvider_reflectsRevocation(t *testing.T) {
 // and skip it.
 func TestSeedFromEmails_doesNotRegrantARevokedAdmin(t *testing.T) {
 	db := newSeedDB(t)
-	if err := db.Exec(`INSERT INTO auth.users (id, google_sub, email)
-	                   VALUES ('u1', 'sub-1', 'jtumidanski@gmail.com')`).Error; err != nil {
+	if err := db.Exec(`INSERT INTO auth.users (id, google_sub, email, email_verified)
+	                   VALUES ('u1', 'sub-1', 'jtumidanski@gmail.com', 1)`).Error; err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	if err := NewAdministrator(db).Grant("u1", BootstrapGrantedBy); err != nil {
@@ -141,5 +142,31 @@ func TestSeedFromEmails_doesNotRegrantARevokedAdmin(t *testing.T) {
 
 	if ok, err := NewProvider(db).IsAdmin("u1"); err != nil || ok {
 		t.Errorf("a revoked admin must stay revoked across a re-seed, got %v err %v", ok, err)
+	}
+}
+
+// The email_verified gate user.Processor.maybeGrantAdmin applies at login
+// time must also hold at boot: SeedFromEmails runs with no id_token in hand,
+// so it can only honor verification if the flag was persisted at login. A
+// bootstrap-listed address whose stored row is NOT verified must not become
+// an admin — otherwise the escalation the login-time gate exists to close
+// (a corporate address Google marks email_verified: false) reopens on every
+// restart, which is exactly what the login-time fix alone does not prevent.
+func TestSeedFromEmails_skipsUnverifiedEmail(t *testing.T) {
+	db := newSeedDB(t)
+	if err := db.Exec(`INSERT INTO auth.users (id, google_sub, email, email_verified)
+	                   VALUES ('u1', 'sub-1', 'jtumidanski@gmail.com', 0)`).Error; err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	granted, err := SeedFromEmails(db, ParseBootstrapEmails("jtumidanski@gmail.com"))
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if granted != 0 {
+		t.Errorf("want 0 grants for an unverified email, got %d", granted)
+	}
+	if ok, err := NewProvider(db).IsAdmin("u1"); err != nil || ok {
+		t.Errorf("an unverified bootstrap email must not become an admin, got %v err %v", ok, err)
 	}
 }

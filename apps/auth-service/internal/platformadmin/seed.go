@@ -22,9 +22,9 @@ func ParseBootstrapEmails(raw string) map[string]bool {
 	return out
 }
 
-// SeedFromEmails grants the privilege to every EXISTING user whose email is in
-// the set and who has not been explicitly revoked, and returns how many grants
-// it made.
+// SeedFromEmails grants the privilege to every EXISTING, VERIFIED user whose
+// email is in the set and who has not been explicitly revoked, and returns how
+// many grants it made.
 //
 // A bootstrap email with no user row is silently skipped — that is the normal
 // case on a fresh database, and user.Processor's provision-time hook is what
@@ -32,6 +32,13 @@ func ParseBootstrapEmails(raw string) map[string]bool {
 // revoked_at tombstone is also skipped — that is what makes revocation durable
 // across restarts: without this check, every boot would re-grant the very
 // admin an operator just revoked.
+//
+// The email_verified filter mirrors the gate user.Processor.maybeGrantAdmin
+// applies at login time. This function runs at boot with no id_token in hand,
+// so it can only honor verification by reading the persisted column — without
+// it, a corporate address Google marked email_verified: false at login would
+// still be silently granted admin on the next restart, reopening the exact
+// escalation the login-time gate exists to close.
 //
 // The users read is raw SQL rather than a user.Provider call so this package
 // does not import user; both live in the same service and schema, so this is
@@ -46,7 +53,7 @@ func SeedFromEmails(db *gorm.DB, emails map[string]bool) (int, error) {
 	}
 
 	var ids []string
-	if err := db.Raw(`SELECT id FROM auth.users WHERE lower(email) IN ?`, list).Scan(&ids).Error; err != nil {
+	if err := db.Raw(`SELECT id FROM auth.users WHERE lower(email) IN ? AND email_verified = ?`, list, true).Scan(&ids).Error; err != nil {
 		return 0, err
 	}
 

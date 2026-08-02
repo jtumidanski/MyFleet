@@ -54,39 +54,42 @@ func (pr *Processor) ProvisionFromGoogle(gp GoogleProfile) (Model, error) {
 	existing, err := pr.p.GetBySub(gp.Sub)
 	if errors.Is(err, ErrNotFound) {
 		m := NewBuilder().SetGoogleSub(gp.Sub).SetEmail(gp.Email).SetDisplayName(gp.Name).SetAvatarURL(gp.Avatar).Build()
-		m = m.WithLogin(gp.Name, gp.Avatar, time.Now())
+		m = m.WithLogin(gp.Name, gp.Avatar, time.Now(), gp.EmailVerified)
 		created, ierr := pr.a.Insert(m)
 		if ierr != nil {
 			return Model{}, ierr
 		}
-		pr.maybeGrantAdmin(created, gp.EmailVerified)
+		pr.maybeGrantAdmin(created)
 		return created, nil
 	}
 	if err != nil {
 		return Model{}, err
 	}
-	updated, uerr := pr.a.Update(existing.WithLogin(gp.Name, gp.Avatar, time.Now()))
+	updated, uerr := pr.a.Update(existing.WithLogin(gp.Name, gp.Avatar, time.Now(), gp.EmailVerified))
 	if uerr != nil {
 		return Model{}, uerr
 	}
-	pr.maybeGrantAdmin(updated, gp.EmailVerified)
+	pr.maybeGrantAdmin(updated)
 	return updated, nil
 }
 
 // maybeGrantAdmin grants the platform-admin privilege when the provisioned user
 // is on the bootstrap list AND Google's id_token asserted the email is
-// verified. The unverified case is not an error — it is simply not a grant:
-// ordinary login for that user proceeds unaffected, only the admin escalation
-// is withheld.
+// verified as of THIS login (m.EmailVerified(), refreshed by WithLogin above
+// rather than read off the incoming GoogleProfile directly — the persisted
+// value is what platformadmin.SeedFromEmails also reads at boot, so both
+// hooks honor exactly the same bit). The unverified case is not an error — it
+// is simply not a grant: ordinary login for that user proceeds unaffected,
+// only the admin escalation is withheld.
 //
 // A grant failure is logged, not returned. Refusing the login because a grant
 // failed would be a worse outcome than a delayed grant, and the startup seed
 // re-runs on every boot — so the failure is transient by construction.
-func (pr *Processor) maybeGrantAdmin(m Model, emailVerified bool) {
+func (pr *Processor) maybeGrantAdmin(m Model) {
 	if pr.grantAdmin == nil || !pr.bootstrapEmails[strings.ToLower(m.Email())] {
 		return
 	}
-	if !emailVerified {
+	if !m.EmailVerified() {
 		pr.log.WithField("user_id", m.ID()).
 			Warn("bootstrap platform-admin email is on the list but Google has not verified it; refusing the grant")
 		return
