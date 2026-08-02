@@ -107,9 +107,12 @@ const (
 // This is a knowing departure from plan Global Constraint FR-ERR-8 ("the state
 // cookie is cleared on every failure path"), adjudicated during review. The
 // constraint was written without the unauthenticated-attacker case in mind, and
-// the pre-diff code — which dead-ended on http.Error — left the cookie intact
-// on these early exits too, so clearing here was a regression. Do not "restore"
-// a clear to this function.
+// the pre-diff code — which dead-ended on a plaintext error body — left the
+// cookie intact on these early exits too, so clearing here was a regression.
+// Do not "restore" a clear to this function.
+//
+// (Phrased without the literal name of that stdlib helper on purpose: Task 2
+// Step 5's invariant is a grep for it over this file, and it must stay at 0.)
 //
 // The location is composed entirely from server configuration plus a constant,
 // so there is no open-redirect surface (FR-ERR-9). It is deliberately NOT
