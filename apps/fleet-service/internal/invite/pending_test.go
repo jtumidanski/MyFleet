@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -33,7 +34,7 @@ func newPendingRouter(t *testing.T, fleets map[string]string, invites ...Model) 
 
 	adm := NewAdministrator(db)
 	for _, inv := range invites {
-		if _, err := adm.Insert(inv, "trace-test"); err != nil {
+		if _, err := adm.Insert(context.Background(), inv, "trace-test"); err != nil {
 			t.Fatalf("seed invite: %v", err)
 		}
 	}

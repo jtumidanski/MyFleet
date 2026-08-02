@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"context"
 	"time"
 
 	"gorm.io/gorm"
@@ -11,21 +12,26 @@ import (
 )
 
 // Administrator is the write interface for invite data access.
+//
+// Like Provider, every method takes the caller's context first and opens its
+// transaction on db.WithContext(ctx): the *gorm.DB is captured once at startup,
+// so without it a write would run on a bare connection with no deadline and no
+// trace, and an abandoned request's transaction would keep holding its rows.
 type Administrator interface {
 	// Insert creates the invite row and enqueues an invite.created outbox event
 	// in the SAME transaction (FR-EVT-1, FR-EVT-2). A failed enqueue rolls the
 	// invite back — an invite nobody is told about is worse than no invite.
-	Insert(m Model, traceID string) (Model, error)
+	Insert(ctx context.Context, m Model, traceID string) (Model, error)
 	// Resend rotates the token and resets expires_at, enqueuing a fresh
 	// invite.created in the SAME transaction (FR-RSND-2). now is passed in
 	// rather than read internally so the returned Model's updated_at is exactly
 	// the value written — which is what the resend cooldown then reads.
-	Resend(inv Model, newToken string, expiresAt, now time.Time, traceID string) (Model, error)
-	Delete(id string) error
+	Resend(ctx context.Context, inv Model, newToken string, expiresAt, now time.Time, traceID string) (Model, error)
+	Delete(ctx context.Context, id string) error
 	// Accept stamps accepted_at and creates an active membership in one transaction.
 	// Appends a member.invited activity event and enqueues a member.invited
 	// outbox event in the SAME transaction.
-	Accept(inv Model, userID, traceID string) (Model, error)
+	Accept(ctx context.Context, inv Model, userID, traceID string) (Model, error)
 }
 
 // ActivityRecorder appends an activity event on the supplied tx (design §8.2).
@@ -70,9 +76,9 @@ func (a *dbAdministrator) WithCreatedEmitter(emit CreatedEmitter) *dbAdministrat
 	return a
 }
 
-func (a *dbAdministrator) Insert(m Model, traceID string) (Model, error) {
+func (a *dbAdministrator) Insert(ctx context.Context, m Model, traceID string) (Model, error) {
 	e := m.ToEntity()
-	err := a.db.Transaction(func(tx *gorm.DB) error {
+	err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&e).Error; err != nil {
 			return err
 		}
@@ -89,9 +95,9 @@ func (a *dbAdministrator) Insert(m Model, traceID string) (Model, error) {
 	return Make(e), nil
 }
 
-func (a *dbAdministrator) Resend(inv Model, newToken string, expiresAt, now time.Time, traceID string) (Model, error) {
+func (a *dbAdministrator) Resend(ctx context.Context, inv Model, newToken string, expiresAt, now time.Time, traceID string) (Model, error) {
 	var updated Model
-	err := a.db.Transaction(func(tx *gorm.DB) error {
+	err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// updated_at is set explicitly rather than left to GORM so the value we
 		// return is provably the value persisted. The WHERE clause carries a
 		// SECOND guard beyond id: accepted_at IS NULL. Without it, this UPDATE
@@ -153,18 +159,18 @@ func (a *dbAdministrator) Resend(inv Model, newToken string, expiresAt, now time
 	return updated, nil
 }
 
-func (a *dbAdministrator) Delete(id string) error {
-	return a.db.Delete(&Entity{}, "id = ?", id).Error
+func (a *dbAdministrator) Delete(ctx context.Context, id string) error {
+	return a.db.WithContext(ctx).Delete(&Entity{}, "id = ?", id).Error
 }
 
 // Accept runs the accept workflow in a single transaction:
 //  1. Stamp accepted_at on the invite row.
 //  2. Create an active membership for the accepting user.
 //  3. Enqueue a member.invited event in the outbox.
-func (a *dbAdministrator) Accept(inv Model, userID, traceID string) (Model, error) {
+func (a *dbAdministrator) Accept(ctx context.Context, inv Model, userID, traceID string) (Model, error) {
 	now := time.Now()
 	var updated Model
-	err := a.db.Transaction(func(tx *gorm.DB) error {
+	err := a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 1. Stamp accepted_at
 		if err := tx.Model(&Entity{}).Where("id = ?", inv.ID()).Update("accepted_at", &now).Error; err != nil {
 			return err

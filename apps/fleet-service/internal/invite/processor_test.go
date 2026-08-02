@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -24,33 +25,33 @@ type stubProvider struct {
 	lastSince    time.Time
 }
 
-func (s *stubProvider) GetByID(id string) (Model, error) {
+func (s *stubProvider) GetByID(_ context.Context, id string) (Model, error) {
 	if m, ok := s.byID[id]; ok {
 		return m, nil
 	}
 	return Model{}, ErrNotFound
 }
 
-func (s *stubProvider) GetByToken(token string) (Model, error) {
+func (s *stubProvider) GetByToken(_ context.Context, token string) (Model, error) {
 	if m, ok := s.byToken[token]; ok {
 		return m, nil
 	}
 	return Model{}, ErrNotFound
 }
 
-func (s *stubProvider) ListByFleetID(fleetID string) ([]Model, error) {
+func (s *stubProvider) ListByFleetID(_ context.Context, fleetID string) ([]Model, error) {
 	return s.byFleet[fleetID], nil
 }
 
 // Records what the processor asked for, so a test can prove the blank-email
 // guard short-circuits BEFORE the query rather than relying on the stub to
 // return nothing.
-func (s *stubProvider) ListRedeemableByEmail(email string, _ time.Time) ([]Model, error) {
+func (s *stubProvider) ListRedeemableByEmail(_ context.Context, email string, _ time.Time) ([]Model, error) {
 	s.redeemableCalls = append(s.redeemableCalls, email)
 	return s.byEmail[strings.ToLower(email)], nil
 }
 
-func (s *stubProvider) CountByFleetSince(fleetID string, since time.Time) (int64, error) {
+func (s *stubProvider) CountByFleetSince(_ context.Context, fleetID string, since time.Time) (int64, error) {
 	s.lastSince = since
 	return s.countByFleet[fleetID], nil
 }
@@ -134,12 +135,12 @@ func TestCheckCreateLimit(t *testing.T) {
 	sp := &stubProvider{countByFleet: map[string]int64{"f1": 19}}
 	p := NewProcessor(logrus.New(), sp)
 
-	if err := p.CheckCreateLimit("f1", 20, 24*time.Hour, now); err != nil {
+	if err := p.CheckCreateLimit(context.Background(), "f1", 20, 24*time.Hour, now); err != nil {
 		t.Fatalf("19 of 20 must be allowed, got %v", err)
 	}
 
 	sp.countByFleet["f1"] = 20
-	if err := p.CheckCreateLimit("f1", 20, 24*time.Hour, now); !errors.Is(err, server.ErrTooManyRequests) {
+	if err := p.CheckCreateLimit(context.Background(), "f1", 20, 24*time.Hour, now); !errors.Is(err, server.ErrTooManyRequests) {
 		t.Fatalf("at the limit must be 429, got %v", err)
 	}
 
@@ -317,7 +318,7 @@ func TestListRedeemableForEmail_neverQueriesForABlankEmail(t *testing.T) {
 	}}
 	p := NewProcessor(logrus.New(), stub)
 
-	got, err := p.ListRedeemableForEmail("")
+	got, err := p.ListRedeemableForEmail(context.Background(), "")
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
@@ -335,7 +336,7 @@ func TestListRedeemableForEmail_queriesWithTheAuthenticatedAddress(t *testing.T)
 	}}
 	p := NewProcessor(logrus.New(), stub)
 
-	got, err := p.ListRedeemableForEmail("jane@example.com")
+	got, err := p.ListRedeemableForEmail(context.Background(), "jane@example.com")
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}

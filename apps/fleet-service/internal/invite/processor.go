@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"context"
 	"errors"
 	"net/mail"
 	"strings"
@@ -22,8 +23,8 @@ func NewProcessor(log logrus.FieldLogger, p Provider) *Processor {
 }
 
 // ListByFleet returns all invites for a fleet.
-func (pr *Processor) ListByFleet(fleetID string) ([]Model, error) {
-	return pr.p.ListByFleetID(fleetID)
+func (pr *Processor) ListByFleet(ctx context.Context, fleetID string) ([]Model, error) {
+	return pr.p.ListByFleetID(ctx, fleetID)
 }
 
 // ListRedeemableForEmail returns the invites waiting for authedEmail — the
@@ -39,16 +40,16 @@ func (pr *Processor) ListByFleet(fleetID string) ([]Model, error) {
 // packages/shared-go/auth/middleware.go); folding a blank address through the
 // LOWER() comparison would match every blank-address row in the table and hand
 // them all to that caller.
-func (pr *Processor) ListRedeemableForEmail(authedEmail string) ([]Model, error) {
+func (pr *Processor) ListRedeemableForEmail(ctx context.Context, authedEmail string) ([]Model, error) {
 	if authedEmail == "" {
 		return []Model{}, nil
 	}
-	return pr.p.ListRedeemableByEmail(authedEmail, time.Now())
+	return pr.p.ListRedeemableByEmail(ctx, authedEmail, time.Now())
 }
 
 // GetByID fetches an invite by ID.
-func (pr *Processor) GetByID(id string) (Model, error) {
-	m, err := pr.p.GetByID(id)
+func (pr *Processor) GetByID(ctx context.Context, id string) (Model, error) {
+	m, err := pr.p.GetByID(ctx, id)
 	if errors.Is(err, ErrNotFound) {
 		return Model{}, server.ErrNotFound
 	}
@@ -56,8 +57,8 @@ func (pr *Processor) GetByID(id string) (Model, error) {
 }
 
 // GetByToken fetches an invite by its token.
-func (pr *Processor) GetByToken(token string) (Model, error) {
-	m, err := pr.p.GetByToken(token)
+func (pr *Processor) GetByToken(ctx context.Context, token string) (Model, error) {
+	m, err := pr.p.GetByToken(ctx, token)
 	if errors.Is(err, ErrNotFound) {
 		return Model{}, server.ErrNotFound
 	}
@@ -141,8 +142,8 @@ func ValidateInviteEmail(s string) error {
 
 // CheckCreateLimit enforces the per-fleet invite creation window (FR-RATE-1).
 // Over the limit → server.ErrTooManyRequests (429).
-func (pr *Processor) CheckCreateLimit(fleetID string, limit int, window time.Duration, now time.Time) error {
-	n, err := pr.p.CountByFleetSince(fleetID, now.Add(-window))
+func (pr *Processor) CheckCreateLimit(ctx context.Context, fleetID string, limit int, window time.Duration, now time.Time) error {
+	n, err := pr.p.CountByFleetSince(ctx, fleetID, now.Add(-window))
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -211,7 +212,7 @@ func newInviteTestDB(t *testing.T) *gorm.DB {
 func newAcceptRouter(t *testing.T, inv Model) chi.Router {
 	t.Helper()
 	db := newInviteTestDB(t)
-	if _, err := NewAdministrator(db).Insert(inv, "trace-test"); err != nil {
+	if _, err := NewAdministrator(db).Insert(context.Background(), inv, "trace-test"); err != nil {
 		t.Fatalf("seed invite: %v", err)
 	}
 

@@ -1,6 +1,7 @@
 package invite
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"testing"
@@ -88,7 +89,7 @@ func TestInsert_commitsInviteAndOutboxTogether(t *testing.T) {
 		})
 
 	m := newInvite(t, "f1", "a@b.com", "tok-1")
-	created, err := adm.Insert(m, "trace-1")
+	created, err := adm.Insert(context.Background(), m, "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -120,7 +121,7 @@ func TestInsert_rollsBackWhenEmitFails(t *testing.T) {
 	adm := NewAdministrator(db).WithCreatedEmitter(
 		func(*gorm.DB, string, string, string, string, string, string) error { return boom })
 
-	if _, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1"); !errors.Is(err, boom) {
+	if _, err := adm.Insert(context.Background(), newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1"); !errors.Is(err, boom) {
 		t.Fatalf("Insert err = %v, want %v", err, boom)
 	}
 	if n := countRows(t, db, &Entity{}); n != 0 {
@@ -144,14 +145,14 @@ func TestResend_rotatesTokenAndEmitsFreshEvent(t *testing.T) {
 			})
 		})
 
-	orig, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
+	orig, err := adm.Insert(context.Background(), newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
 
 	now := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	newExpiry := now.Add(7 * 24 * time.Hour)
-	updated, err := adm.Resend(orig, "tok-2", newExpiry, now, "trace-2")
+	updated, err := adm.Resend(context.Background(), orig, "tok-2", newExpiry, now, "trace-2")
 	if err != nil {
 		t.Fatalf("Resend: %v", err)
 	}
@@ -169,10 +170,10 @@ func TestResend_rotatesTokenAndEmitsFreshEvent(t *testing.T) {
 	// The old token must no longer resolve — that is what makes the previously
 	// mailed link dead.
 	prov := NewProvider(db)
-	if _, err := prov.GetByToken("tok-1"); !errors.Is(err, ErrNotFound) {
+	if _, err := prov.GetByToken(context.Background(), "tok-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("old token still resolves: %v", err)
 	}
-	if got, err := prov.GetByToken("tok-2"); err != nil || got.ID() != orig.ID() {
+	if got, err := prov.GetByToken(context.Background(), "tok-2"); err != nil || got.ID() != orig.ID() {
 		t.Fatalf("new token lookup: %v %+v", err, got)
 	}
 
@@ -201,17 +202,17 @@ func TestResend_rollsBackWhenEmitFails(t *testing.T) {
 			return boom
 		})
 
-	orig, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
+	orig, err := adm.Insert(context.Background(), newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
 
 	emitOK = false
 	now := time.Now()
-	if _, err := adm.Resend(orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, boom) {
+	if _, err := adm.Resend(context.Background(), orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, boom) {
 		t.Fatalf("Resend err = %v, want %v", err, boom)
 	}
-	if _, err := NewProvider(db).GetByToken("tok-1"); err != nil {
+	if _, err := NewProvider(db).GetByToken(context.Background(), "tok-1"); err != nil {
 		t.Fatalf("original token must survive a rolled-back resend: %v", err)
 	}
 }
@@ -232,18 +233,18 @@ func TestResend_deletedRowDoesNotRotateOrEmit(t *testing.T) {
 			})
 		})
 
-	orig, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
+	orig, err := adm.Insert(context.Background(), newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
 	events = 0 // discard the count from Insert's own emit
 
-	if err := adm.Delete(orig.ID()); err != nil {
+	if err := adm.Delete(context.Background(), orig.ID()); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
 	now := time.Now()
-	if _, err := adm.Resend(orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, server.ErrConflict) {
+	if _, err := adm.Resend(context.Background(), orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, server.ErrConflict) {
 		t.Fatalf("Resend on a deleted row err = %v, want server.ErrConflict", err)
 	}
 	if events != 0 {
@@ -276,7 +277,7 @@ func TestResend_concurrentlyAcceptedDoesNotRotateOrEmit(t *testing.T) {
 			})
 		})
 
-	orig, err := adm.Insert(newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
+	orig, err := adm.Insert(context.Background(), newInvite(t, "f1", "a@b.com", "tok-1"), "trace-1")
 	if err != nil {
 		t.Fatalf("Insert: %v", err)
 	}
@@ -291,16 +292,16 @@ func TestResend_concurrentlyAcceptedDoesNotRotateOrEmit(t *testing.T) {
 	}
 
 	now := time.Now()
-	if _, err := adm.Resend(orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, server.ErrConflict) {
+	if _, err := adm.Resend(context.Background(), orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, server.ErrConflict) {
 		t.Fatalf("Resend on a concurrently-accepted invite err = %v, want server.ErrConflict", err)
 	}
 	if events != 0 {
 		t.Fatalf("invite.created emitted %d time(s) for an accepted invite, want 0", events)
 	}
-	if _, err := NewProvider(db).GetByToken("tok-1"); err != nil {
+	if _, err := NewProvider(db).GetByToken(context.Background(), "tok-1"); err != nil {
 		t.Fatalf("original token must survive: %v", err)
 	}
-	if _, err := NewProvider(db).GetByToken("tok-2"); !errors.Is(err, ErrNotFound) {
+	if _, err := NewProvider(db).GetByToken(context.Background(), "tok-2"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("rotated token must not exist, GetByToken(tok-2) err = %v", err)
 	}
 	if n := countRows(t, db, &sharedevents.OutboxRow{}); n != 1 {

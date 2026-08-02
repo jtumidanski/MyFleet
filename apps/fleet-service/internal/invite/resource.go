@@ -95,7 +95,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 
 			// Per-fleet creation window (FR-RATE-1). Checked before minting a
 			// token so a throttled request costs no entropy and no DB write.
-			if err := proc.CheckCreateLimit(fleetID, limits.CreatePerWindow, limits.CreateWindow, time.Now()); err != nil {
+			if err := proc.CheckCreateLimit(req.Context(), fleetID, limits.CreatePerWindow, limits.CreateWindow, time.Now()); err != nil {
 				// ErrTooManyRequests is the routine rate-limit outcome; anything
 				// else means the count query itself failed.
 				if !errors.Is(err, server.ErrTooManyRequests) {
@@ -131,7 +131,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			created, err := adm.Insert(m, traceID)
+			created, err := adm.Insert(req.Context(), m, traceID)
 			if err != nil {
 				log.WithError(err).WithFields(logrus.Fields{
 					"fleet_id": fleetID,
@@ -152,7 +152,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				server.WriteError(w, err)
 				return
 			}
-			ms, err := proc.ListByFleet(fleetID)
+			ms, err := proc.ListByFleet(req.Context(), fleetID)
 			if err != nil {
 				log.WithError(err).WithField("fleet_id", fleetID).Error("list invites")
 				server.WriteError(w, err)
@@ -180,7 +180,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		r.Get("/invites/pending", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 
-			ms, err := proc.ListRedeemableForEmail(identity.Email)
+			ms, err := proc.ListRedeemableForEmail(req.Context(), identity.Email)
 			if err != nil {
 				log.WithError(err).WithField("correlation_id",
 					telemetry.CorrelationIDFromContext(req.Context())).
@@ -212,7 +212,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 
-			inv, err := proc.GetByID(id)
+			inv, err := proc.GetByID(req.Context(), id)
 			if err != nil {
 				if errors.Is(err, server.ErrNotFound) {
 					server.WriteError(w, server.ErrNotFound)
@@ -245,7 +245,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			if err := adm.Delete(id); err != nil {
+			if err := adm.Delete(req.Context(), id); err != nil {
 				log.WithError(err).WithFields(logrus.Fields{
 					"invite_id": id,
 					"fleet_id":  inv.FleetID(),
@@ -266,7 +266,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			inviteID := chi.URLParam(req, "inviteId")
 			traceID := telemetry.CorrelationIDFromContext(req.Context())
 
-			inv, err := proc.GetByID(inviteID)
+			inv, err := proc.GetByID(req.Context(), inviteID)
 			if err != nil {
 				if !errors.Is(err, server.ErrNotFound) {
 					log.WithError(err).WithFields(logrus.Fields{
@@ -333,7 +333,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				server.WriteError(w, err)
 				return
 			}
-			updated, err := adm.Resend(inv, token, now.Add(defaultExpiry), now, traceID)
+			updated, err := adm.Resend(req.Context(), inv, token, now.Add(defaultExpiry), now, traceID)
 			if err != nil {
 				// ErrConflict here is the TOCTOU race (deleted/accepted
 				// concurrently, see administrator.go Resend) — a routine
@@ -357,7 +357,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			token := chi.URLParam(req, "token")
 			traceID := telemetry.CorrelationIDFromContext(req.Context())
 
-			inv, err := proc.GetByToken(token)
+			inv, err := proc.GetByToken(req.Context(), token)
 			if err != nil {
 				if errors.Is(err, server.ErrNotFound) {
 					server.WriteError(w, server.ErrNotFound)
@@ -396,7 +396,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				return
 			}
 
-			updated, err := adm.Accept(inv, identity.UserID, traceID)
+			updated, err := adm.Accept(req.Context(), inv, identity.UserID, traceID)
 			if err != nil {
 				log.WithError(err).WithFields(logrus.Fields{
 					"invite_id": inv.ID(),

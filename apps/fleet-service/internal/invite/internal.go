@@ -44,7 +44,7 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB, fleets FleetN
 			// Returned even when accepted or expired (FR-INT-3) — the consumer
 			// decides whether to send, and needs to tell "stale" apart from
 			// "deleted" to avoid pointless retries.
-			inv, err := proc.GetByID(inviteID)
+			inv, err := proc.GetByID(req.Context(), inviteID)
 			if err != nil {
 				if errors.Is(err, server.ErrNotFound) {
 					server.WriteError(w, server.ErrNotFound)

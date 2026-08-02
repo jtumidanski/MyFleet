@@ -1,24 +1,33 @@
 package invite
 
 import (
+	"context"
 	"errors"
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/database"
 )
 
 var ErrNotFound = errors.New("invite not found")
 
 // Provider is the read-only interface for invite data access.
+//
+// Every method takes the caller's context as its first argument and runs its
+// query on db.WithContext(ctx). The *gorm.DB the provider holds is captured once
+// at startup; without WithContext every query would run on that bare connection,
+// so a client that disconnected mid-request would leave the query running, and
+// no query would carry a deadline or join the request's trace.
 type Provider interface {
-	GetByID(id string) (Model, error)
-	GetByToken(token string) (Model, error)
-	ListByFleetID(fleetID string) ([]Model, error)
-	ListRedeemableByEmail(email string, now time.Time) ([]Model, error)
+	GetByID(ctx context.Context, id string) (Model, error)
+	GetByToken(ctx context.Context, token string) (Model, error)
+	ListByFleetID(ctx context.Context, fleetID string) ([]Model, error)
+	ListRedeemableByEmail(ctx context.Context, email string, now time.Time) ([]Model, error)
 	// CountByFleetSince backs the per-fleet creation rate limit. It is a query,
 	// not an in-process counter, because fleet-service runs multiple replicas
 	// and a per-pod limiter enforces nothing (FR-RATE-1).
-	CountByFleetSince(fleetID string, since time.Time) (int64, error)
+	CountByFleetSince(ctx context.Context, fleetID string, since time.Time) (int64, error)
 }
 
 type dbProvider struct{ db *gorm.DB }
@@ -26,26 +35,30 @@ type dbProvider struct{ db *gorm.DB }
 // NewProvider returns a read-only Provider backed by the given database.
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
-func (p *dbProvider) GetByID(id string) (Model, error) {
-	var e Entity
-	if err := p.db.First(&e, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return Model{}, ErrNotFound
+func (p *dbProvider) GetByID(ctx context.Context, id string) (Model, error) {
+	return database.Query(func() (Model, error) {
+		var e Entity
+		if err := p.db.WithContext(ctx).First(&e, "id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return Model{}, ErrNotFound
+			}
+			return Model{}, err
 		}
-		return Model{}, err
-	}
-	return Make(e), nil
+		return Make(e), nil
+	})()
 }
 
-func (p *dbProvider) GetByToken(token string) (Model, error) {
-	var e Entity
-	if err := p.db.First(&e, "token = ?", token).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return Model{}, ErrNotFound
+func (p *dbProvider) GetByToken(ctx context.Context, token string) (Model, error) {
+	return database.Query(func() (Model, error) {
+		var e Entity
+		if err := p.db.WithContext(ctx).First(&e, "token = ?", token).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return Model{}, ErrNotFound
+			}
+			return Model{}, err
 		}
-		return Model{}, err
-	}
-	return Make(e), nil
+		return Make(e), nil
+	})()
 }
 
 // ListRedeemableByEmail returns the invites addressed to email that an accept
@@ -57,39 +70,47 @@ func (p *dbProvider) GetByToken(token string) (Model, error) {
 //
 // A blank email is rejected by the caller (Processor.ListRedeemableForEmail),
 // not here, so this stays a plain query.
-func (p *dbProvider) ListRedeemableByEmail(email string, now time.Time) ([]Model, error) {
-	var es []Entity
-	err := p.db.
-		Where("LOWER(email) = LOWER(?)", email).
-		Where("accepted_at IS NULL").
-		Where("expires_at > ?", now).
-		Find(&es).Error
-	if err != nil {
-		return nil, err
-	}
+func (p *dbProvider) ListRedeemableByEmail(ctx context.Context, email string, now time.Time) ([]Model, error) {
+	return database.SliceQuery(func() ([]Model, error) {
+		var es []Entity
+		err := p.db.WithContext(ctx).
+			Where("LOWER(email) = LOWER(?)", email).
+			Where("accepted_at IS NULL").
+			Where("expires_at > ?", now).
+			Find(&es).Error
+		if err != nil {
+			return nil, err
+		}
+		return makeAll(es), nil
+	})()
+}
+
+func (p *dbProvider) ListByFleetID(ctx context.Context, fleetID string) ([]Model, error) {
+	return database.SliceQuery(func() ([]Model, error) {
+		var es []Entity
+		if err := p.db.WithContext(ctx).Where("fleet_id = ?", fleetID).Find(&es).Error; err != nil {
+			return nil, err
+		}
+		return makeAll(es), nil
+	})()
+}
+
+func (p *dbProvider) CountByFleetSince(ctx context.Context, fleetID string, since time.Time) (int64, error) {
+	return database.Query(func() (int64, error) {
+		var n int64
+		err := p.db.WithContext(ctx).Model(&Entity{}).
+			Where("fleet_id = ? AND created_at > ?", fleetID, since).
+			Count(&n).Error
+		return n, err
+	})()
+}
+
+// makeAll converts a slice of rows to Models, always returning a non-nil slice
+// so a caller marshalling the result renders [] rather than null.
+func makeAll(es []Entity) []Model {
 	out := make([]Model, 0, len(es))
 	for _, e := range es {
 		out = append(out, Make(e))
 	}
-	return out, nil
-}
-
-func (p *dbProvider) ListByFleetID(fleetID string) ([]Model, error) {
-	var es []Entity
-	if err := p.db.Where("fleet_id = ?", fleetID).Find(&es).Error; err != nil {
-		return nil, err
-	}
-	out := make([]Model, 0, len(es))
-	for _, e := range es {
-		out = append(out, Make(e))
-	}
-	return out, nil
-}
-
-func (p *dbProvider) CountByFleetSince(fleetID string, since time.Time) (int64, error) {
-	var n int64
-	err := p.db.Model(&Entity{}).
-		Where("fleet_id = ? AND created_at > ?", fleetID, since).
-		Count(&n).Error
-	return n, err
+	return out
 }
