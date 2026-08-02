@@ -76,3 +76,28 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/imagePullPolicy
         value: IfNotPresent
+  # Local mail goes to the bundled Mailpit sink. Putting this override in the
+  # OVERLAY rather than the base is what keeps SMTP_TLS_MODE=none structurally
+  # unable to reach main (FR-DEV-2).
+  - target:
+      kind: ConfigMap
+      name: notification-service-config
+    patch: |-
+      - op: replace
+        path: /data/SMTP_ENABLED
+        value: "true"
+      - op: replace
+        path: /data/SMTP_HOST
+        value: "mailpit"
+      - op: replace
+        path: /data/SMTP_PORT
+        value: "1025"
+      - op: replace
+        path: /data/SMTP_TLS_MODE
+        value: "none"
+      - op: replace
+        path: /data/SMTP_FROM_ADDRESS
+        value: "invites@myfleet.home"
+      - op: replace
+        path: /data/PUBLIC_WEB_URL
+        value: "http://myfleet.home"

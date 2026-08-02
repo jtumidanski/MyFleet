@@ -28,6 +28,22 @@ var errInternal = errors.New("internal server error")
 var errThemeValidation = fmt.Errorf("%w: themePreference must be one of light, dark, system",
 	server.ErrValidation)
 
+// nullIfEmpty renders an absent token claim as JSON `null` rather than `""`.
+//
+// auth.Identity holds every claim as a Go string, so "the user has no fleet"
+// and "the user's fleet id is the empty string" are indistinguishable by the
+// time they reach here — and `""` marshals to a value the client reads as
+// present. A fleetless user then passed the SPA's `activeFleetId === null`
+// guard and failed every page's `!activeFleetId` check, landing on
+// "No fleet selected" with onboarding unreachable. The absent claim is a
+// distinct state and the wire must say so.
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 // InitializeRoutes wires GET /auth/me (design §8.1, FR-AUTH-3) and
 // PATCH /auth/me (PRD §5.2). Active fleet/role are read from the validated
 // token's Identity; profile from the DB.
@@ -62,7 +78,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Router) {
 			}
 			server.WriteJSON(w, http.StatusOK, server.Document{
 				Data: Transform(m),
-				Meta: map[string]any{"activeFleetId": id.ActiveFleetID, "role": id.Role},
+				Meta: map[string]any{
+					"activeFleetId": nullIfEmpty(id.ActiveFleetID),
+					"role":          nullIfEmpty(id.Role),
+				},
 			})
 		})
 

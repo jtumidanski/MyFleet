@@ -1,22 +1,9 @@
-import { StatusBadge, formatMileage, type VehicleStatus } from '@myfleet/ui-components';
+import { formatMileage } from '@myfleet/ui-components';
 import { Card, CardContent } from '../../../ui/card';
 import { Button } from '../../../ui/button';
 import { VehiclePhotoThumbnail } from '../VehiclePhotoThumbnail';
 import { useVehicleMedia } from '../../../../lib/hooks/api/media';
 import type { Vehicle } from '../../../../types/models/vehicle';
-
-const KNOWN_STATUSES: readonly VehicleStatus[] = [
-  'Healthy',
-  'Upcoming Maintenance',
-  'Overdue',
-  'Inactive',
-];
-
-function asVehicleStatus(value: string | undefined): VehicleStatus | null {
-  return value && (KNOWN_STATUSES as readonly string[]).includes(value)
-    ? (value as VehicleStatus)
-    : null;
-}
 
 /** How many tiles the thumbnail strip shows before collapsing the rest into "+N". */
 const STRIP_SIZE = 3;
@@ -30,9 +17,9 @@ interface VehicleIdentityRailProps {
 }
 
 /**
- * The vehicle's identity card: primary photo, title/status, spec line, key
- * facts, a thumbnail strip into the gallery, and an Edit affordance for
- * writers.
+ * The vehicle's identity card: primary photo, key facts, a thumbnail strip
+ * into the gallery, and an Edit affordance for writers. Title, status and spec
+ * line sit in the page's PageHeader, not here (see VehicleDetailPage).
  */
 export function VehicleIdentityRail({
   vehicle,
@@ -44,12 +31,10 @@ export function VehicleIdentityRail({
   const { attributes } = vehicle;
   const { data: mediaRefs } = useVehicleMedia(vehicle.id);
 
-  const status = asVehicleStatus(attributes.status);
+  // Title and status moved to the page's PageHeader (task-015). This is kept
+  // only as the photo's alt text.
   const title =
     attributes.nickname?.trim() || `${attributes.year} ${attributes.make} ${attributes.model}`;
-  const specLine = `${attributes.year} ${attributes.make} ${attributes.model}${
-    attributes.trim ? ` ${attributes.trim}` : ''
-  }`;
 
   // The primary photo comes from the media list's flagged resource, not
   // vehicle.attributes.primaryImageMediaId — the two are set by the same
@@ -68,14 +53,6 @@ export function VehicleIdentityRail({
           vehicleLabel={title}
           className="h-40 w-full rounded-md"
         />
-
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold">{title}</h1>
-            {status && <StatusBadge status={status} />}
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{specLine}</p>
-        </div>
 
         <dl className="grid grid-cols-2 gap-3 text-sm">
           <div>

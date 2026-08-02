@@ -32,6 +32,7 @@ export const inviteKeys = {
   all: ['invites'] as const,
   lists: () => [...inviteKeys.all, 'list'] as const,
   list: (params: { fleetId: string }) => [...inviteKeys.lists(), params] as const,
+  pending: () => [...inviteKeys.all, 'pending'] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,27 @@ export function useInvites(fleetId: string | null | undefined) {
   });
 }
 
+/**
+ * GET /api/fleet/invites/pending — invites waiting for the signed-in user.
+ *
+ * Unlike every other invite query this one is not fleet-scoped, and it is meant
+ * to run for a user who has no fleet at all: it is what makes an invite
+ * discoverable to someone who was invited before they had an account and never
+ * received the link.
+ *
+ * `staleTime: 0` — the invitee may be looking at this page precisely because
+ * someone just invited them, and a cached "nothing waiting" is the failure this
+ * hook exists to prevent.
+ */
+export function usePendingInvites() {
+  return useQuery({
+    queryKey: inviteKeys.pending(),
+    queryFn: () => inviteService.listPending(),
+    staleTime: 0,
+    select: (result) => result.data,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------
@@ -68,6 +90,26 @@ export function useCreateInvite(fleetId: string) {
       void queryClient.invalidateQueries({ queryKey: inviteKeys.lists() });
     },
   });
+}
+
+/**
+ * Maps invite API failures to copy a person can act on (FR-UI-4).
+ *
+ * Kept here rather than in a shared error module: this is invite-specific copy,
+ * and the two 429s need different sentences, which a generic status-to-string
+ * map could not express.
+ */
+export function inviteErrorMessage(err: unknown, action: 'create' | 'resend'): string {
+  const apiError = createErrorFromUnknown(err);
+  if (apiError.status === 429) {
+    return action === 'create'
+      ? "You've sent too many invites today. Try again tomorrow."
+      : 'You just resent this invite. Wait a few minutes before trying again.';
+  }
+  if (apiError.status === 409 && action === 'resend') {
+    return 'That invite has already been accepted.';
+  }
+  return apiError.message || `Could not ${action} invite`;
 }
 
 /**
@@ -132,6 +174,28 @@ export function useAcceptInvite() {
       // own handler on the very same request — so both must prefer it or the
       // user reads "conflict" next to the real reason.
       toast.error(apiError.detail || apiError.message || 'Could not accept invite');
+    },
+  });
+}
+
+/**
+ * POST /api/fleet/fleets/{fleetId}/invites/{inviteId}/resend — owner-only.
+ *
+ * Invalidating the list is REQUIRED, not cosmetic: resend rotates the token, so
+ * a stale cache would hand the copy-link button a dead token.
+ */
+export function useResendInvite(fleetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) => inviteService.resendInvite(fleetId, inviteId),
+    onSuccess: () => {
+      toast.success('Invite resent');
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: inviteKeys.lists() });
+    },
+    onError: (err) => {
+      toast.error(inviteErrorMessage(err, 'resend'));
     },
   });
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
+import { StatusBadge } from '@myfleet/ui-components';
 import { useAuth } from '../context/AuthContext';
 import { useVehicle, useRestoreVehicle } from '../lib/hooks/api/vehicles';
 import { useMaintenanceSchedules, useMaintenanceCategories } from '../lib/hooks/api/maintenance';
@@ -27,11 +28,21 @@ import { DeleteVehicleDialog } from '../components/features/vehicles/dialogs/Del
 import { PhotoGalleryDialog } from '../components/features/vehicles/dialogs/PhotoGalleryDialog';
 import { Skeleton } from '../components/ui/skeleton';
 import { Button } from '../components/ui/button';
+import { asVehicleStatus } from '../components/features/vehicles/vehicleBanner';
+import { PageHeader } from '../components/PageHeader';
 import type { VehicleRecordRow } from '../lib/vehicleRecords';
 import type { MaintenanceSchedule } from '../types/models/maintenanceSchedule';
 
 /** Which single dialog, if any, is open. Only one at a time — opening a new one replaces whatever was open. */
 type OpenDialog = QuickAction | 'edit' | 'gallery' | 'complete' | null;
+
+/**
+ * Shared by all three render branches. Task-015 requires the title's box to
+ * stay put when data lands (FR-10/FR-16), which only holds if the loading and
+ * not-found branches use the redesign's wide container too — not the
+ * `max-w-2xl` they inherited from the pre-redesign page.
+ */
+const PAGE_CONTAINER = 'mx-auto w-full max-w-[1600px] space-y-6';
 
 export function VehicleDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -86,24 +97,56 @@ export function VehicleDetailPage() {
     }
   };
 
+  // Both non-loaded branches carry the SAME container and width as the loaded
+  // branch (FR-10/FR-16), and a real heading rather than a heading-shaped
+  // skeleton: the title text swaps when data lands, but its box does not move.
   if (isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-40 w-full max-w-2xl" />
+      <div className={PAGE_CONTAINER}>
+        <PageHeader title="Vehicle" />
+        <Skeleton className="h-40 w-full" />
       </div>
     );
   }
 
   if (!vehicle) {
-    return <p className="text-muted-foreground">Vehicle not found.</p>;
+    return (
+      <div className={PAGE_CONTAINER}>
+        <PageHeader title="Vehicle" />
+        <p className="text-muted-foreground">Vehicle not found.</p>
+      </div>
+    );
   }
 
   const maintenanceDialogOpen = openDialog === 'maintenance' || openDialog === 'modification';
   const maintenanceDialogKind = openDialog === 'modification' ? 'modification' : 'maintenance';
 
+  // Identity copy for the header. Lifted out of VehicleIdentityRail, which
+  // rendered it before task-015's PageHeader convention reached this page.
+  const { attributes } = vehicle;
+  const status = asVehicleStatus(attributes.status);
+  const title =
+    attributes.nickname?.trim() || `${attributes.year} ${attributes.make} ${attributes.model}`;
+  const specLine = `${attributes.year} ${attributes.make} ${attributes.model}${
+    attributes.trim ? ` ${attributes.trim}` : ''
+  }`;
+
   return (
-    <div className="mx-auto w-full max-w-[1600px]">
+    <div className={PAGE_CONTAINER}>
+      {/*
+       * Title, status and spec line live here rather than in the identity rail
+       * the design sketched them into (design §5): task-015 landed the
+       * PageHeader convention across every authenticated page while this
+       * redesign was in flight, and a heading rendered only inside the rail
+       * would have moved the title's box between the loading and loaded
+       * states.
+       */}
+      <PageHeader
+        title={title}
+        titleAdornment={status && <StatusBadge status={status} />}
+        description={specLine}
+      />
+
       {!!recordsState.categoriesError && (
         <p className="mb-4 rounded-md border border-danger-border bg-danger-subtle px-3 py-2 text-sm text-danger-subtle-foreground">
           {createErrorFromUnknown(recordsState.categoriesError).message ||

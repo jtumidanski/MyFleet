@@ -11,3 +11,12 @@ func TestVehicleCreatedData_jsonTags(t *testing.T) {
 		t.Fatalf("unexpected json: %s", b)
 	}
 }
+
+// The token is a bearer credential and must never ride the event bus (FR-EVT-3).
+// Pinning the exact JSON is what makes an accidentally-added Token field fail here.
+func TestInviteCreatedData_jsonTags(t *testing.T) {
+	b, _ := json.Marshal(InviteCreatedData{InviteID: "i1", Email: "a@b.com", Role: "member"})
+	if string(b) != `{"invite_id":"i1","email":"a@b.com","role":"member"}` {
+		t.Fatalf("unexpected json: %s", b)
+	}
+}
