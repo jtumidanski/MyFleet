@@ -14,6 +14,11 @@ type Administrator interface {
 	// in the SAME transaction (FR-EVT-1, FR-EVT-2). A failed enqueue rolls the
 	// invite back — an invite nobody is told about is worse than no invite.
 	Insert(m Model, traceID string) (Model, error)
+	// Resend rotates the token and resets expires_at, enqueuing a fresh
+	// invite.created in the SAME transaction (FR-RSND-2). now is passed in
+	// rather than read internally so the returned Model's updated_at is exactly
+	// the value written — which is what the resend cooldown then reads.
+	Resend(inv Model, newToken string, expiresAt, now time.Time, traceID string) (Model, error)
 	Delete(id string) error
 	// Accept stamps accepted_at and creates an active membership in one transaction.
 	// Appends a member.invited activity event and enqueues a member.invited
@@ -80,6 +85,43 @@ func (a *dbAdministrator) Insert(m Model, traceID string) (Model, error) {
 		return Model{}, err
 	}
 	return Make(e), nil
+}
+
+func (a *dbAdministrator) Resend(inv Model, newToken string, expiresAt, now time.Time, traceID string) (Model, error) {
+	var updated Model
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		// updated_at is set explicitly rather than left to GORM so the value we
+		// return is provably the value persisted.
+		res := tx.Model(&Entity{}).Where("id = ?", inv.ID()).Updates(map[string]any{
+			"token":      newToken,
+			"expires_at": expiresAt,
+			"updated_at": now,
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		updated = Make(Entity{
+			ID:              inv.ID(),
+			FleetID:         inv.FleetID(),
+			Email:           inv.Email(),
+			Role:            inv.Role(),
+			Token:           newToken,
+			ExpiresAt:       expiresAt,
+			AcceptedAt:      inv.AcceptedAt(),
+			InvitedByUserID: inv.InvitedByUserID(),
+			UpdatedAt:       now,
+		})
+		// FATAL: a failed enqueue rolls the rotation back. Rotating without
+		// emitting would kill the previously mailed link and send nothing new.
+		if a.emitCreated != nil {
+			return a.emitCreated(tx, inv.FleetID(), inv.InvitedByUserID(), traceID, inv.ID(), inv.Email(), inv.Role())
+		}
+		return nil
+	})
+	if err != nil {
+		return Model{}, err
+	}
+	return updated, nil
 }
 
 func (a *dbAdministrator) Delete(id string) error {

@@ -2,6 +2,7 @@ package invite
 
 import (
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -118,5 +119,89 @@ func TestInsert_rollsBackWhenEmitFails(t *testing.T) {
 	}
 	if n := countRows(t, db, &sharedevents.OutboxRow{}); n != 0 {
 		t.Fatalf("want 0 outbox rows after rollback, got %d", n)
+	}
+}
+
+// FR-RSND-2: rotation is an UPDATE, so token's unique index still holds and the
+// old link resolves to no row (404 on accept), which is acceptance criterion 4.
+func TestResend_rotatesTokenAndEmitsFreshEvent(t *testing.T) {
+	db := newInviteDB(t)
+	events := 0
+	adm := NewAdministrator(db).WithCreatedEmitter(
+		func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
+			events++
+			return sharedevents.Enqueue(tx, sharedevents.Envelope{
+				EventID: "e" + strconv.Itoa(events), Type: "invite.created", FleetID: fleetID})
+		})
+
+	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	now := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	newExpiry := now.Add(7 * 24 * time.Hour)
+	updated, err := adm.Resend(orig, "tok-2", newExpiry, now, "trace-2")
+	if err != nil {
+		t.Fatalf("Resend: %v", err)
+	}
+
+	if updated.Token() != "tok-2" {
+		t.Fatalf("token=%q want tok-2", updated.Token())
+	}
+	if !updated.ExpiresAt().Equal(newExpiry) {
+		t.Fatalf("expires_at=%v want %v", updated.ExpiresAt(), newExpiry)
+	}
+	if !updated.UpdatedAt().Equal(now) {
+		t.Fatalf("updated_at=%v want %v", updated.UpdatedAt(), now)
+	}
+
+	// The old token must no longer resolve — that is what makes the previously
+	// mailed link dead.
+	prov := NewProvider(db)
+	if _, err := prov.GetByToken("tok-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("old token still resolves: %v", err)
+	}
+	if got, err := prov.GetByToken("tok-2"); err != nil || got.ID() != orig.ID() {
+		t.Fatalf("new token lookup: %v %+v", err, got)
+	}
+
+	// Exactly one row was updated, not inserted, and a SECOND event was emitted
+	// with a new event_id — that new id is what lets it past the consumer's
+	// (event_id, consumer) ledger (FR-EVT-4).
+	if n := countRows(t, db, &Entity{}); n != 1 {
+		t.Fatalf("want 1 invite row after resend, got %d", n)
+	}
+	if n := countRows(t, db, &sharedevents.OutboxRow{}); n != 2 {
+		t.Fatalf("want 2 outbox rows after resend, got %d", n)
+	}
+}
+
+// A failed enqueue must leave the token unrotated — otherwise the previously
+// mailed link dies and no new mail is ever sent.
+func TestResend_rollsBackWhenEmitFails(t *testing.T) {
+	db := newInviteDB(t)
+	boom := errors.New("outbox unavailable")
+	emitOK := true
+	adm := NewAdministrator(db).WithCreatedEmitter(
+		func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
+			if emitOK {
+				return sharedevents.Enqueue(tx, sharedevents.Envelope{EventID: "e1", Type: "invite.created", FleetID: fleetID})
+			}
+			return boom
+		})
+
+	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+
+	emitOK = false
+	now := time.Now()
+	if _, err := adm.Resend(orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, boom) {
+		t.Fatalf("Resend err = %v, want %v", err, boom)
+	}
+	if _, err := NewProvider(db).GetByToken("tok-1"); err != nil {
+		t.Fatalf("original token must survive a rolled-back resend: %v", err)
 	}
 }
