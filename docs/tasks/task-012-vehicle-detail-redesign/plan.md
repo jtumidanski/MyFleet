@@ -221,6 +221,16 @@ type Provider interface {
 
 // visibleTo scopes a query to system rows plus one fleet's own.
 func visibleTo(q *gorm.DB, fleetID string) *gorm.DB {
+	// The empty-fleetID branch is not a shortcut: fleet_id is uuid in
+	// PostgreSQL, and binding "" fails at bind time (SQLSTATE 22P02) before any
+	// row is evaluated, so the IS NULL disjunct would never rescue it. A caller
+	// with no active fleet must still see system categories.
+	//
+	// No test in this package catches the removal of this branch — the suite
+	// runs on SQLite, which does not type-check bind parameters.
+	if fleetID == "" {
+		return q.Where("fleet_id IS NULL")
+	}
 	return q.Where("fleet_id IS NULL OR fleet_id = ?", fleetID)
 }
 
