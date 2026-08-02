@@ -120,6 +120,13 @@ jobs:
       - name: Check manifests
         run: make manifests
 
+      # See pr.yml's manifests job for why this lives here. On this workflow it
+      # is also a deploy gate: bump-overlay waits on `manifests`, so a Carfax
+      # template that has drifted between the TS default, the served
+      # config.json and the ConfigMap cannot reach the cluster.
+      - name: Check Carfax URL template
+        run: make carfax-template
+
   # ── Publish container images to GHCR ─────────────────────────────────────────
   # Deliberately has no `needs`: see the note above the jobs block.
   publish:
