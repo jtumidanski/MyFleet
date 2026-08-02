@@ -18,6 +18,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/jwks"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/membership"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/oidc"
+	"github.com/jtumidanski/myfleet/apps/auth-service/internal/platformadmin"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/session"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/user"
 )
@@ -26,9 +27,25 @@ func main() {
 	log := telemetry.NewLogger()
 	telemetry.InitTracer("auth-service")
 
-	db, err := database.Connect(log, database.SetMigrations(user.Migration, session.Migration))
+	db, err := database.Connect(log, database.SetMigrations(
+		user.Migration, session.Migration, platformadmin.Migration))
 	if err != nil {
 		log.WithError(err).Fatal("db connect")
+	}
+
+	// PLATFORM_ADMIN_BOOTSTRAP_EMAILS seeds auth.platform_admins and is never
+	// consulted per request (FR-ADMIN-AUTH-3): the TABLE is the runtime source
+	// of truth, so an admin can be revoked with a DELETE and no redeploy.
+	bootstrapAdmins := platformadmin.ParseBootstrapEmails(
+		config.Get("PLATFORM_ADMIN_BOOTSTRAP_EMAILS", "jtumidanski@gmail.com"))
+	adminAdm := platformadmin.NewAdministrator(db)
+
+	// Hook 1 of 2: grant to bootstrap users that already exist. Idempotent
+	// across restarts (FR-ADMIN-AUTH-1).
+	if granted, serr := platformadmin.SeedFromEmails(db, bootstrapAdmins); serr != nil {
+		log.WithError(serr).Fatal("seed platform admins")
+	} else if granted > 0 {
+		log.WithField("granted", granted).Info("seeded platform admins")
 	}
 
 	// In-memory signing key. auth-service validates its OWN tokens against this
@@ -58,7 +75,12 @@ func main() {
 		cookieSecure = true
 	}
 
-	users := user.NewProcessor(log, userProv, user.NewAdministrator(db))
+	// Hook 2 of 2: grant at provisioning time, for a bootstrap user who did not
+	// exist when the seed ran (FR-ADMIN-AUTH-2).
+	users := user.NewProcessor(log, userProv, user.NewAdministrator(db)).
+		WithBootstrapAdmins(bootstrapAdmins, func(userID string) error {
+			return adminAdm.Grant(userID, platformadmin.BootstrapGrantedBy)
+		})
 
 	oidcProc := oidc.NewProcessor(
 		config.MustGet("GOOGLE_CLIENT_ID"),
