@@ -218,6 +218,55 @@ func TestList_noActiveFleetSeesSystemOnly(t *testing.T) {
 	}
 }
 
+// TestFindByName_systemRowWinsDeterministicTie proves the explicit tie-break
+// Order in FindByName, not implicit id ordering. The unique index on
+// (fleet_id, name, kind) does not rule out a system row and a fleet-scoped
+// row sharing a name+kind (PostgreSQL/SQLite both treat every NULL fleet_id
+// as distinct), so this situation is real, just rare.
+//
+// The fleet row is deliberately given a lexicographically SMALLER id than
+// the system row. GORM's implicit fallback for First() with no explicit
+// Order is "order by primary key ascending" — so if FindByName's CASE-based
+// Order were ever removed, this specific id pairing would make the fleet
+// row win instead of the system row, failing this test deterministically
+// rather than only some fraction of the time (as it would with random
+// UUIDs, where either row could sort first).
+func TestFindByName_systemRowWinsDeterministicTie(t *testing.T) {
+	db := newTestDB(t)
+	fleetA := "11111111-1111-1111-1111-111111111111"
+
+	fleetRowID := "00000000-0000-0000-0000-000000000001"
+	systemRowID := "ffffffff-ffff-ffff-ffff-fffffffffffe"
+	if err := db.Create(&Entity{
+		ID:      fleetRowID,
+		Name:    "Oil Change",
+		Kind:    string(KindMaintenance),
+		FleetID: &fleetA,
+	}).Error; err != nil {
+		t.Fatalf("create fleet row: %v", err)
+	}
+	if err := db.Create(&Entity{
+		ID:            systemRowID,
+		Name:          "Oil Change",
+		Kind:          string(KindMaintenance),
+		SystemDefined: true,
+	}).Error; err != nil {
+		t.Fatalf("create system row: %v", err)
+	}
+
+	m, found, err := NewProvider(db).FindByName(fleetA, "Oil Change", KindMaintenance)
+	if err != nil {
+		t.Fatalf("FindByName: %v", err)
+	}
+	if !found {
+		t.Fatal("expected a match")
+	}
+	if m.ID() != systemRowID {
+		t.Fatalf("expected the system row (id=%s) to win the tie deterministically, got id=%s (SystemDefined=%v)",
+			systemRowID, m.ID(), m.SystemDefined())
+	}
+}
+
 func containsName(ms []Model, name string) bool {
 	for _, m := range ms {
 		if m.Name() == name {

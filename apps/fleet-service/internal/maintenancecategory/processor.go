@@ -1,11 +1,13 @@
 package maintenancecategory
 
 import (
+	"errors"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
@@ -83,12 +85,14 @@ func (pr *Processor) Create(fleetID, name string, kind Kind) (Model, error) {
 		fleetID: &fleetID,
 	})
 	if err != nil {
-		if isUniqueViolation(err) {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			// Lost a race: another request inserted the identical
 			// (fleet_id, name, kind) row between our FindByName and this
 			// Insert. Re-resolve rather than surfacing a 500 — the winner
 			// is now visible and this call should be just as idempotent as
-			// the found==true path above.
+			// the found==true path above. gorm.ErrDuplicatedKey requires
+			// the connection to be opened with TranslateError: true (see
+			// Administrator.Insert's doc comment).
 			existing, found, ferr := pr.p.FindByName(fleetID, name, kind)
 			if ferr != nil {
 				return Model{}, ferr

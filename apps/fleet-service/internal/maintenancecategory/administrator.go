@@ -1,20 +1,22 @@
 package maintenancecategory
 
-import (
-	"errors"
-
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/mattn/go-sqlite3"
-	"gorm.io/gorm"
-)
+import "gorm.io/gorm"
 
 // Administrator is the write interface for maintenance category data access.
 type Administrator interface {
 	// Insert stores a new category and returns the persisted Model. Fails
-	// with a unique-constraint violation (detectable via isUniqueViolation)
-	// when a concurrent request already inserted the identical
-	// (fleet_id, name, kind) row — see the idx_maintenance_categories_scope
-	// comment on Entity.
+	// with an error satisfying errors.Is(err, gorm.ErrDuplicatedKey) when a
+	// concurrent request already inserted the identical (fleet_id, name,
+	// kind) row — see the idx_maintenance_categories_scope comment on
+	// Entity. gorm.ErrDuplicatedKey is only produced when the connection was
+	// opened with gorm.Config{TranslateError: true} (which
+	// packages/shared-go/database.Connect sets, and this package's own test
+	// DB helper mirrors): that flag lets each driver translate its own raw
+	// error (pgconn.PgError on PostgreSQL, sqlite3.Error on SQLite) onto this
+	// portable sentinel, instead of this package importing either driver's
+	// error type directly. Importing github.com/mattn/go-sqlite3 directly
+	// broke CGO_ENABLED=0 builds (that package's error types are cgo-gated);
+	// this is why TranslateError exists.
 	Insert(m Model) (Model, error)
 }
 
@@ -29,21 +31,4 @@ func (a *dbAdministrator) Insert(m Model) (Model, error) {
 		return Model{}, err
 	}
 	return Make(e), nil
-}
-
-// isUniqueViolation reports whether err is a unique-constraint violation on
-// either PostgreSQL (production, via pgx) or SQLite (this package's unit
-// tests, via mattn/go-sqlite3). Neither GORM driver in use implements
-// GORM's ErrorTranslator, so gorm.ErrDuplicatedKey is never produced here —
-// the underlying driver errors must be inspected directly.
-func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
-		return pgErr.Code == "23505" // unique_violation
-	}
-	var sqliteErr sqlite3.Error
-	if errors.As(err, &sqliteErr) {
-		return sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
-	}
-	return false
 }

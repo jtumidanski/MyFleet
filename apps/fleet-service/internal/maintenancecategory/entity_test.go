@@ -16,7 +16,13 @@ import (
 
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	// TranslateError mirrors packages/shared-go/database.Connect's production
+	// gorm.Config: it lets gorm.io/driver/sqlite map a raw SQLITE_CONSTRAINT
+	// error onto gorm.ErrDuplicatedKey, the same sentinel PostgreSQL produces
+	// in production. Without it here, TestCreate_losesRaceReturnsWinner would
+	// exercise a different (untranslated) error shape than production ever
+	// sees.
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}

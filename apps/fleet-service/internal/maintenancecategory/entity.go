@@ -14,19 +14,25 @@ type Entity struct {
 	// case-insensitive LOWER() dedupe in FindByName, which is the real
 	// user-facing match. PostgreSQL treats each NULL FleetID as distinct, so
 	// this index does not constrain system rows — Seed's FirstOrCreate is
-	// their guard.
-	Name          string `gorm:"not null;uniqueIndex:idx_maintenance_categories_scope"`
+	// their guard. The explicit priority values (shared across all three
+	// fields below) order the composite index's columns (fleet_id, name,
+	// kind) to match design.md's specification — GORM otherwise orders
+	// composite index columns by struct field declaration order, which here
+	// would produce (name, kind, fleet_id) instead. Equivalent for
+	// uniqueness either way, but only the design's order is useful for a
+	// prefix scan.
+	Name          string `gorm:"not null;uniqueIndex:idx_maintenance_categories_scope,priority:2"`
 	Description   string
 	SystemDefined bool `gorm:"not null;default:false"`
 	// The DEFAULT is what classifies the eight pre-existing rows in the same
 	// ALTER TABLE that adds the column — no backfill step (PRD FR-KIND-1).
 	// The literal is quoted because GORM copies the tag value verbatim into the
 	// DDL; unquoted, PostgreSQL reads `maintenance` as a column reference.
-	Kind string `gorm:"type:varchar(20);not null;default:'maintenance';uniqueIndex:idx_maintenance_categories_scope"`
+	Kind string `gorm:"type:varchar(20);not null;default:'maintenance';uniqueIndex:idx_maintenance_categories_scope,priority:3"`
 	// NULL means a system/global category visible to every fleet. A non-NULL
 	// value scopes the row to one fleet, so free-form names entered by one
 	// household never appear in another's picker (design §10.1).
-	FleetID *string `gorm:"type:uuid;index;uniqueIndex:idx_maintenance_categories_scope"`
+	FleetID *string `gorm:"type:uuid;index;uniqueIndex:idx_maintenance_categories_scope,priority:1"`
 }
 
 func (Entity) TableName() string { return "fleet.maintenance_categories" }
