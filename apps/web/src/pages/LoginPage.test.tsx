@@ -39,8 +39,15 @@ function baseAuth(overrides: Partial<AuthContextValue> = {}): AuthContextValue {
  * category of module-identity bug as the loginError memoisation trap, one
  * layer up. useTheme would then throw "must be used within a ThemeProvider"
  * even though a ThemeProvider is right there in the tree.
+ *
+ * `state` is the router location state RequireAuth sets when it bounces an
+ * unauthenticated visitor here.
  */
-async function renderLogin(hash = '', auth: Partial<AuthContextValue> = {}) {
+async function renderLogin(
+  hash = '',
+  auth: Partial<AuthContextValue> = {},
+  state?: { from: string },
+) {
   window.history.replaceState(null, '', `/login${hash}`);
   mockAuth.mockReturnValue(baseAuth(auth));
   vi.resetModules();
@@ -49,11 +56,12 @@ async function renderLogin(hash = '', auth: Partial<AuthContextValue> = {}) {
     import('../context/ThemeContext'),
   ]);
   return render(
-    <MemoryRouter initialEntries={['/login']}>
+    <MemoryRouter initialEntries={[{ pathname: '/login', state }]}>
       <ThemeProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<div>dashboard</div>} />
+          <Route path="/invites/:token/accept" element={<div>invite accept</div>} />
         </Routes>
       </ThemeProvider>
     </MemoryRouter>,
@@ -109,6 +117,26 @@ describe('LoginPage', () => {
     // A double-click cannot start two OAuth flows.
     act(() => signInButton().click());
     expect(login).toHaveBeenCalledTimes(1);
+  });
+
+  // RequireAuth stashes the attempted path in router state; LoginPage has to
+  // forward it so auth-service can send the invitee back to the accept route.
+  // This is the ONLY guard on the return-path handoff — a redesign of this page
+  // that drops `from` still typechecks, because login's parameter is optional.
+  it('forwards the attempted path to login()', async () => {
+    await renderLogin('', {}, { from: '/invites/abc123/accept' });
+
+    act(() => signInButton().click());
+
+    expect(login).toHaveBeenCalledWith('/invites/abc123/accept');
+  });
+
+  it('calls login() with no return path on a direct visit', async () => {
+    await renderLogin();
+
+    act(() => signInButton().click());
+
+    expect(login).toHaveBeenCalledWith(undefined);
   });
 
   // FR-STATE-4 / FR-A11Y-1.
@@ -175,5 +203,13 @@ describe('LoginPage', () => {
     await renderLogin('', { isAuthenticated: true });
 
     expect(screen.getByText('dashboard')).toBeInTheDocument();
+  });
+
+  // …and the bounce honours `from` too: a visitor who signed in in another tab
+  // and came back must not lose the invite they were bounced off.
+  it('bounces an already-authenticated visitor to the attempted path', async () => {
+    await renderLogin('', { isAuthenticated: true }, { from: '/invites/abc123/accept' });
+
+    expect(screen.getByText('invite accept')).toBeInTheDocument();
   });
 });

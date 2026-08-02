@@ -10,6 +10,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query';
 import { useMe, logoutRequest, authKeys } from '../lib/hooks/api/auth';
 import { captureTokenFromHash, clearAccessToken, getAccessToken } from '../lib/api/token';
+import { buildLoginUrl } from '../lib/api/authRoutes';
 import type { FleetRole, User } from '../types/models/user';
 
 export interface AuthContextValue {
@@ -18,7 +19,8 @@ export interface AuthContextValue {
   role: FleetRole | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: () => void;
+  /** `returnTo` is a site-relative path to land on after the OAuth round-trip. */
+  login: (returnTo?: string) => void;
   logout: () => Promise<void>;
 }
 
@@ -44,9 +46,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [me.isError]);
 
-  const login = useCallback(() => {
+  const login = useCallback((returnTo?: string) => {
     // Full navigation to auth-service so the OAuth redirect chain works.
-    window.location.href = '/api/auth/login/google';
+    window.location.href = buildLoginUrl(returnTo);
   }, []);
 
   const logout = useCallback(async () => {

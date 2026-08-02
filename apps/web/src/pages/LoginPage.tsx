@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -25,14 +25,20 @@ export function LoginPage() {
   // authenticated PATCH would 401 and toast on every click (FR-PRETOGGLE-3).
   const { preference, setPreference } = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Set by RequireAuth when it bounced the user here; handed to auth-service so
+  // the OAuth callback returns to the page they actually wanted.
+  const from = (location.state as { from?: string } | null)?.from;
   // Read once per page load; the module memoises, so StrictMode's remount does
   // not swallow the notice (design §4.1).
   const [errorCode] = useState(consumeLoginError);
   const [redirecting, setRedirecting] = useState(false);
 
   useEffect(() => {
-    if (isAuthenticated) navigate('/', { replace: true });
-  }, [isAuthenticated, navigate]);
+    // Honour `from` here too: a visitor who authenticated in another tab and
+    // came back would otherwise lose the invite they were bounced off.
+    if (isAuthenticated) navigate(from ?? '/', { replace: true });
+  }, [isAuthenticated, navigate, from]);
 
   const notice = errorCode ? noticeFor(errorCode) : null;
   const failed = notice?.tone === 'danger';
@@ -83,7 +89,7 @@ export function LoginPage() {
               // exit path in-page (FR-STATE-2) and `disabled` makes a second
               // activation impossible (FR-STATE-3).
               setRedirecting(true);
-              login();
+              login(from);
             }}
           >
             {redirecting ? (
