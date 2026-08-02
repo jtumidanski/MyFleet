@@ -103,10 +103,12 @@ func main() {
 		go worker.Run(ctx, brokers, "media-variant-workers")
 	}
 
-	// Daily media purge: hard-delete soft-deleted objects past purge_after,
-	// removing both the rows and the MinIO objects. Under advisory lock so only
-	// one replica runs per tick (design §10.6 / A9).
-	go jobs.Every(ctx, 24*time.Hour, func(ctx context.Context) error {
+	// Media purge: hard-delete soft-deleted objects past purge_after, removing
+	// both the rows and the MinIO objects. Under advisory lock so only one
+	// replica runs per tick (design §10.6 / A9). Hourly, not daily: jobs.Every's
+	// first tick is at T+interval, so a 24-hour sweep in a service that
+	// redeploys more often than daily never runs (design OQ-5).
+	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
 		_, err := database.WithLeaderLock(db, "media-purge", func() error {
 			return purgeExpired(ctx, log, db, store)
 		})

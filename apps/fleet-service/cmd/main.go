@@ -22,6 +22,7 @@ import (
 	dtoevents "github.com/jtumidanski/myfleet/packages/dto-go/events"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/activity"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/admin"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/dashboard"
 	fleetevents "github.com/jtumidanski/myfleet/apps/fleet-service/internal/events"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
@@ -124,12 +125,35 @@ func main() {
 		Activity:  activityProc,
 	}
 
-	// Background sweep: hard-delete soft-deleted vehicles past their purge window.
-	// Runs under advisory lock so only one replica executes per tick (design A9).
+	// One-time cleanup of rows the pre-cascade vehicle sweep already orphaned
+	// (PRD §11b). Under the leader lock so only one replica runs it, and a no-op
+	// on a healthy database. It must precede /admin/stats being trusted: until
+	// it runs, the console reports numbers no fleet can reconcile (risks.md R10).
+	if _, err := database.WithLeaderLock(db, "admin-orphan-cleanup", func() error {
+		removed, cerr := admin.DeleteOrphans(db)
+		if cerr != nil {
+			return cerr
+		}
+		total := 0
+		for _, n := range removed {
+			total += n
+		}
+		if total > 0 {
+			log.WithField("removed", removed).Warn("deleted orphaned rows left by the pre-cascade vehicle sweep")
+		}
+		return nil
+	}); err != nil {
+		log.WithError(err).Fatal("orphan cleanup")
+	}
+
+	// Background sweep: hard-delete soft-deleted vehicles past their purge
+	// window, cascading to their children. Hourly, not daily: jobs.Every fires
+	// its FIRST tick at T+interval, so a 24-hour job in a service that redeploys
+	// more often than daily never runs at all (design OQ-5).
 	ctx := context.Background()
-	go jobs.Every(ctx, 24*time.Hour, func(ctx context.Context) error {
+	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
 		_, err := database.WithLeaderLock(db, "vehicle-purge", func() error {
-			return vehicle.PurgeExpired(db)
+			return vehicle.PurgeExpired(db, admin.DeleteVehicleChildren)
 		})
 		if err != nil {
 			log.WithError(err).Warn("vehicle purge sweep failed")
