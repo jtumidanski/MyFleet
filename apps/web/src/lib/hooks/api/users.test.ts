@@ -56,7 +56,7 @@ describe('useUsers', () => {
     const { result } = renderHook(() => useUsers(['u1']), { wrapper: makeWrapper(newClient()) });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data?.u1.displayName).toBe('One');
+    expect(result.current.data?.u1?.displayName).toBe('One');
   });
 
   // Sorting and de-duping happen inside the hook, so callers can pass the raw
