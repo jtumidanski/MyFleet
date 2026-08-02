@@ -115,3 +115,67 @@ func TestConfigFromEnv_credentialsRequiredUnlessModeIsNone(t *testing.T) {
 		}
 	})
 }
+
+// C-3: net/smtp's PlainAuth refuses to send credentials over an unencrypted
+// connection, so SMTP_TLS_MODE=none with real credentials configured would
+// fail on every message — classified TRANSIENT by classify, burning the full
+// retry budget before the mail is permanently dropped. Catch the
+// misconfiguration at startup instead. Empty credentials with mode "none"
+// must stay legal — that is exactly how compose and the k3s-local overlay
+// point at the unauthenticated Mailpit sink, and neither sets
+// SMTP_USERNAME/SMTP_PASSWORD.
+func TestConfigFromEnv_credentialsWithModeNonePanics(t *testing.T) {
+	base := func(t *testing.T) {
+		t.Setenv("SMTP_ENABLED", "true")
+		t.Setenv("SMTP_HOST", "smtp.example.com")
+		t.Setenv("SMTP_FROM_ADDRESS", "invites@example.com")
+		t.Setenv("PUBLIC_WEB_URL", "https://example.com")
+		t.Setenv("SMTP_TLS_MODE", TLSModeNone)
+	}
+
+	t.Run("username set panics", func(t *testing.T) {
+		base(t)
+		t.Setenv("SMTP_USERNAME", "user")
+		t.Setenv("SMTP_PASSWORD", "")
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected a panic")
+			}
+		}()
+		ConfigFromEnv()
+	})
+
+	t.Run("password set panics", func(t *testing.T) {
+		base(t)
+		t.Setenv("SMTP_USERNAME", "")
+		t.Setenv("SMTP_PASSWORD", "pass")
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected a panic")
+			}
+		}()
+		ConfigFromEnv()
+	})
+
+	t.Run("both set panics", func(t *testing.T) {
+		base(t)
+		t.Setenv("SMTP_USERNAME", "user")
+		t.Setenv("SMTP_PASSWORD", "pass")
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected a panic")
+			}
+		}()
+		ConfigFromEnv()
+	})
+
+	t.Run("neither set is legal", func(t *testing.T) {
+		base(t)
+		t.Setenv("SMTP_USERNAME", "")
+		t.Setenv("SMTP_PASSWORD", "")
+		cfg := ConfigFromEnv()
+		if cfg.TLSMode != TLSModeNone || cfg.Username != "" || cfg.Password != "" {
+			t.Fatalf("cfg=%+v", cfg)
+		}
+	})
+}

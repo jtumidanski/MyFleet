@@ -76,6 +76,17 @@ func ConfigFromEnv() Config {
 	if cfg.TLSMode != TLSModeNone && (cfg.Username == "" || cfg.Password == "") {
 		panic("SMTP_USERNAME and SMTP_PASSWORD are required unless SMTP_TLS_MODE is \"none\"")
 	}
+	// The reverse combination is just as broken: net/smtp's PlainAuth refuses to
+	// transmit credentials over an unencrypted connection, so every send would
+	// fail. That failure classifies as TRANSIENT, burning the full retry budget
+	// before the mail is permanently dropped — a confusing, expensive way to
+	// discover a config mistake. Fail now instead. Empty credentials with
+	// TLSModeNone stay legal: that is exactly how compose and the k3s-local
+	// overlay point at the unauthenticated Mailpit sink (FR-DEV-2).
+	if cfg.TLSMode == TLSModeNone && (cfg.Username != "" || cfg.Password != "") {
+		panic("SMTP_USERNAME/SMTP_PASSWORD cannot be set when SMTP_TLS_MODE is \"none\": " +
+			"net/smtp refuses to send credentials over an unencrypted connection, so every message would fail")
+	}
 	if cfg.SendAttempts < 1 {
 		panic("SMTP_SEND_ATTEMPTS must be at least 1")
 	}
