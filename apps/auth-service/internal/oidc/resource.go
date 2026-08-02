@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -94,16 +95,32 @@ func safeReturnPath(raw string) string {
 	if err != nil || u.Scheme != "" || u.Host != "" || u.Opaque != "" {
 		return ""
 	}
+	// Collapse dot segments and duplicate slashes BEFORE the authority re-check:
+	// "/.//evil.example" and "/x/..//evil.example" both resolve to "//evil.example"
+	// in the browser, which the prefix test above cannot see. Clearing RawPath
+	// makes RequestURI re-encode from the cleaned value.
+	u.Path = path.Clean(u.Path)
+	u.RawPath = ""
+	if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") {
+		return ""
+	}
+	// /api/* is same-origin but routed to the services, not the SPA: landing
+	// there strands the access-token fragment on a JSON 401.
+	if strings.HasPrefix(u.Path, "/api/") {
+		return ""
+	}
 	return u.RequestURI()
 }
 
 // destination resolves where the callback sends the browser: an explicit return
 // path wins, otherwise fleetless users go to onboarding and everyone else home.
-func destination(d Dependencies, fleetID, returnPath string) string {
+// Takes the Principal rather than a fleet-id string so the two arguments cannot
+// be silently transposed at the call site.
+func destination(d Dependencies, principal session.Principal, returnPath string) string {
 	if returnPath != "" {
 		return d.AppBaseURL + returnPath
 	}
-	if fleetID == "" {
+	if principal.ActiveFleetID == "" {
 		return d.AppBaseURL + d.OnboardingPath
 	}
 	return d.AppBaseURL + d.HomePath
@@ -186,7 +203,7 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		// a fleet go to onboarding and everyone else lands home. membership.Client
 		// maps fleet-service's 404 to an empty fleet id, so that is how a
 		// brand-new user is recognised.
-		dest := destination(d, principal.ActiveFleetID, returnPath) + "#access_token=" + url.QueryEscape(access)
+		dest := destination(d, principal, returnPath) + "#access_token=" + url.QueryEscape(access)
 		http.Redirect(w, req, dest, http.StatusFound)
 	}
 }
@@ -227,13 +244,27 @@ func verifyStateCookie(req *http.Request, secret []byte, state string) (nonce, r
 		return "", "", false
 	}
 	parts := strings.Split(string(raw), "|")
+	// 4 fields is the pre-return-path format. Accepted so a login already in
+	// flight when this version deploys still completes — a rolling deploy fails
+	// in BOTH directions otherwise, for the whole rollout rather than one TTL.
+	// Removable one release after this ships.
+	if len(parts) == 4 {
+		parts = []string{parts[0], parts[1], parts[2], "", parts[3]}
+	}
 	if len(parts) != 5 {
 		return "", "", false
 	}
 	gotState, gotNonce, expStr, encPath, sig := parts[0], parts[1], parts[2], parts[3], parts[4]
 	payload := gotState + "|" + gotNonce + "|" + expStr + "|" + encPath
 	if !hmac.Equal([]byte(sig), []byte(sign(secret, payload))) {
-		return "", "", false
+		// A legacy cookie was signed without the trailing return-path field, so
+		// its signature only matches the three-field payload. An empty encPath
+		// is the only case that can be legacy; a current empty-path cookie
+		// matched above.
+		legacy := gotState + "|" + gotNonce + "|" + expStr
+		if encPath != "" || !hmac.Equal([]byte(sig), []byte(sign(secret, legacy))) {
+			return "", "", false
+		}
 	}
 	if exp, perr := atoi(expStr); perr != nil || time.Now().Unix() > exp {
 		return "", "", false

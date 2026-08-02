@@ -11,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { inviteService } from '../../../services/api/InviteService';
-import { refreshAccessToken } from '../../api/refresh';
+import { mintAccessToken } from '../../api/refresh';
 import { memberKeys } from './members';
 import { fleetKeys } from './fleets';
 import { authKeys } from './auth';
@@ -105,7 +105,17 @@ export function useAcceptInvite() {
   return useMutation({
     mutationFn: (token: string) => inviteService.acceptInvite(token),
     onSuccess: async () => {
-      await refreshAccessToken();
+      // mintAccessToken, NOT refreshAccessToken: the invite is already accepted
+      // server-side and the current token is still valid, so a transient mint
+      // failure must not clear it — that would log the user out on the very
+      // path that just succeeded, with the invite spent.
+      const token = await mintAccessToken();
+      if (!token) {
+        toast.error(
+          'You joined the fleet, but your session could not be updated. Sign out and back in to see it.',
+        );
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: authKeys.all });
     },
     onSettled: () => {

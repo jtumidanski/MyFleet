@@ -19,8 +19,10 @@ export function LoginPage() {
   const from = (location.state as { from?: string } | null)?.from;
 
   useEffect(() => {
-    if (isAuthenticated) navigate('/', { replace: true });
-  }, [isAuthenticated, navigate]);
+    // Honour `from` here too: a visitor who authenticated in another tab and
+    // came back would otherwise lose the invite they were bounced off.
+    if (isAuthenticated) navigate(from ?? '/', { replace: true });
+  }, [isAuthenticated, navigate, from]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted">

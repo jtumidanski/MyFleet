@@ -8,7 +8,9 @@ import { Skeleton } from './ui/skeleton';
  * belongs here because an invitee has no fleet until the invite is accepted —
  * bouncing them to onboarding would make the accept route unreachable.
  */
-const FLEETLESS_ROUTES = [/^\/onboarding$/, /^\/invites\/[^/]+\/accept$/];
+// Trailing slashes are tolerated because React Router matches the routes in
+// App.tsx with or without one; the guard must agree with it.
+const FLEETLESS_ROUTES = [/^\/onboarding\/?$/, /^\/invites\/[^/]+\/accept\/?$/];
 
 function allowsFleetlessAccess(pathname: string): boolean {
   return FLEETLESS_ROUTES.some((route) => route.test(pathname));
