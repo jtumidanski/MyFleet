@@ -102,7 +102,7 @@ Tasks 1-3, 4-6 and 7-10 are three independent tracks; within a track the order i
   - `var ErrInvalidRole = errors.New("invalid membership role")`
   - `func (pr *Processor) ValidateRoleChange(fleetID, targetUserID, role string) (Model, error)` — returns the target membership on success so the caller need not re-read it. Errors: `ErrInvalidRole`, `server.ErrNotFound`, `server.ErrConflict`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `apps/fleet-service/internal/membership/processor_test.go`:
 
@@ -227,12 +227,12 @@ func TestWithRole_returnsANewModelAndLeavesTheOriginalAlone(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./apps/fleet-service/internal/membership/...`
 Expected: FAIL — `p.ValidateRoleChange undefined`, `original.WithRole undefined`, `ErrInvalidRole undefined`.
 
-- [ ] **Step 3: Add `WithRole`**
+- [x] **Step 3: Add `WithRole`**
 
 Append to `apps/fleet-service/internal/membership/model.go`:
 
@@ -246,7 +246,7 @@ func (m Model) WithRole(role string) Model {
 }
 ```
 
-- [ ] **Step 4: Add `ErrInvalidRole` and `ValidateRoleChange`**
+- [x] **Step 4: Add `ErrInvalidRole` and `ValidateRoleChange`**
 
 In `apps/fleet-service/internal/membership/processor.go`, add the sentinel just below the imports:
 
@@ -299,12 +299,12 @@ func (pr *Processor) ValidateRoleChange(fleetID, targetUserID, role string) (Mod
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `go test ./apps/fleet-service/internal/membership/... -v -run 'ValidateRoleChange|WithRole'`
 Expected: PASS, all eight new tests.
 
-- [ ] **Step 6: Vet and commit**
+- [x] **Step 6: Vet and commit**
 
 ```bash
 go vet ./apps/fleet-service/internal/membership/...
@@ -331,7 +331,7 @@ git commit -m "feat(fleet-service): validate membership role changes"
   - `Administrator` interface gains `UpdateRole(m Model, role, actorUserID string) (Model, error)` and `Remove(m Model, actorUserID string) error`
   - Event types written: `"member.role_changed"`, `"member.removed"`, `"member.left"`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/fleet-service/internal/membership/administrator_db_test.go`:
 
@@ -583,12 +583,12 @@ func TestRemove_worksWithoutARecorder(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./apps/fleet-service/internal/membership/...`
 Expected: FAIL — `ActivityRecorder undefined`, `NewAdministrator(db).WithActivityRecorder undefined`, `UpdateRole`/`Remove` undefined.
 
-- [ ] **Step 3: Extend the administrator**
+- [x] **Step 3: Extend the administrator**
 
 Replace the top of `apps/fleet-service/internal/membership/administrator.go` (imports through `NewAdministrator`) with:
 
@@ -707,19 +707,19 @@ func (a *dbAdministrator) Remove(m Model, actorUserID string) error {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `go test ./apps/fleet-service/internal/membership/... -v`
 Expected: PASS — all nine new administrator tests plus the Task 1 and pre-existing tests.
 
-- [ ] **Step 5: Confirm nothing else broke from the return-type change**
+- [x] **Step 5: Confirm nothing else broke from the return-type change**
 
 `NewAdministrator` now returns `*dbAdministrator` instead of the interface. The only call site is `apps/fleet-service/cmd/main.go:74`, where the value is passed as `fleet.OnboardingAdmin` — a concrete pointer still satisfies it.
 
 Run: `go build ./... && go vet ./apps/fleet-service/...`
 Expected: no output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/fleet-service/internal/membership/administrator.go \
@@ -740,7 +740,7 @@ git commit -m "feat(fleet-service): record member role changes and removals in-t
 - Consumes: `ValidateRoleChange`, `ErrInvalidRole` (Task 1); `UpdateRole`, `Remove`, `ActivityRecorder`, `WithActivityRecorder` (Task 2); `authz.RequireSameFleet`, `authz.RequireOwner`; `Processor.RequireOwnerInFleet`, `Processor.GetMember`, `Processor.ValidateRemoval`.
 - Produces: `func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, rec ActivityRecorder) func(chi.Router)` — **signature change**, third parameter added.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/fleet-service/internal/membership/resource_test.go`:
 
@@ -1044,12 +1044,12 @@ func TestDeleteMember_notFoundWhenTheTargetIsNotAMember(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./apps/fleet-service/internal/membership/...`
 Expected: FAIL — `InitializeRoutes` takes 2 args, not 3; no PATCH route registered.
 
-- [ ] **Step 3: Rewrite the handler wiring**
+- [x] **Step 3: Rewrite the handler wiring**
 
 Replace lines 1-84 of `apps/fleet-service/internal/membership/resource.go` with:
 
@@ -1208,7 +1208,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, rec ActivityRecorder)
 }
 ```
 
-- [ ] **Step 4: Update the wiring in `cmd/main.go`**
+- [x] **Step 4: Update the wiring in `cmd/main.go`**
 
 In `apps/fleet-service/cmd/main.go`, line 186, change:
 
@@ -1224,12 +1224,12 @@ to:
 
 (`activity` is already imported at line 25.)
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `go test ./apps/fleet-service/... && go build ./... && go vet ./apps/fleet-service/...`
 Expected: PASS, no build or vet output.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/fleet-service/internal/membership/resource.go \
@@ -1255,7 +1255,7 @@ git commit -m "feat(fleet-service): add role PATCH and allow members to leave a 
 
 > **Merge note (D11):** `task-011-platform-admin-console` specifies the same method for its admin route. The signature here is deliberately identical and carries **no scoping** — it is a plain `WHERE id IN (?)`. Whoever merges second deletes their duplicate and keeps the other's.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `apps/auth-service/internal/user/provider_test.go`:
 
@@ -1318,12 +1318,12 @@ func TestListByIDs_returnsEmptyForNoIDs(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./apps/auth-service/internal/user/...`
 Expected: FAIL — `NewProvider(db).ListByIDs undefined`.
 
-- [ ] **Step 3: Add `ListByIDs` to the provider**
+- [x] **Step 3: Add `ListByIDs` to the provider**
 
 In `apps/auth-service/internal/user/provider.go`, add to the `Provider` interface:
 
@@ -1361,7 +1361,7 @@ func (s *dbProvider) ListByIDs(ids []string) ([]Model, error) {
 }
 ```
 
-- [ ] **Step 4: Add the processor pass-through**
+- [x] **Step 4: Add the processor pass-through**
 
 Append to `apps/auth-service/internal/user/processor.go`:
 
@@ -1374,12 +1374,12 @@ func (pr *Processor) ListByIDs(ids []string) ([]Model, error) {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `go test ./apps/auth-service/internal/user/... -v -run ListByIDs`
 Expected: PASS — three tests.
 
-- [ ] **Step 6: Build, vet and commit**
+- [x] **Step 6: Build, vet and commit**
 
 ```bash
 go build ./... && go vet ./apps/auth-service/...
@@ -1403,7 +1403,7 @@ git commit -m "feat(auth-service): add batch user lookup by id"
 - Consumes: fleet-service `GET /internal/fleets/{fleetID}/members` returning `[{"user_id":"…","role":"…"}]` (`apps/fleet-service/internal/membership/rest.go:46-49`). **No new fleet-service route.**
 - Produces: `func (c *Client) FleetMemberIDs(ctx context.Context, fleetID string) ([]string, error)`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `apps/auth-service/internal/membership/client_test.go`:
 
@@ -1481,12 +1481,12 @@ func TestFleetMemberIDs_errorCarriesNoIDAndNoBody(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./apps/auth-service/internal/membership/...`
 Expected: FAIL — `c.FleetMemberIDs undefined`.
 
-- [ ] **Step 3: Implement the method**
+- [x] **Step 3: Implement the method**
 
 In `apps/auth-service/internal/membership/client.go`, extend the imports to:
 
@@ -1560,14 +1560,14 @@ func (c *Client) FleetMemberIDs(ctx context.Context, fleetID string) ([]string, 
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `go test ./apps/auth-service/internal/membership/... -v`
 Expected: PASS — five new tests plus the existing `Active` tests.
 
 If `strings` is not yet imported in `client_test.go`, add it.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 go vet ./apps/auth-service/...
@@ -1593,7 +1593,7 @@ git commit -m "feat(auth-service): resolve a fleet's member ids from fleet-servi
   - `func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, members FleetMemberGatherer) func(chi.Router)` — **signature change**, third parameter added.
   - Route `GET /auth/users?ids=a,b,c` → `{"data":[{"type":"users","id":"…","attributes":{…}}]}`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/auth-service/internal/user/users_resource_test.go`:
 
@@ -1833,12 +1833,12 @@ func TestAuthUsers_returns500WhenTheFleetLookupFails(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./apps/auth-service/internal/user/...`
 Expected: FAIL — `FleetMemberGatherer` undefined and `InitializeRoutes` takes 2 args.
 
-- [ ] **Step 3: Add the route**
+- [x] **Step 3: Add the route**
 
 In `apps/auth-service/internal/user/resource.go`:
 
@@ -1989,7 +1989,7 @@ and append this handler inside the returned closure, after the `PATCH /auth/me` 
 		})
 ```
 
-- [ ] **Step 4: Update the existing router helper**
+- [x] **Step 4: Update the existing router helper**
 
 In `apps/auth-service/internal/user/resource_test.go`, line 42, change:
 
@@ -2004,7 +2004,7 @@ to:
 	r.Group(InitializeRoutes(log, db, nil))
 ```
 
-- [ ] **Step 5: Wire it in `cmd/main.go`**
+- [x] **Step 5: Wire it in `cmd/main.go`**
 
 In `apps/auth-service/cmd/main.go`, replace line 91:
 
@@ -2024,12 +2024,12 @@ with:
 
 (`context` is already imported at line 4.)
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `go test ./apps/auth-service/... && go build ./... && go vet ./apps/auth-service/...`
 Expected: PASS — ten new handler tests plus the existing `/auth/me` suite; no build or vet output.
 
-- [ ] **Step 7: Verify SEC-2 by inspecting the route's placement**
+- [x] **Step 7: Verify SEC-2 by inspecting the route's placement**
 
 There is no unit test for "401 without a JWT": the handler tests mount a bare
 chi router with an `Identity` injected directly, and the middleware that would
@@ -2047,7 +2047,7 @@ same `pr` router — **not** in a sibling `AddRouteInitializer`. `/auth/users`
 carries no auth check of its own; if it ever moves out of that group it becomes
 world-readable.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/auth-service/internal/user/resource.go \
@@ -2071,7 +2071,7 @@ git commit -m "feat(auth-service): add fleet-scoped batch user lookup endpoint"
 
 > **Why alert-dialog and not dialog (D10):** every dialog in this task is a confirm/cancel decision on a destructive or privilege-granting action, which is exactly Radix's alert-dialog semantics — focus pinned to cancel, no dismiss-on-outside-click, `role="alertdialog"`. No other in-flight worktree adds this component; expect at most a `package.json` merge.
 
-- [ ] **Step 1: Install the dependency**
+- [x] **Step 1: Install the dependency**
 
 ```bash
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -2080,7 +2080,7 @@ npm install --workspace apps/web @radix-ui/react-alert-dialog@^1.1.0
 
 Verify `apps/web/package.json` gained `"@radix-ui/react-alert-dialog"` under `dependencies` and that `package-lock.json` was updated.
 
-- [ ] **Step 2: Create the component**
+- [x] **Step 2: Create the component**
 
 Create `apps/web/src/components/ui/alert-dialog.tsx`:
 
@@ -2200,7 +2200,7 @@ export {
 };
 ```
 
-- [ ] **Step 3: Verify it type-checks and the app still builds**
+- [x] **Step 3: Verify it type-checks and the app still builds**
 
 Run:
 ```bash
@@ -2211,7 +2211,7 @@ Expected: build succeeds.
 
 If `buttonVariants` is not exported from `apps/web/src/components/ui/button.tsx`, export it there (`export { Button, buttonVariants }`) rather than duplicating the class strings.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add apps/web/package.json package-lock.json apps/web/src/components/ui/alert-dialog.tsx
@@ -2234,7 +2234,7 @@ git commit -m "feat(web): add alert-dialog primitive"
   - `export const userKeys = { all, byIds(ids) }`
   - `export function useUsers(ids: string[])` → `UseQueryResult<Record<string, UserAttributes>>`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/web/src/lib/hooks/api/users.test.ts`:
 
@@ -2333,7 +2333,7 @@ describe('useUsers', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run:
 ```bash
@@ -2342,7 +2342,7 @@ npm run -w apps/web test -- users.test
 ```
 Expected: FAIL — cannot resolve `./users` or `../../../services/api/UserService`.
 
-- [ ] **Step 3: Create the service**
+- [x] **Step 3: Create the service**
 
 Create `apps/web/src/services/api/UserService.ts`:
 
@@ -2385,7 +2385,7 @@ export const userService = new UserService();
 
 `apiClient` is imported for parity with the other services; if lint flags it as unused, drop the import — `listAt` already routes through it.
 
-- [ ] **Step 4: Create the hook**
+- [x] **Step 4: Create the hook**
 
 Create `apps/web/src/lib/hooks/api/users.ts`:
 
@@ -2445,12 +2445,12 @@ export function useUsers(ids: string[]) {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `npm run -w apps/web test -- users.test`
 Expected: PASS — seven tests.
 
-- [ ] **Step 6: Lint and commit**
+- [x] **Step 6: Lint and commit**
 
 ```bash
 npm run -w apps/web lint
@@ -2476,7 +2476,7 @@ git commit -m "feat(web): resolve member display names from auth-service"
   - `useUpdateMemberRole(fleetId: string)` — variables `{ userId: string; role: FleetRole }`
   - `useRemoveMember(fleetId: string)` — variables **change** from `string` to `{ userId: string; isSelf: boolean }`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `apps/web/src/lib/hooks/api/members.test.ts`:
 
@@ -2597,12 +2597,12 @@ Then append these tests inside the `describe('mutation invalidation contracts �
   });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `npm run -w apps/web test -- members.test`
 Expected: FAIL — `useUpdateMemberRole` is not exported.
 
-- [ ] **Step 3: Add `updateRole` to the service**
+- [x] **Step 3: Add `updateRole` to the service**
 
 In `apps/web/src/services/api/MemberService.ts`, extend the header comment's route list with:
 
@@ -2648,7 +2648,7 @@ and add the method inside the class:
   }
 ```
 
-- [ ] **Step 4: Rewrite the mutations**
+- [x] **Step 4: Rewrite the mutations**
 
 In `apps/web/src/lib/hooks/api/members.ts`, extend the imports:
 
@@ -2751,12 +2751,12 @@ export function useUpdateMemberRole(fleetId: string) {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `npm run -w apps/web test -- members.test`
 Expected: PASS — all pre-existing tests plus the five new ones.
 
-- [ ] **Step 6: Type-check, lint and commit**
+- [x] **Step 6: Type-check, lint and commit**
 
 ```bash
 npm run -w apps/web build && npm run -w apps/web lint
@@ -2789,7 +2789,7 @@ git commit -m "feat(web): add role-change mutation and self-aware member removal
 | 3 | owner | 1 | ≥ 2 | Enabled | Leave **with successor picker** |
 | 4 | owner | 1 | 1 | **Disabled** | None — inline explanation |
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/web/src/components/features/settings/MemberList.test.tsx`:
 
@@ -3140,12 +3140,12 @@ describe('MemberList — leaving', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `npm run -w apps/web test -- MemberList`
 Expected: FAIL — no names rendered, no dialogs, no Leave button for non-owners.
 
-- [ ] **Step 3: Rewrite the component**
+- [x] **Step 3: Rewrite the component**
 
 Replace `apps/web/src/components/features/settings/MemberList.tsx` entirely with:
 
@@ -3489,7 +3489,7 @@ export function MemberList({ fleetId, isOwner }: MemberListProps) {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `npm run -w apps/web test -- MemberList`
 Expected: PASS — all fourteen tests.
@@ -3506,14 +3506,14 @@ beforeAll(() => {
 
 (import `beforeAll` from `vitest`).
 
-- [ ] **Step 5: Run the whole web suite, type-check and lint**
+- [x] **Step 5: Run the whole web suite, type-check and lint**
 
 ```bash
 npm run -w apps/web test && npm run -w apps/web build && npm run -w apps/web lint
 ```
 Expected: all green. `SettingsPage.tsx` needs no change — `MemberList`'s props are unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/features/settings/MemberList.tsx \
@@ -3527,7 +3527,7 @@ git commit -m "feat(web): show member names and guard membership actions"
 
 **Files:** none — this task only runs checks.
 
-- [ ] **Step 1: Format the frontend**
+- [x] **Step 1: Format the frontend**
 
 ```bash
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -3541,7 +3541,7 @@ Commit any formatting-only changes:
 git add -A && git commit -m "style: prettier" || echo "nothing to format"
 ```
 
-- [ ] **Step 2: Run the full CI target**
+- [x] **Step 2: Run the full CI target**
 
 ```bash
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -3550,7 +3550,7 @@ make ci
 
 Expected: `lint-check`, `vet`, `test`, `build`, `fe-test`, `fe-build`, `manifests` and `carfax-template` all pass. Paste the failing output into the fix rather than re-running blind if any step fails.
 
-- [ ] **Step 3: Confirm the manifests are untouched**
+- [x] **Step 3: Confirm the manifests are untouched**
 
 This task changes no deployment manifest — the new auth route rides the existing `/api/auth` IngressRoute and `FLEET_SERVICE_URL` is already configured.
 
@@ -3559,7 +3559,7 @@ git diff --name-only main...HEAD -- deploy/
 ```
 Expected: no output. If anything is listed, it was not asked for by this task — remove it.
 
-- [ ] **Step 4: Verify the acceptance criteria have test coverage**
+- [x] **Step 4: Verify the acceptance criteria have test coverage**
 
 Cross-check `prd.md` §10 against the suites, then confirm the full set runs green:
 
@@ -3568,7 +3568,7 @@ go test ./apps/fleet-service/internal/membership/... ./apps/auth-service/... -v 
 npm run -w apps/web test
 ```
 
-- [ ] **Step 5: Final commit if anything moved**
+- [x] **Step 5: Final commit if anything moved**
 
 ```bash
 git status --short

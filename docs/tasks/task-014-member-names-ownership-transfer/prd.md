@@ -387,63 +387,63 @@ index was built to prevent, and the leave flow depends on it.
 
 **Names**
 
-- [ ] The settings Members card shows display names, not UUIDs.
-- [ ] A member with no `displayName` shows their email; with neither, the first
+- [x] The settings Members card shows display names, not UUIDs.
+- [x] A member with no `displayName` shows their email; with neither, the first
       8 characters of their id.
-- [ ] The authenticated user's own row is marked "(you)".
-- [ ] `GET /api/auth/users?ids=…` returns 200 with only the ids that are active
+- [x] The authenticated user's own row is marked "(you)".
+- [x] `GET /api/auth/users?ids=…` returns 200 with only the ids that are active
       members of the caller's active fleet.
-- [ ] A request for a user id in a *different* fleet returns 200 with that id
+- [x] A request for a user id in a *different* fleet returns 200 with that id
       absent from `data` — not 403, not 404.
-- [ ] A request with no `ids`, or more than 100, returns 422.
-- [ ] A request with no JWT returns 401.
-- [ ] Simulating a failure of the name lookup still renders the member list with
+- [x] A request with no `ids`, or more than 100, returns 422.
+- [x] A request with no JWT returns 401.
+- [x] Simulating a failure of the name lookup still renders the member list with
       id fallbacks.
 
 **Confirmation**
 
-- [ ] Clicking Remove on another member opens a dialog naming that member; the
+- [x] Clicking Remove on another member opens a dialog naming that member; the
       DELETE fires only after confirming.
-- [ ] Cancelling the dialog fires no request.
-- [ ] Clicking Leave opens a dialog explaining the consequences; the DELETE fires
+- [x] Cancelling the dialog fires no request.
+- [x] Clicking Leave opens a dialog explaining the consequences; the DELETE fires
       only after confirming.
 
 **Leaving**
 
-- [ ] A `member` can leave their own fleet and receives 204.
-- [ ] A `viewer` can leave their own fleet and receives 204.
-- [ ] A `viewer` attempting to delete *another* member receives 403.
-- [ ] A `member` attempting to delete *another* member receives 403.
-- [ ] After leaving, the SPA refreshes the session and lands on onboarding.
-- [ ] A sole member who is the owner sees Leave disabled with an explanation.
+- [x] A `member` can leave their own fleet and receives 204.
+- [x] A `viewer` can leave their own fleet and receives 204.
+- [x] A `viewer` attempting to delete *another* member receives 403.
+- [x] A `member` attempting to delete *another* member receives 403.
+- [x] After leaving, the SPA refreshes the session and lands on onboarding.
+- [x] A sole member who is the owner sees Leave disabled with an explanation.
 
 **Ownership transfer**
 
-- [ ] An owner can PATCH another member's role to `owner`; both are owners
+- [x] An owner can PATCH another member's role to `owner`; both are owners
       afterwards.
-- [ ] A non-owner PATCHing any role receives 403.
-- [ ] An owner with a stale `owner` token claim not backed by the database
+- [x] A non-owner PATCHing any role receives 403.
+- [x] An owner with a stale `owner` token claim not backed by the database
       receives 403.
-- [ ] PATCH with `role: "admin"` returns 422 naming the field and the allowed
+- [x] PATCH with `role: "admin"` returns 422 naming the field and the allowed
       values.
-- [ ] PATCH against a user who is not a member of the fleet returns 404.
-- [ ] Demoting the only owner returns 409.
-- [ ] PATCH setting a role the member already has returns 200 unchanged.
-- [ ] The sole owner's Leave dialog requires a successor; the confirm button is
+- [x] PATCH against a user who is not a member of the fleet returns 404.
+- [x] Demoting the only owner returns 409.
+- [x] PATCH setting a role the member already has returns 200 unchanged.
+- [x] The sole owner's Leave dialog requires a successor; the confirm button is
       disabled until one is selected.
-- [ ] "Transfer & leave" promotes the successor and then removes the actor; the
+- [x] "Transfer & leave" promotes the successor and then removes the actor; the
       fleet retains exactly one owner.
-- [ ] An owner who is *not* the sole owner sees the plain leave dialog with no
+- [x] An owner who is *not* the sole owner sees the plain leave dialog with no
       successor picker.
-- [ ] The standalone "Make owner" action is visible to owners on non-owner rows
+- [x] The standalone "Make owner" action is visible to owners on non-owner rows
       and hidden from non-owners.
 
 **Activity**
 
-- [ ] A role change writes a `member.role_changed` activity entry.
-- [ ] An owner-initiated removal writes `member.removed`.
-- [ ] A self-leave writes `member.left`.
+- [x] A role change writes a `member.role_changed` activity entry.
+- [x] An owner-initiated removal writes `member.removed`.
+- [x] A self-leave writes `member.left`.
 
 **Build**
 
-- [ ] `make ci` passes (lint-check, vet, test, build, fe-test, fe-build).
+- [x] `make ci` passes (lint-check, vet, test, build, fe-test, fe-build).
