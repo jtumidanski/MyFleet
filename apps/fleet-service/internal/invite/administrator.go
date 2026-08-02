@@ -5,6 +5,8 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/membership"
 )
 
@@ -91,14 +93,41 @@ func (a *dbAdministrator) Resend(inv Model, newToken string, expiresAt, now time
 	var updated Model
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		// updated_at is set explicitly rather than left to GORM so the value we
-		// return is provably the value persisted.
-		res := tx.Model(&Entity{}).Where("id = ?", inv.ID()).Updates(map[string]any{
-			"token":      newToken,
-			"expires_at": expiresAt,
-			"updated_at": now,
-		})
+		// return is provably the value persisted. The WHERE clause carries a
+		// SECOND guard beyond id: accepted_at IS NULL. Without it, this UPDATE
+		// would happily rotate the token of an invite that a concurrent Accept
+		// stamped between the handler's proc.GetByID (which produced inv) and
+		// this transaction — the handler's own inv.AcceptedAt() != nil check
+		// only sees the STALE pre-transaction read and cannot catch that race.
+		res := tx.Model(&Entity{}).
+			Where("id = ? AND accepted_at IS NULL", inv.ID()).
+			Updates(map[string]any{
+				"token":      newToken,
+				"expires_at": expiresAt,
+				"updated_at": now,
+			})
 		if res.Error != nil {
 			return res.Error
+		}
+		// Zero rows affected means the row either no longer exists (deleted
+		// between the read and this transaction) or was accepted in that same
+		// window — RowsAffected alone cannot distinguish the two. Returning the
+		// fabricated "updated" Model built from the stale in-memory inv here
+		// would hand the caller a 200 with a freshly rotated, live token for a
+		// row that is either gone or already claimed, and would emit
+		// invite.created for it. Neither must happen, so bail out before
+		// building updated and before touching the emitter.
+		//
+		// Mapped to server.ErrConflict rather than server.ErrNotFound: the
+		// handler already returns 409 for the accepted case it CAN see
+		// (inv.AcceptedAt() != nil, checked just before calling Resend), so
+		// treating the race that slips past that check as a conflict too keeps
+		// the two paths consistent. It also avoids falsely asserting "this ID
+		// never existed" when the row may still be sitting there, accepted — a
+		// client that reissues after a fresh GET will see 404 if it's truly
+		// deleted, or the current accepted state either way.
+		if res.RowsAffected == 0 {
+			return server.ErrConflict
 		}
 		updated = Make(Entity{
 			ID:              inv.ID(),

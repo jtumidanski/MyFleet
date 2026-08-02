@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	sharedevents "github.com/jtumidanski/myfleet/packages/shared-go/events"
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // newInviteDB returns an in-memory sqlite DB with the invite table and the
@@ -204,5 +205,97 @@ func TestResend_rollsBackWhenEmitFails(t *testing.T) {
 	}
 	if _, err := NewProvider(db).GetByToken("tok-1"); err != nil {
 		t.Fatalf("original token must survive a rolled-back resend: %v", err)
+	}
+}
+
+// TOCTOU guard (code review finding 1a): the handler reads the invite via
+// proc.GetByID, then a concurrent request deletes the row before the Resend
+// transaction runs. Without the RowsAffected check, the UPDATE silently
+// touches 0 rows and the code used to fabricate a 200 response with a rotated
+// token for a row that no longer exists, plus emit invite.created for it.
+func TestResend_deletedRowDoesNotRotateOrEmit(t *testing.T) {
+	db := newInviteDB(t)
+	events := 0
+	adm := NewAdministrator(db).WithCreatedEmitter(
+		func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
+			events++
+			return sharedevents.Enqueue(tx, sharedevents.Envelope{
+				EventID: "e" + strconv.Itoa(events), Type: "invite.created", FleetID: fleetID,
+			})
+		})
+
+	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	events = 0 // discard the count from Insert's own emit
+
+	if err := adm.Delete(orig.ID()); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	now := time.Now()
+	if _, err := adm.Resend(orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, server.ErrConflict) {
+		t.Fatalf("Resend on a deleted row err = %v, want server.ErrConflict", err)
+	}
+	if events != 0 {
+		t.Fatalf("invite.created emitted %d time(s) for a deleted row, want 0", events)
+	}
+	if n := countRows(t, db, &Entity{}); n != 0 {
+		t.Fatalf("want 0 invite rows, got %d", n)
+	}
+	// Only the row Insert wrote is present; Resend must not have added a
+	// second outbox row for a rotation that never happened.
+	if n := countRows(t, db, &sharedevents.OutboxRow{}); n != 1 {
+		t.Fatalf("want 1 outbox row (from Insert only), got %d", n)
+	}
+}
+
+// TOCTOU guard (code review finding 1b, the security-relevant half): a
+// concurrent Accept lands between the handler's proc.GetByID read and the
+// Resend transaction. The handler's inv.AcceptedAt() != nil check only sees
+// the stale pre-race read, so without the accepted_at IS NULL guard in the
+// UPDATE's WHERE clause, an already-accepted invite would walk away with a
+// fresh, live token.
+func TestResend_concurrentlyAcceptedDoesNotRotateOrEmit(t *testing.T) {
+	db := newInviteDB(t)
+	events := 0
+	adm := NewAdministrator(db).WithCreatedEmitter(
+		func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
+			events++
+			return sharedevents.Enqueue(tx, sharedevents.Envelope{
+				EventID: "e" + strconv.Itoa(events), Type: "invite.created", FleetID: fleetID,
+			})
+		})
+
+	orig, err := adm.Insert(newInvite("f1", "a@b.com", "tok-1"), "trace-1")
+	if err != nil {
+		t.Fatalf("Insert: %v", err)
+	}
+	events = 0 // discard the count from Insert's own emit
+
+	// Stamp accepted_at directly, simulating a concurrent Accept that landed
+	// after orig was read but before Resend runs. orig itself still reports
+	// AcceptedAt() == nil — that staleness is the whole point of the test.
+	acceptedAt := time.Now().UTC()
+	if err := db.Model(&Entity{}).Where("id = ?", orig.ID()).Update("accepted_at", &acceptedAt).Error; err != nil {
+		t.Fatalf("stamp accepted_at: %v", err)
+	}
+
+	now := time.Now()
+	if _, err := adm.Resend(orig, "tok-2", now.Add(time.Hour), now, "trace-2"); !errors.Is(err, server.ErrConflict) {
+		t.Fatalf("Resend on a concurrently-accepted invite err = %v, want server.ErrConflict", err)
+	}
+	if events != 0 {
+		t.Fatalf("invite.created emitted %d time(s) for an accepted invite, want 0", events)
+	}
+	if _, err := NewProvider(db).GetByToken("tok-1"); err != nil {
+		t.Fatalf("original token must survive: %v", err)
+	}
+	if _, err := NewProvider(db).GetByToken("tok-2"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rotated token must not exist, GetByToken(tok-2) err = %v", err)
+	}
+	if n := countRows(t, db, &sharedevents.OutboxRow{}); n != 1 {
+		t.Fatalf("want 1 outbox row (from Insert only), got %d", n)
 	}
 }
