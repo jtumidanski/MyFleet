@@ -23,4 +23,8 @@ export type FleetRole = 'owner' | 'member' | 'viewer';
 export interface AuthMeta {
   activeFleetId: string | null;
   role: FleetRole | null;
+  // Sourced from the validated token's claim, not a second lookup. It is
+  // orthogonal to `role`: role is a position inside one fleet, this is a
+  // position above all of them.
+  platformAdmin: boolean;
 }

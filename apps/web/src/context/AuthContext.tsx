@@ -16,6 +16,7 @@ export interface AuthContextValue {
   user: User | null;
   activeFleetId: string | null;
   role: FleetRole | null;
+  platformAdmin: boolean;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: () => void;
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: data?.user ?? null,
       activeFleetId: data?.activeFleetId ?? null,
       role: data?.role ?? null,
+      platformAdmin: data?.platformAdmin ?? false,
       isAuthenticated: hasToken && !!data?.user,
       isLoading: hasToken && me.isLoading,
       login,

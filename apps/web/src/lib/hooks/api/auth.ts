@@ -13,6 +13,7 @@ export interface MeResult {
   user: User;
   activeFleetId: string | null;
   role: AuthMeta['role'];
+  platformAdmin: boolean;
 }
 
 // `GET /api/auth/me` → user resource + meta:{ activeFleetId, role }.
@@ -22,6 +23,9 @@ async function fetchMe(): Promise<MeResult> {
     user: doc.data,
     activeFleetId: doc.meta?.activeFleetId ?? null,
     role: doc.meta?.role ?? null,
+    // Defaults to false: an older server that does not send the field must not
+    // accidentally reveal the console's entry point.
+    platformAdmin: doc.meta?.platformAdmin ?? false,
   };
 }
 

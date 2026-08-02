@@ -30,6 +30,7 @@ function baseAuth(overrides: Partial<AuthContextValue>): AuthContextValue {
     user: null,
     activeFleetId: null,
     role: null,
+    platformAdmin: false,
     isAuthenticated: false,
     isLoading: false,
     login: vi.fn(),
