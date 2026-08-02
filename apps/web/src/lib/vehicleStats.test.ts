@@ -80,9 +80,14 @@ describe('deriveTrailingCost', () => {
   });
 
   it('includes a row exactly at the twelve-month cutoff', () => {
+    // `cutoff.toISOString()` always includes millisecond precision
+    // ('.000Z'), so a fixture written as '...:00Z' (no ms) is
+    // lexicographically *greater* than the cutoff and never actually lands
+    // on the boundary being tested — the row must match the cutoff's exact
+    // ISO shape to exercise the `>=` at vehicleStats.ts:30.
     const rows = [
       { id: 'maintenance:edge', sourceId: 'edge', kind: 'maintenance' as const,
-        date: '2025-08-02T00:00:00Z', title: 'Edge', cost: 100 },
+        date: '2025-08-02T00:00:00.000Z', title: 'Edge', cost: 100 },
     ];
     expect(deriveTrailingCost(rows, now)).toBe(100);
   });
@@ -95,7 +100,11 @@ describe('deriveTrailingCost', () => {
 describe('deriveAvgEconomy', () => {
   it('is undefined with fewer than two fill-ups', () => {
     expect(deriveAvgEconomy([])).toBeUndefined();
-    expect(deriveAvgEconomy([fuelRow('2026-07-01', 84000, 58.31, 16)])).toBeUndefined();
+    // gallons must be set so this row actually survives the usability
+    // filter as one usable fill-up (not zero) — otherwise this exercises
+    // the empty-array case a second time instead of the single-row one.
+    expect(deriveAvgEconomy([{ ...fuelRow('2026-07-01', 84000, 58.31, 16), gallons: 16 }]))
+      .toBeUndefined();
   });
 
   it('is undefined when the odometer did not advance', () => {
@@ -137,6 +146,31 @@ describe('deriveAvgEconomy', () => {
     // If the non-advancing pair were treated as 0 miles / 8 gallons instead of
     // skipped, gallons would still total 28 and change the result.
     expect(deriveAvgEconomy(rows)).toBeCloseTo(10, 2);
+  });
+
+  it('skips both legs adjacent to a decreasing odometer, not just the first', () => {
+    const rows = [
+      { ...fuelRow('2026-07-01T00:00:00Z', 84000, 30, 10), gallons: 10 },
+      { ...fuelRow('2026-07-10T00:00:00Z', 83000, 120, 40), gallons: 40 },
+      { ...fuelRow('2026-07-20T00:00:00Z', 84200, 60, 20), gallons: 20 },
+    ];
+    // Leg 1 (84000 -> 83000) is a decrease: bad data, skipped. Leg 2
+    // (83000 -> 84200) shares the bad 83000 endpoint and must be skipped
+    // too, even though its own delta is positive — otherwise it reports
+    // 1,200 miles that were never actually driven since the last *good*
+    // reading, producing an impossible 60 mpg.
+    expect(deriveAvgEconomy(rows)).toBeUndefined();
+  });
+
+  it('resumes counting once a leg no longer touches the tainted reading', () => {
+    const rows = [
+      { ...fuelRow('2026-07-01T00:00:00Z', 84000, 30, 10), gallons: 10 },
+      { ...fuelRow('2026-07-10T00:00:00Z', 83000, 120, 40), gallons: 40 }, // leg 1: bad decrease
+      { ...fuelRow('2026-07-20T00:00:00Z', 84200, 60, 20), gallons: 20 }, // leg 2: tainted, shares 83000
+      { ...fuelRow('2026-08-01T00:00:00Z', 84400, 50, 10), gallons: 10 }, // leg 3: clean
+    ];
+    // Only leg 3 (84200 -> 84400, 200 miles / 10 gallons) should count.
+    expect(deriveAvgEconomy(rows)).toBeCloseTo(20, 2);
   });
 
   it('ignores rows missing gallons or mileage', () => {
@@ -199,6 +233,70 @@ describe('deriveNextService', () => {
 
   it('returns undefined when the top schedule has neither due mileage nor due date', () => {
     const schedules = [schedule('a', 'upcoming')];
+    expect(deriveNextService(schedules, 84000, now)).toBeUndefined();
+  });
+
+  it('reports the date axis when it is nearer than the mileage axis on a hybrid schedule', () => {
+    // 5,000 miles away reads as "plenty of road left", but the date axis
+    // says the service is due in three days — the nearer dimension must
+    // win, not whichever branch happens to be checked first.
+    const schedules = [
+      schedule('hybrid', 'upcoming', { nextDueMileage: 89000, nextDueDate: '2026-08-05T00:00:00Z' }),
+    ];
+    const result = deriveNextService(schedules, 84000, now);
+    expect(result?.label).toBe('3 days');
+  });
+
+  it('reports the mileage axis when it is nearer than the date axis on a hybrid schedule', () => {
+    const schedules = [
+      // 100 mi remaining (well inside the 500 mi due-soon window) vs. 20
+      // days remaining (well inside the 30 day window, but proportionally
+      // further off): mileage is the nearer axis here.
+      schedule('hybrid', 'upcoming', { nextDueMileage: 84100, nextDueDate: '2026-08-22T00:00:00Z' }),
+    ];
+    const result = deriveNextService(schedules, 84000, now);
+    expect(result?.label).toBe('100 mi');
+  });
+
+  it('prefers the mileage axis on an exact urgency tie', () => {
+    const schedules = [
+      // Both axes sit at exactly half their due-soon window: urgency ties.
+      schedule('hybrid', 'upcoming', { nextDueMileage: 84250, nextDueDate: '2026-08-17T00:00:00Z' }),
+    ];
+    const result = deriveNextService(schedules, 84000, now);
+    expect(result?.label).toBe('250 mi');
+  });
+
+  it('falls through to the next-ranked schedule when the top one has no due data yet', () => {
+    // Mirrors a freshly created schedule: Processor.Create inserts a row
+    // before the backend's hourly recompute has populated nextDue*, so it
+    // can reach the frontend with a status but no due data at all.
+    const schedules = [
+      schedule('fresh', 'overdue'),
+      schedule('normal', 'upcoming', { nextDueMileage: 85000 }),
+    ];
+    const result = deriveNextService(schedules, 84000, now);
+    expect(result?.label).toBe('1,000 mi');
+    // Severity comes from whichever schedule actually produced the label,
+    // not from the skipped top-ranked one.
+    expect(result?.severity).toBe('warning');
+  });
+
+  it('falls back to the date axis when nextDueMileage exists but the odometer is unknown', () => {
+    const schedules = [
+      schedule('a', 'upcoming', { nextDueMileage: 90000, nextDueDate: '2026-08-12T00:00:00Z' }),
+    ];
+    const result = deriveNextService(schedules, undefined, now);
+    expect(result?.label).toBe('10 days');
+  });
+
+  it('returns undefined rather than NaN when only mileage data exists and the odometer is unknown', () => {
+    const schedules = [schedule('a', 'upcoming', { nextDueMileage: 90000 })];
+    expect(deriveNextService(schedules, undefined, now)).toBeUndefined();
+  });
+
+  it('ignores an unparseable nextDueDate rather than producing NaN', () => {
+    const schedules = [schedule('a', 'upcoming', { nextDueDate: 'not-a-date' })];
     expect(deriveNextService(schedules, 84000, now)).toBeUndefined();
   });
 });
