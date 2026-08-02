@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/membership"
@@ -77,6 +78,56 @@ func TestNewPrincipalResolver_fillsEveryField(t *testing.T) {
 	}
 	if p.Role != "owner" {
 		t.Fatalf("Role = %q, want owner", p.Role)
+	}
+}
+
+// TestNewPrincipalResolver_leavesNoPrincipalFieldEmpty is the same guarantee as
+// the test above, expressed so that nobody has to remember to update it. It
+// deliberately names NO field: an enumerating test only covers the fields
+// somebody thought to enumerate.
+//
+// The scenario it closes: someone adds Principal.TenantID and wires it into
+// MintAccess — so session's TestMintAccess_mapsEveryPrincipalField stays green
+// — but forgets the literal in newPrincipalResolver. Every token then carries
+// "tenant_id": "", exactly the defect this branch fixed, and every other test
+// in the repository stays green.
+//
+// Sibling guards, each covering a link this one does not:
+//   - session.TestMintAccess_mapsEveryPrincipalField — every field reaches a claim.
+//   - arch.TestNoPrincipalLiteralOutsideResolver — no other site builds a Principal.
+//   - TestNewPrincipalResolver_fillsEveryField above — pins the actual VALUES,
+//     which a zero-value check cannot; a resolver that filled every field with
+//     the wrong data would satisfy this test and fail that one.
+//
+// Both inputs are fully populated, so after resolution every field must be
+// non-empty. A field that is still zero was dropped by the literal.
+func TestNewPrincipalResolver_leavesNoPrincipalFieldEmpty(t *testing.T) {
+	resolve := newPrincipalResolver(
+		usersWith("user-1", "a@b.com"),
+		fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
+	)
+
+	p, err := resolve(context.Background(), "user-1")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	v := reflect.ValueOf(p)
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Type().Field(i)
+		if f.Type.Kind() != reflect.String {
+			// Not a skip: a non-string field means the "zero value means
+			// dropped" scheme no longer holds, and this test must say so rather
+			// than quietly cover less than it appears to.
+			t.Fatalf("session.Principal.%s is a %s, not a string — this test infers "+
+				"'dropped' from the empty string, so extend its scheme before adding "+
+				"a field of another kind", f.Name, f.Type.Kind())
+		}
+		if v.Field(i).String() == "" {
+			t.Errorf("session.Principal.%s is empty after resolution — newPrincipalResolver's "+
+				"literal does not set it, so every token this service mints will carry an "+
+				"empty claim for it.", f.Name)
+		}
 	}
 }
 
