@@ -164,7 +164,7 @@ during initial implementation:
 | Check | File | Requirement |
 |-------|------|-------------|
 | `builder.go` exists | `builder.go` | Fluent builder — `NewBuilder()`, setters, `Build()` that validates invariants (`DOM-01`) |
-| `ToEntity()` method | `entity.go` | `func (m Model) ToEntity() Entity` — present on every domain's Model, e.g. `apps/fleet-service/internal/vehicle/entity.go:63` (`DOM-02`) |
+| `ToEntity()` method | `entity.go` | `func (m Model) ToEntity() Entity` — present in 17 of the 20 domain packages with an `entity.go` (e.g. `apps/fleet-service/internal/vehicle/entity.go:63`). The three exceptions: `platformadmin` has no `model.go` at all, so no `Model` and nothing to convert; `dashboard`'s types are `Dashboard`/`Widget`, converted one-way from entity via `MakeDashboard` (`entity.go:68`) with no reverse method; `admin` declares `Operation`/`AuditEvent` instead of a single `Model`, each with its own `ToEntity()` (`model.go:114`, `model.go:169`) (`DOM-02`) |
 | `Make` constructor | `entity.go` | `func Make(e Entity) Model`; not uniform — a domain whose model needs child rows too takes them as extra args, e.g. `maintenancerecord/entity.go:44` is `func Make(e Entity, docs []DocumentEntity) Model` (`DOM-03`) |
 | `TransformSlice` function | `rest.go` | List handlers use `TransformSlice`, not an inline loop — unless decorating each row with a per-row derived value via `TransformDerived` (`DOM-05`) |
 | `logrus.FieldLogger` | `processor.go` | Constructor takes `logrus.FieldLogger`, not `*logrus.Logger` (`DOM-06`) |
