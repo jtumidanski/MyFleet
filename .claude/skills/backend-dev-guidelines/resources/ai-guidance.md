@@ -11,8 +11,8 @@ description: Rules for AI agents generating or editing Golang services.
 **CRITICAL:** Before implementing ANY code changes, review the [Standard Implementation Workflow](../SKILL.md#standard-implementation-workflow) in the main skill document.
 
 **Key Requirements:**
-- ✅ Update mocks immediately when interfaces change
-- ✅ Run `go test ./... -count=1` BEFORE claiming completion
+- ✅ Update the in-package `fake*`/`stub*` doubles immediately when the interface they implement changes (see testing-guide.md — example: `apps/auth-service/internal/user/processor_test.go:14` declares `fakeProvider`)
+- ✅ Run `make test` BEFORE claiming completion
 - ✅ Fix all test failures before proceeding
 - ✅ Report actual test output, not assumptions
 - ❌ NEVER skip test execution
@@ -20,57 +20,51 @@ description: Rules for AI agents generating or editing Golang services.
 
 ## Core Rules
 1. Respect file responsibilities (see file-responsibilities.md).
-2. Maintain immutability and functional composition.
-3. Use curried functions for dependency injection.
-4. Use `server.RegisterHandler` and `server.RegisterInputHandler` for REST endpoints.
-5. Implement JSON:API interface methods on all REST models and request types.
-6. **Always verify referenced types exist before using them** - Never assume a type/constant/operation exists.
-7. **Always run builds AND tests after code changes** - Verify ALL affected services compile and pass tests.
-8. **Always ask before implementing new features** - Get user approval before adding new functionality.
+2. Maintain immutability (see patterns-functional.md#immutability).
+3. Wrap bodied routes (the request carries a payload) in `server.RegisterInputHandler[T]`; body-less routes (GET, DELETE, and actions whose only input is the URL path) register a plain handler directly on the chi router (see patterns-rest-jsonapi.md).
+4. **Always verify referenced types exist before using them** - Never assume a type/constant/operation exists.
+5. **Always run builds AND tests after code changes** - Verify ALL affected services compile and pass tests.
+6. **Always ask before implementing new features** - Get user approval before adding new functionality.
 
 ## Validation Rules
 
 ### Before Using Any Type/Constant/Operation:
 1. **Always verify it exists** - Read the relevant file to confirm the type/constant is implemented
-2. **Check all dependent services** - If using a condition type, verify it's in validation/model.go; if using an operation, verify it's in operation_executor.go
+2. **Check where it's declared** - e.g. an error sentinel must be declared in `packages/shared-go/server/errors.go`; a `Provider` method must be declared on that domain's `Provider` interface in `provider.go`
 3. **Never assume** - Just because it makes logical sense doesn't mean it's implemented
 
 ### Examples:
-❌ **BAD** - Using condition without verification:
+❌ **BAD** - Using a sentinel without verification:
 ```go
-// Assuming "bucketCount" condition exists without checking
-conditions := []validation.Condition{
-    {Type: "bucketCount", Operator: ">=", Value: "1"},
-}
+// Assuming server.ErrPreconditionFailed exists without checking
+return Model{}, server.ErrPreconditionFailed
 ```
 
 ✅ **GOOD** - Verify first, ask if missing:
 ```
-1. Read validation/model.go
-2. Search for "bucketCount" in ConditionType constants
-3. If not found: "The condition type 'bucketCount' doesn't exist in validation/model.go.
-   Should I implement it first, or use a different approach?"
+1. Read packages/shared-go/server/errors.go
+2. Search for ErrPreconditionFailed among the declared sentinels
+3. If not found: "The sentinel 'server.ErrPreconditionFailed' doesn't exist in
+   errors.go. Should I add it (with its StatusFor mapping), or map this case to
+   an existing sentinel like server.ErrConflict instead?"
 ```
 
-❌ **BAD** - Using operation without verification:
+❌ **BAD** - Calling a provider method without verification:
 ```go
-// Assuming "enable_versioning" operation exists
-operation := Operation{
-    Type: "enable_versioning",
-    Params: map[string]string{"bucketId": "abc", "enabled": "true"},
-}
+// Assuming Provider has a ListActiveByFleet method without checking
+ms, err := p.ListActiveByFleet(fleetID)
 ```
 
 ✅ **GOOD** - Verify first, ask if missing:
 ```
-1. Read operation_executor.go
-2. Search for case "enable_versioning": in the switch statement
-3. If not found: "The operation 'enable_versioning' doesn't exist in operation_executor.go.
-   To implement it, I would need to:
-   - Add case in operation_executor.go
-   - Add the necessary domain model and processor methods
+1. Read provider.go
+2. Search for ListActiveByFleet in the Provider interface
+3. If not found: "The method 'ListActiveByFleet' doesn't exist on this domain's
+   Provider interface. To implement it, I would need to:
+   - Add the method to the Provider interface and its db-backed implementation
+   - Add a matching fake in the processor's _test.go
 
-   Should I implement this feature first?"
+   Should I implement this first?"
 ```
 
 ## Testing Rules
@@ -79,37 +73,36 @@ operation := Operation{
 1. **Always run builds for ALL affected services** - Not just the one you modified
 2. **Always run tests** for all modified and dependent services
 3. **Report failures immediately** - Never commit/continue with failing builds or tests
-4. **Update all mocks** - When interfaces change, update ALL mock implementations
+4. **Update the in-package `fake*`/`stub*` doubles** - When a `Provider`/`Administrator`/`Processor` interface changes, update every `fake*`/`stub*` implementation declared in the `_test.go` files that use it
 5. **No partial implementations** - A feature isn't done until all services build and test successfully
 
 ### Build & Test Workflow:
 ```bash
-# CRITICAL: Always build from workspace root to catch cross-service issues
-cd /path/to/workspace/root
-
-# Build all affected packages
-go build ./...
+# Run from the repo root. `make build`/`make vet`/`make test` build the
+# workspace-wide package pattern `go.work` resolves across every module — not
+# a loop over modules, and not the same as a bare `go build ./...` at the root.
+make build
 
 # If the build fails:
 # 1. Report the failure to the user with error details
 # 2. Fix ALL compilation errors (missing methods, type mismatches, etc.)
-# 3. Re-run the build
+# 3. Re-run `make build`
 # 4. Only proceed when the build succeeds
 
-# After successful builds, run tests
-go test ./...
+make vet
+make test
 
 # If tests fail:
 # 1. Report the failure to the user
-# 2. Fix the tests or code (usually missing mock methods)
-# 3. Re-run tests
+# 2. Fix the tests or code (often a fake*/stub* double missing a new method)
+# 3. Re-run `make test`
 # 4. Only proceed when all tests pass
 ```
 
 ### Common Build Failures & Fixes:
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `missing method ChangeFace` | Interface updated but mock not updated | Add method to mock struct and implement it |
+| `does not implement Provider (missing method X)` | Interface method added but a `fake*`/`stub*` double in an affected `_test.go` not updated | Add the method to the `fake*`/`stub*` struct and implement it |
 | `redeclared in this block` | Duplicate function declarations | Remove old/duplicate version |
 | `cannot use X as Y value` | Function signature changed incompletely | Update ALL call sites (use `grep -r`) |
 
@@ -167,17 +160,18 @@ After extracting code to a shared library, review every modified service file fo
 
 Before reporting any domain package as complete, verify **every item** below. These are the items most frequently missed across all service audits:
 
-- [ ] **`builder.go` exists** for every domain with a model — with `NewBuilder()`, fluent setters, and `Build()` that validates invariants
-- [ ] **`ToEntity()` method** exists on the Model type in `entity.go` (not just `Make(Entity) Model`)
-- [ ] **`TransformSlice`** exists in `rest.go` alongside `Transform` — list handlers use it (no inline loops)
-- [ ] **Processor accepts `logrus.FieldLogger`** (not `*logrus.Logger`) in its constructor
-- [ ] **Handlers pass `d.Logger()`** to processors (not `logrus.StandardLogger()`)
-- [ ] **POST/PATCH routes use `RegisterInputHandler[T]`** (not `RegisterHandler` which is for GET/DELETE only)
-- [ ] **Transform errors are checked and logged** (never `rm, _ := Transform(m)`)
-- [ ] **Providers use lazy evaluation** via `database.Query`/`database.SliceQuery` (not eager execution wrapped in `FixedProvider`)
-- [ ] **No `os.Getenv()` in handlers** — env vars read once in config, injected via constructors
-- [ ] **No cross-domain business logic in handlers** — orchestration belongs in the processor layer
-- [ ] **Sub-domain packages have proper layers** — even simple action-event packages need processor + administrator (or fold into parent domain processor)
+- [ ] **`builder.go` exists** for every domain with a model — with `NewBuilder()`, fluent setters, and a `Build()` that returns `(Model, error)` and checks the invariants **if the domain has any**; a bare `Build() Model` is correct for the six domains that do not (`DOM-01`)
+- [ ] **`ToEntity()` method** exists on the Model type in `entity.go` — `func (m Model) ToEntity() Entity`, present in 17 of the 20 domain packages with an `entity.go`, e.g. `apps/fleet-service/internal/vehicle/entity.go:63`. Three exceptions, all structural rather than oversights: `platformadmin` has no `model.go` at all (`administrator.go`, `entity.go`, `provider.go`, `resource.go`, `seed.go`), so there is no `Model` to convert; `dashboard` declares `Dashboard`/`Widget` instead of `Model` and converts one-way from entity via `MakeDashboard` (`entity.go:68`), with writes building entity literals directly in `processor.go` rather than through a reverse method; `admin` declares two domain types instead of one — `Operation` and `AuditEvent` — each with its own `Make*`/`ToEntity()` pair in `model.go` (`model.go:82` `MakeOperation`, `model.go:114` `Operation.ToEntity()`, `model.go:141` `MakeAudit`, `model.go:169` `AuditEvent.ToEntity()`) (`DOM-02`)
+- [ ] **`Make` constructor** in `entity.go` returns `Model` with no error and is not uniform: 16 of 17 domains are `func Make(e Entity) Model`; the exception is `maintenancerecord`, whose model needs its child rows too — `func Make(e Entity, docs []DocumentEntity) Model` (`apps/fleet-service/internal/maintenancerecord/entity.go:44`) (`DOM-03`)
+- [ ] **`TransformSlice`** exists in `rest.go` alongside `Transform` — list handlers use it, not an inline loop, unless the loop is decorating each element with a per-row derived value via `TransformDerived` (e.g. `apps/fleet-service/internal/vehicle/resource.go:50-53`) rather than rebuilding the `server.Resource` literal by hand (`DOM-05`)
+- [ ] **Every processor that takes a logger takes `logrus.FieldLogger`**, not `*logrus.Logger`, in its constructor — 18 of 19 `NewProcessor` functions take a logger; the exception, `apps/auth-service/internal/oidc/processor.go:28`, takes no logger at all (`DOM-06`)
+- [ ] **Handlers use the `log` parameter `InitializeRoutes` receives** (passed straight into `NewProcessor`, `apps/fleet-service/internal/vehicle/resource.go:28-29`) — never `logrus.StandardLogger()`, which is reserved for the shared error-logger fallback in `packages/shared-go/server/jsonapi.go:70` (`DOM-07`)
+- [ ] **Bodied routes wrap their handler in `server.RegisterInputHandler[T]`**; body-less routes — GET, DELETE, and action endpoints whose only input is the URL path (e.g. `POST /vehicles/{id}/restore`, `apps/fleet-service/internal/vehicle/resource.go:178`) — register a plain `func(w, r)` directly on the chi router (`DOM-08`)
+- [ ] **Every domain error goes out through `server.WriteError(w, err)`** — no hand-built envelope, no bare `http.Error`, no per-error `w.WriteHeader` ladder (`DOM-09`)
+- [ ] **`provider.go` declares a `Provider` interface** with a `db`-backed implementation and a `NewProvider(db)` constructor — universal, 19 of 19. **Any method that fetches a single record** additionally translates `gorm.ErrRecordNotFound` at the boundary rather than letting the raw GORM error reach the handler — `server.StatusFor` does not recognise it and would map it to 500. 16 of 19 `provider.go` files have a single-record fetch method; the remaining 3 have none and nothing to translate because they expose only list or existence queries, which never surface `gorm.ErrRecordNotFound`: `mileage/provider.go:12-16` (`ListByVehicle` only), `notification/provider.go:29-31` (`ListByUser` only), `platformadmin/provider.go:6-19` (`IsAdmin`/`IsRevoked` only). Of those 16, most translate to a domain not-found sentinel (usually `ErrNotFound`; `admin/provider.go:33` is `ErrOperationNotFound`) — but 2 legitimately express not-found as a bool flag or zero value instead, because the caller doesn't need it as an error: `activity/provider.go:63-65` (`LastActivityByVehicle` returns `time.Time{}, nil`) and `maintenancecategory/provider.go:102-104` (`FindByName` returns `Model{}, false, nil`) (`DOM-10`)
+- [ ] **No `os.Getenv()` in handlers** — env vars read once in config, injected via constructors (`DOM-11`)
+- [ ] **No cross-domain business logic in handlers** — orchestration belongs in the processor layer (`DOM-12`)
+- [ ] **Sub-domain packages have proper layers** — even simple action-event packages need a `processor.go` and `administrator.go` (or fold into the parent domain's processor) (`SUB-01`/`SUB-02`)
 
 ---
 
@@ -185,55 +179,37 @@ Before reporting any domain package as complete, verify **every item** below. Th
 1. **Validate dependencies** - Verify all types/operations you plan to use exist
 2. Create `model.go` - Immutable domain model with accessors
 3. Map `entity.go` to DB - GORM entities with migrations, including `Make()` and `ToEntity()`
-4. Implement `builder.go` - Fluent API for model construction with `Build()` validation
-5. Define processors and providers - Pure business logic, `logrus.FieldLogger` in constructors
-6. Add `rest.go` - JSON:API DTOs with `Transform` AND `TransformSlice` functions
-7. Add `resource.go` - Route registration and thin handlers using `d.Logger()` and correct handler types
-8. Write table-driven tests
-9. **Run the Commonly Missed Items Checklist above**
-10. **Build the project** - From workspace root, run `go build ./...`
-11. **Run all tests** - Verify nothing broke with `go test ./... -count=1`
-12. **Report build/test results** - Show pass/fail status to user
-13. **Fix ALL issues before proceeding** - No partial implementations allowed
+4. Implement `builder.go` - Fluent API for model construction; `Build()` validates only if there is an invariant to check
+5. Define `provider.go` (reads) and `administrator.go` (writes) - each an interface with a `db`-backed implementation and a `New*` constructor
+6. Define `processor.go` - Pure business logic, `logrus.FieldLogger` in the constructor
+7. Add `rest.go` - JSON:API DTOs with `Transform` AND `TransformSlice` functions
+8. Add `resource.go` - Route registration and thin handlers using the `log` parameter `InitializeRoutes` receives
+9. Write table-driven tests
+10. **Run the Commonly Missed Items Checklist above**
+11. **Build the project** - From the repo root, run `make build`
+12. **Run all tests** - Verify nothing broke with `make test`
+13. **Report build/test results** - Show pass/fail status to user
+14. **Fix ALL issues before proceeding** - No partial implementations allowed
 
 ## REST Generation Specifics
 
-
 ### When generating `rest.go`:
-- ✅ Implement JSON:API interface on all models (`GetName()`, `GetID()`, `SetID()`)
-- ✅ Use flat structure for request models (no nested Data/Type/Attributes)
-- ✅ Mark ID field with `json:"-"` tag
-
-- ✅ Use pointer fields for optional attributes with `omitempty`
-- ✅ Create `Transform(Model) (RestModel, error)` function
-
-- ✅ Create `TransformSlice([]Model) ([]RestModel, error)` function
+- ✅ Declare a plain `Attributes` struct and put it inside a `server.Resource{Type, ID, Attributes}` literal — there is no interface to implement and no marshaling library
+- ✅ Use flat, narrow named structs for request models (`createAttributes` / `patchAttributes`) — no nested Data/Type/Attributes
+- ✅ Use pointer fields on a patch struct so a nil distinguishes "absent" from "set to zero"
+- ✅ Create `Transform(Model) server.Resource` — no error return in 45 of 47 `Transform*` functions; the two exceptions (`activity`'s `Transform`/`TransformSlice`) return an error because they unmarshal a stored JSON payload
+- ✅ Create `TransformSlice([]Model) []server.Resource` alongside `Transform`
 - ❌ Never use jsonapi struct tags on fields
 - ❌ Never create nested Data/Type/Attributes structures
 
 ### When generating `resource.go`:
-- ✅ Return `func(db *gorm.DB) server.RouteInitializer` from `InitializeRoutes`
-- ✅ Use `server.RegisterHandler(l)(si)("handler-name", handler)` for GET/DELETE
-- ✅ Use `server.RegisterInputHandler[T](l)(si)("handler-name", handler)` for POST/PATCH
-- ✅ Map domain errors to specific HTTP status codes
-- ✅ Use `server.MarshalResponse[T]` for success responses
-- ✅ Log errors with `d.Logger().WithError(err)`
+- ✅ Return `func(chi.Router)` from `InitializeRoutes`
+- ✅ Build the processor once, closed over the `log` parameter, outside `return func(r chi.Router) {...}`
+- ✅ Register body-less handlers (GET, DELETE, path-only actions) as a plain `func(w, r)` directly on `r.Get`/`r.Delete`/`r.Post`
+- ✅ Wrap bodied handlers (the request carries a payload) in `server.RegisterInputHandler[T]`
+- ✅ Map every domain error to a status with a single `server.WriteError(w, err)` call
 - ❌ Never manually decode JSON with nested structures
-- ❌ Never create custom error response helpers
-
-## Useful Composition
-```go
-// Transform entity to model using provider pattern
-model.Map(Make)(entityProvider)(model.ParallelMap())
-
-
-// Transform model to REST representation
-res, err := ops.Map(Transform)(ops.FixedProvider(model))()
-
-// Transform slice of models to REST representations
-res, err := ops.SliceMap(Transform)(ops.FixedProvider(models))(ops.ParallelMap())()
-```
-
+- ❌ Never create custom error response helpers or a per-error `w.WriteHeader` ladder
 
 ## Common Anti-Patterns to Avoid
 
@@ -249,29 +225,21 @@ var req struct {
 json.NewDecoder(r.Body).Decode(&req)
 ```
 
-### ✅ Use Flat Request Models
+### ✅ Use Flat, Narrow Request Models
+`apps/fleet-service/internal/vehicle/rest.go:31-44`, verbatim:
 ```go
-// DO THIS
-type CreateRequest struct {
-    Id   uuid.UUID `json:"-"`
-    Name string    `json:"name"`
+// createAttributes is the exact set of fields POST /fleets/{id}/vehicles accepts.
+type createAttributes struct {
+    Nickname       string `json:"nickname"`
+    Make           string `json:"make"`
+    Model          string `json:"model"`
+    Trim           string `json:"trim"`
+    Year           int    `json:"year"`
+    VIN            string `json:"vin"`
+    CurrentMileage int    `json:"currentMileage"`
+    Notes          string `json:"notes"`
 }
-// Let server.RegisterInputHandler handle JSON:API unmarshaling
-```
-
-### ❌ Manual HTTP Handler Registration
-
-```go
-
-// DON'T DO THIS
-router.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
-    // Manual parsing, error handling, etc.
-})
-```
-
-### ✅ Use server.RegisterHandler
-```go
-// DO THIS
-router.HandleFunc("/users",
-    server.RegisterHandler(l)(si)("get-users", listUsersHandler(db))).Methods(http.MethodGet)
+// Let server.RegisterInputHandler[T] handle JSON:API unmarshaling; the ID is
+// never part of the attributes struct — it comes from NewBuilder(), never the
+// request body.
 ```

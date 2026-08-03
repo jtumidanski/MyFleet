@@ -14,26 +14,48 @@ Defines immutable domain objects with private fields and accessor methods.
 Database entity definitions and migration helpers using GORM.
 
 **Required functions:**
-- `Make(Entity) (Model, error)` — converts a database entity to an immutable domain model
+- `Make(e Entity) Model` — converts a database entity (plus any child entities
+  the model needs) to an immutable domain model. No error return — this holds
+  for 17 of 17 domains. The signature is not uniform across those 17: sixteen
+  take only the entity; one also takes a child-entity slice —
+  `func Make(e Entity, docs []DocumentEntity) Model`
+  (`apps/fleet-service/internal/maintenancerecord/entity.go:44`) — but every
+  domain returns `Model` alone, never `(Model, error)`.
 - `ToEntity() Entity` — method on Model that converts back to a database entity
 
 Both directions are mandatory. `Make` is used after reads; `ToEntity()` is used before writes.
 
 ## `builder.go`
 
-Fluent API for constructing validated domain models. `Build()` enforces invariants.
+Fluent API for constructing domain models. Two signatures exist, and which one a
+domain uses is determined by whether it has invariants to enforce:
 
+- **`Build() (Model, error)`** — 11 of 17 domains. `Build()` returns
+  `server.ErrValidation` when an invariant fails
+  (`apps/fleet-service/internal/vehicle/builder.go:26-30`) — that sentinel is
+  what makes the 422 mapping in
+  [patterns-rest-jsonapi.md](patterns-rest-jsonapi.md#validation-guidelines)
+  work end to end.
+- **`Build() Model`** — 6 of 17 (`membership`, `activity`, `vehiclemedia`,
+  `mileage`, `auth/session`, `auth/user`). These domains have no construction
+  invariant beyond "the setters were called", so a `(Model, error)` signature
+  would force every caller to handle an error that can never be non-nil.
+
+Adding an error return to a builder with nothing to validate is not an
+improvement; it is an unreachable branch at every call site.
 
 ## `processor.go`
 Business logic orchestration.
 
-**Constructor signature:** `NewProcessor(l logrus.FieldLogger, ctx context.Context, db *gorm.DB)`
-- The logger parameter **must** be `logrus.FieldLogger` (interface), **not** `*logrus.Logger` (concrete type). This ensures compatibility with `d.Logger()` from handlers.
+**Constructor signature:** `NewProcessor(log logrus.FieldLogger, p Provider, a Administrator)`
+(`apps/fleet-service/internal/maintenancerecord/processor.go:19`). `Provider`
+and `Administrator` are the interfaces documented in
+[patterns-provider.md](patterns-provider.md).
+- The logger parameter **must** be `logrus.FieldLogger` (interface), **not** `*logrus.Logger` (concrete type).
 
 **Key Responsibilities:**
 - Orchestrate providers (reads) and administrators (writes)
 - Enforce business rules and invariants
-- Always use `p.db.WithContext(p.ctx)` when calling providers or administrators
 
 **Critical Rules:**
 - ✅ `processor.go` → `provider.go` for reads (correct)
@@ -42,18 +64,12 @@ Business logic orchestration.
 
 ## `administrator.go`
 
-**Write operations** (create, update, delete) that modify database state. This file handles all state-changing database access.
+**Write operations** — every insert, update, soft-delete and restore. Exposes an
+`Administrator` interface with a `db`-backed implementation and a
+`NewAdministrator(db)` constructor; takes and returns domain `Model`s. Side
+effects that must commit atomically with the write go through `TxHook`.
 
-**Key Responsibilities:**
-- Define write functions that accept `*gorm.DB` as the first parameter
-- Return the modified Entity (not Model) — the processor converts via `Make`
-
-**Typical Signatures:**
-```go
-func create(db *gorm.DB, name string) (Entity, error)
-func update(db *gorm.DB, id uuid.UUID, name string) (Entity, error)
-func deleteByID(db *gorm.DB, id uuid.UUID) error
-```
+Full contract and worked example: [patterns-provider.md](patterns-provider.md).
 
 **Why This Separation:**
 - **Testability** — Read and write operations can be mocked independently
@@ -65,25 +81,27 @@ func deleteByID(db *gorm.DB, id uuid.UUID) error
 **Read operations** (queries) that fetch data without side effects. This file handles all read-only database access.
 
 **Key Responsibilities:**
-- Define query functions returning `database.EntityProvider[T]` or `database.EntityProvider[[]T]`
-- Provide `modelFromEntity(e entity) (Model, error)` transformation function
-- Use `database.Query[T]` for single-entity lookups
-- Use `database.SliceQuery[T]` for multi-entity queries
+- Exposes a `Provider` interface with a `db`-backed implementation and a
+  `NewProvider(db)` constructor — full contract in
+  [patterns-provider.md](patterns-provider.md).
+- Methods return `(Model, error)` directly — eager, plain values. There is no
+  lazy or curried provider type.
+- `database.Query[T]` / `database.SliceQuery[T]` are an accepted variant (used
+  by 4 of 19 providers), not a requirement — see
+  [patterns-provider.md](patterns-provider.md#accepted-variant-databasequery).
+- `Make(e)` (see `entity.go` above) runs inside the provider, converting the
+  entity to a `Model` before it returns.
 - Never modify database state
 
-**Typical Signatures:**
+**Typical Signatures** (`apps/fleet-service/internal/vehicle/provider.go:24,35`):
 ```go
-func getById(id uint32) database.EntityProvider[entity]
-func getByName(name string) database.EntityProvider[entity]
-func getAll() database.EntityProvider[[]entity]
-func modelFromEntity(e entity) (Model, error)
+func (p *dbProvider) GetByID(id string) (Model, error)
+func (p *dbProvider) ListByFleet(fleetID string, page server.Page) ([]Model, int, error)
 ```
-
-**Pattern:** Provider functions are curried - they accept query parameters and return a function that takes `*gorm.DB` and returns `model.Provider[T]`. The `*gorm.DB` should have context set via `db.WithContext(ctx)`. This enables lazy evaluation and composition with `model.Map`, `model.SliceMap`, and `model.ParallelMap`.
 
 **Why This Separation:**
 - **Testability** - Read and write operations can be mocked independently
-- **Pure composition** - Read path remains side-effect free, enabling functional composition
+- **Read path stays side-effect free** - the read path never issues a write query
 - **Clear intent** - Code review can quickly identify state-changing operations
 
 
@@ -91,14 +109,24 @@ func modelFromEntity(e entity) (Model, error)
 Route registration and handler definitions for REST endpoints.
 
 **Key Responsibilities:**
-- Define `InitializeRoutes(si jsonapi.ServerInformation) func(db *gorm.DB) server.RouteInitializer` for route registration
-- Use `server.RegisterHandler(l)(si)` for GET/DELETE handlers (no request body)
-- Use `server.RegisterInputHandler[T](l)(si)` for POST/PATCH handlers (with typed request model)
-- Implement handler functions matching `server.GetHandler` or `server.InputHandler[T]` signatures
-- Map domain errors to HTTP status codes (400, 404, 409, 500)
+- Register routes on a chi router; every route entry point returns
+  `func(chi.Router)` — full contract in
+  [patterns-rest-jsonapi.md](patterns-rest-jsonapi.md).
+- Body-less routes (GET/DELETE, and actions with no attributes) register a
+  plain `func(w http.ResponseWriter, req *http.Request)` directly on chi.
+- Bodied routes (POST/PATCH/PUT) wrap that same func in
+  `server.RegisterInputHandler` (`packages/shared-go/server/handler.go:47`),
+  which infers its type parameter from the callback's third argument — there
+  is no separate handler type to match.
+- Errors go out through a single `server.WriteError(w, err)`;
+  `server.StatusFor` maps the sentinel to a status code.
 - **Delegate ALL business logic to processors - NEVER call provider functions directly**
-- Use `server.MarshalResponse[T]` for successful responses
-- Log errors with context using `d.Logger().WithError(err)`
+- Success responses go out through `server.WriteJSON(w, status, server.Document{...})`.
+- `server.WriteError` already logs every 5xx itself, so a handler-level log of
+  that same error is redundant — but handlers that log to attach request
+  context (`log.WithError(err).Error("list fuel logs")`,
+  `fuel/resource.go:53`) are the common pattern in this tree, not a
+  violation.
 
 **Pattern:** Thin handlers that parse input, invoke processors, handle errors, and marshal responses.
 
@@ -112,17 +140,31 @@ Route registration and handler definitions for REST endpoints.
 Serialization and transformation between domain models and JSON:API.
 
 **Key Responsibilities:**
-- Define `RestModel` struct implementing JSON:API interface (`GetName()`, `GetID()`, `SetID()`)
-- Define request models (`CreateRequest`, `UpdateRequest`) implementing JSON:API interface
-- Implement `Transform(Model) (RestModel, error)` to convert domain models to REST representations
-- Implement `TransformSlice([]Model) ([]RestModel, error)` for bulk transformations
+- Define an `Attributes` struct and put it inside a `server.Resource` literal
+  — there is no `Attributes`-implementing interface and no marshaling
+  library. Full contract: [patterns-rest-jsonapi.md](patterns-rest-jsonapi.md#rest-model-structure).
+- Define a narrow unexported request struct per write endpoint
+  (`createAttributes`, `patchAttributes`) — they do not reuse `Attributes`.
+- Implement `Transform(Model) server.Resource` to convert domain models to
+  REST representations. 45 of the 47 `Transform*` functions in the tree
+  return no error — mapping model getters onto a struct cannot fail. The
+  exception is `activity`, whose `Transform`/`TransformSlice` return
+  `(server.Resource, error)` / `([]server.Resource, error)` because they
+  unmarshal a stored JSON payload that can be malformed
+  (`apps/fleet-service/internal/activity/rest.go:23,49`).
+- Implement `TransformSlice([]Model) []server.Resource` for bulk transformations.
 - Use flat structure for request models (no nested Data/Type/Attributes)
-- Mark ID field with `json:"-"` tag (set via SetID)
+- The resource ID is a separate `server.Resource` field, never an attribute
+  and never tagged `json:"-"` inside the attributes struct.
 - Use pointer fields for optional attributes with `omitempty`
 
-**Both `Transform` and `TransformSlice` are mandatory.** List handlers must use `TransformSlice` — do not inline transform loops in resource.go.
+**Both `Transform` and `TransformSlice` are mandatory.** List handlers must
+use `TransformSlice` — do not inline transform loops in `resource.go`, unless
+each row needs a per-row derived value `TransformSlice` cannot express; in
+that case call `TransformDerived` per element instead (see
+[patterns-rest-jsonapi.md](patterns-rest-jsonapi.md#transform-functions)).
 
-**Pattern:** JSON:API-compliant DTOs with automatic marshaling/unmarshaling via api2go library.
-
-
+**Pattern:** Plain Go structs marshaled into a `server.Resource` /
+`server.Document` — there is no code-generation or reflection-based
+marshaling library.
 

@@ -58,6 +58,20 @@ func (pr *Processor) ListActiveMembers(fleetID string) ([]Model, error) {
 	return pr.p.ListActiveByFleetID(fleetID)
 }
 
+// GetActiveByUserID returns the single active membership for a user, translating
+// the package's ErrNotFound into server.ErrNotFound the same way GetMember does.
+//
+// The internal route used to call the provider directly and repeat that
+// translation inline (DOM-13). Keeping it here means the two "resolve a
+// membership" paths cannot drift apart in how a missing row is reported.
+func (pr *Processor) GetActiveByUserID(userID string) (Model, error) {
+	m, err := pr.p.GetActiveByUserID(userID)
+	if errors.Is(err, ErrNotFound) {
+		return Model{}, server.ErrNotFound
+	}
+	return m, err
+}
+
 // GetMember returns the membership for a specific user in a fleet.
 func (pr *Processor) GetMember(fleetID, userID string) (Model, error) {
 	m, err := pr.p.GetByFleetAndUser(fleetID, userID)

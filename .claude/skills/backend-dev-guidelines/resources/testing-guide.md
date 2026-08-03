@@ -11,20 +11,30 @@ description: Testing patterns and practices for MyFleet Golang services.
 ```go
 import (
     "testing"
-    "github.com/sirupsen/logrus/hooks/test"
     "gorm.io/driver/sqlite"
     "gorm.io/gorm"
 )
 
 func setupTestDB(t *testing.T) *gorm.DB {
+    t.Helper()
     db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-    require.NoError(t, err)
-
-    err = db.AutoMigrate(&Entity{})
-    require.NoError(t, err)
+    if err != nil {
+        t.Fatalf("open sqlite: %v", err)
+    }
+    if err := db.AutoMigrate(&Entity{}); err != nil {
+        t.Fatalf("migrate: %v", err)
+    }
     return db
 }
 ```
+
+In-memory SQLite is the real pattern, recurring across every service —
+`apps/media-service/internal/processedevents/processedevents_test.go:11-27` is
+this function almost exactly. Schema-qualified tables (Postgres schemas like
+`fleet.`) attach a named in-memory schema and use explicit DDL instead of
+bare `AutoMigrate` — see `apps/fleet-service/internal/maintenancecategory/entity_test.go`.
+Assert on `err` with `t.Fatalf`, not an assertion library — see
+[Test Doubles](#test-doubles).
 
 ---
 
@@ -37,74 +47,124 @@ func setupTestDB(t *testing.T) *gorm.DB {
 
 ## Guidelines
 - Prefer table-driven tests.
-- Mock DB providers.
-- Verify span propagation.
+- Use in-package `fake*`/`stub*` structs for `Provider`/`Administrator`
+  interfaces — see [Test Doubles](#test-doubles) below. There is no `mock/`
+  directory convention.
 
 ## Example
+
 ```go
-func TestBuilderValidation(t *testing.T) {
-  _, err := NewBuilder().SetId(0).Build()
-  require.Error(t, err)
+func TestBuild_requiresMakeModelYear(t *testing.T) {
+    _, err := NewBuilder().SetFleetID("f1").Build() // missing make/model/year
+    if !errors.Is(err, server.ErrValidation) {
+        t.Fatalf("missing required fields must be 422, got %v", err)
+    }
 }
 ```
+
+`apps/fleet-service/internal/vehicle/processor_test.go:10-15`, validating the
+invariant enforced by `Build()` in
+`apps/fleet-service/internal/vehicle/builder.go:26-31`: every builder is a
+zero-argument `NewBuilder()` (the id is generated internally via
+`uuid.NewString()`), and `vehicle`'s `Build()` rejects an empty make, model,
+or year with `server.ErrValidation`.
 
 ---
 
 ## Interface Change Workflow
 
-**CRITICAL:** When modifying any interface, follow this checklist to prevent compilation failures and ensure mock synchronization.
+**CRITICAL:** When modifying any interface, follow this checklist.
 
 ### Checklist for Interface Changes
 
 When adding, modifying, or removing methods from an interface:
 
 - [ ] **Update the interface definition** in the primary file (e.g., `processor.go`)
-- [ ] **Update ALL mock implementations** in `mock/` directories
-  - Add corresponding function fields to mock struct
-  - Implement the new methods with proper nil-check and default behavior
-  - Follow existing mock patterns (return nil error if function not set)
-- [ ] **Run full test suite** in the current service: `go test ./... -count=1`
+- [ ] **Update every in-package `fake*`/`stub*` double** that implements the
+      changed interface — they live in the `_test.go` files of the same
+      package (see [Test Doubles](#test-doubles))
+- [ ] **Run the full test suite**: `make test`
 - [ ] **Search for other usages** across services that may depend on this interface
 - [ ] **Update integration tests** that may depend on the interface behavior
 - [ ] **Document the change** if it affects service contracts or behavior
 
-### Mock Implementation Pattern
+---
 
-When adding a method to an interface, the mock must include:
+## Test Doubles
 
-1. **Function field** in the mock struct:
+MyFleet has no `mock/` directories and no generated mocks. The convention is
+a small unexported `fake*`/`stub*` struct, declared in the `_test.go` file
+that uses it, in the same package, asserted with stdlib `t.Fatalf`/`t.Errorf`.
+
+Canonical example — `apps/auth-service/internal/user/processor_test.go:10-40`:
+
 ```go
-type ProcessorMock struct {
-    GetByIdFunc func(id uuid.UUID) (Model, error)
-    CreateFunc  func(input CreateInput) (Model, error)
+// Note: a fake keyed by an opaque map cannot express which column the real
+// query filters on, which is why the /auth/me login-loop bug was invisible
+// here. The column-level guarantees live in provider_test.go, against a real
+// database.
+type fakeProvider struct {
+    byID  map[string]Model
+    bySub map[string]Model
 }
+
+func (f *fakeProvider) GetByID(id string) (Model, error) {
+    if m, ok := f.byID[id]; ok {
+        return m, nil
+    }
+    return Model{}, ErrNotFound
+}
+
+type fakeAdmin struct{ created, updated int }
+
+func (f *fakeAdmin) Insert(m Model) (Model, error) { f.created++; return m, nil }
+func (f *fakeAdmin) Update(m Model) (Model, error) { f.updated++; return m, nil }
 ```
 
-2. **Method implementation** with nil-check:
-```go
-func (m *ProcessorMock) GetById(id uuid.UUID) (Model, error) {
-    if m.GetByIdFunc != nil {
-        return m.GetByIdFunc(id)
-    }
-    return Model{}, nil
-}
+(`fakeProvider` implements the rest of `Provider` the same way — see the
+source file.) Same pattern elsewhere: `stubProvider`/`stubAdministrator` in
+`apps/fleet-service/internal/invite/processor_test.go:16,354`; `fakeInbox`/
+`fakeMembers`/`fakeGenerator` in `apps/notification-service/internal/consumer/consume_test.go:15,29,36`.
 
-func (m *ProcessorMock) Create(input CreateInput) (Model, error) {
-    if m.CreateFunc != nil {
-        return m.CreateFunc(input)
-    }
-    return Model{}, nil
-}
+A double only needs to satisfy the interface it stands in for — the compiler
+rejects an incomplete one at build time, so there's no manual
+"every method implemented" step to track.
+
+**No assertion library.** `stretchr/testify` appears only transitively in
+`go.sum`, never imported — don't add it to match this guide.
+
+### The DB-Backed Counterweight
+
+A fake keyed by a map can express *that* a call happened, but not *which
+column* a real query filters on. `apps/auth-service/internal/user/provider_test.go:11-17`
+exists for exactly this reason:
+
+```go
+// These tests run against a real database rather than a fake Provider on
+// purpose. The login-loop bug this file guards against was invisible to
+// processor_test.go's fakeProvider, because that fake keys an opaque map: it
+// cannot express WHICH COLUMN the real query filters on, which was the entire
+// defect. GET /auth/me passed the JWT `sub` claim — our internal user id — to
+// GetBySub, which filters on google_sub. The row was always missed, /auth/me
+// always 404'd, and the SPA bounced every authenticated user back to login.
 ```
 
-### Finding Mock Files
+When a fake's simplification could hide a defect like this, add a
+database-backed test alongside it (`setupTestDB`) — `administrator_db_test.go`
+in `apps/fleet-service/internal/vehicle` is the same counterweight for a
+different package.
 
-Common locations for mocks that must be updated:
-- `{package}/mock/processor.go` - Service-specific processor mocks
-- `{package}/mock/provider.go` - Provider interface mocks
-- Test files using inline mock implementations
+### Executable Convention Checks
 
-**Tip:** Use `grep -r "type.*Mock struct" .` to find all mock implementations in a service.
+Some conventions are cheap enough to pin in a test instead of a doc line:
+`apps/auth-service/internal/arch/arch_test.go:29`
+(`TestNoPrincipalLiteralOutsideResolver`) guarantees `session.Principal` is
+built in one place; `apps/fleet-service/internal/admin/arch_test.go:26,94,131,201`
+and the matching pair (`:27,95`) in `media-service`/`notification-service`
+`internal/admin/arch_test.go` guarantee every admin table has a manifest
+entry. Neither enforces this guide's layering rules — they model pinning one
+narrow invariant in a test that fails the build instead of drifting silently,
+not proof the rest of this guide is mechanically checked.
 
 ---
 
@@ -122,25 +182,26 @@ Run the **full test suite** before committing in these situations:
 
 ### Running Tests
 
-**Full test suite (no cache):**
+**Full test suite** — `make test` (`Makefile:11-12`), not a bare
+`go test ./...` from the repo root (it skips the other modules `go.work`
+lists):
 ```bash
-go test ./... -count=1
+make test
 ```
 
-**With race detection:**
+**Single package, race detection, no cache (fast iteration before `make test`):**
 ```bash
-go test ./... -race -count=1
+go test ./internal/vehicle/... -race -count=1
 ```
 
-**With coverage:**
+**Specific package, verbose, from that service's directory** (e.g.
+`apps/fleet-service`):
 ```bash
-go test ./... -cover -count=1
+go test ./internal/vehicle/... -v -count=1
 ```
 
-**Specific package:**
-```bash
-go test ./bucket/... -v -count=1
-```
+Before opening a PR, run `make ci` (`Makefile:51`) — it also covers the
+frontend and manifest rendering that a Go-only run would miss.
 
 ### Test Failure Protocol
 
@@ -149,54 +210,8 @@ When tests fail:
 1. **Do not ignore** - Failing tests indicate broken contracts
 2. **Understand the failure** - Read the error message completely
 3. **Fix the root cause** - Don't just update tests to pass
-4. **Update mocks if needed** - Ensure mocks implement all interface methods
-5. **Re-run full suite** - Verify the fix didn't break other tests
-6. **Check dependent services** - Some changes may affect other microservices
-
----
-
-## Mock Maintenance
-
-### Why Mocks Must Stay in Sync
-
-Mocks exist to enable isolated unit testing. When an interface changes but mocks don't:
-- **Compilation fails** - Go compiler catches missing methods
-- **Tests become unreliable** - Incomplete mocks lead to false positives
-- **Integration breaks** - Real implementations diverge from tested behavior
-
-### Mock Synchronization Rules
-
-1. **One-to-one correspondence** - Every interface method must have a mock implementation
-2. **Signature matching** - Mock method signatures must exactly match the interface
-3. **Default behavior** - Mocks should have sensible defaults (usually nil/empty/no-op)
-4. **Testability** - Mock fields should allow tests to inject custom behavior
-
-### Verification
-
-After updating mocks, verify with:
-
-```bash
-# Ensure mocks compile
-go test ./*/mock/... -count=1
-
-# Run tests that use mocks
-go test ./... -run TestProcessor -count=1
-```
-
-### Common Mock Update Errors
-
-**Missing method entirely:**
-```
-cannot use &ProcessorMock{} as Processor value in variable declaration:
-*ProcessorMock does not implement Processor (missing method CreateBucket)
-```
-**Fix:** Add the method to the mock struct and implement it.
-
-**Wrong signature:**
-```
-method CreateBucket has wrong signature
-```
-**Fix:** Match the exact parameter and return types from the interface.
+4. **Re-run the full suite** (`make test`) - Verify the fix didn't break other tests
+5. **Check dependent services** - Some changes may affect other microservices
 
 ---
 
@@ -204,27 +219,25 @@ method CreateBucket has wrong signature
 
 Before committing changes, especially to core business logic:
 
-- [ ] Run `go test ./... -count=1` and verify all tests pass
-- [ ] Run `go build` to ensure no compilation errors
-- [ ] If you modified an interface, verify all mocks are updated
+- [ ] Run `make test` and verify all tests pass
+- [ ] Run `make build` to ensure no compilation errors
 - [ ] If you added new business logic, ensure corresponding tests exist
 - [ ] Review changed files for accidental debug code or commented-out logic
 - [ ] Ensure no secrets, credentials, or sensitive data in code
-- [ ] Verify providers use `db.WithContext(ctx)` not bare `db`
-
-### Recommended Git Hooks
-
-Consider adding a pre-commit hook to automatically run tests:
-
-```bash
-# .git/hooks/pre-commit
-#!/bin/bash
-go test ./... -count=1
-if [ $? -ne 0 ]; then
-    echo "Tests failed. Commit aborted."
-    exit 1
-fi
-```
+- [ ] If the provider you touched takes a `context.Context` (2 of 19
+      `provider.go` files — `invite` and `mediavariant`; the other 17,
+      including `vehicle`, `fleet`, `user`, and `session`, have no
+      `context.Context` parameter on their provider methods at all, so there
+      is no context to attach and this rule does not apply to them), verify
+      it runs its query on `db.WithContext(ctx)`, not a bare `db` call:
+      `apps/fleet-service/internal/invite/provider.go:17-21` — "Every method
+      takes the caller's context as its first argument and runs its query on
+      db.WithContext(ctx). The *gorm.DB the provider holds is captured once
+      at startup; without WithContext every query would run on that bare
+      connection, so a client that disconnected mid-request would leave the
+      query running, and no query would carry a deadline or join the
+      request's trace."
+- [ ] Run `make ci` before opening a PR
 
 ---
 
@@ -232,27 +245,19 @@ fi
 
 ### 1. Skipping the Full Test Suite
 **Problem:** Only running tests in the modified package.
-**Solution:** Always run `go test ./... -count=1` to catch cross-package issues.
+**Solution:** Always run `make test` to catch cross-package issues.
 
 ### 2. Using Cached Test Results
 **Problem:** Tests pass due to cache, not because code is correct.
-**Solution:** Use `-count=1` flag to disable test caching.
+**Solution:** Use the `-count=1` flag on per-package runs to disable test caching.
 
-### 3. Forgetting Mock Updates
-**Problem:** Interface changed but mock/processor.go not updated.
-**Solution:** Follow the Interface Change Workflow checklist above.
-
-### 4. Incomplete Mock Implementations
-**Problem:** Mock has the method but doesn't properly handle all return types.
-**Solution:** Copy patterns from existing mock methods, especially for curried functions.
-
-### 5. Not Testing Error Paths
+### 3. Not Testing Error Paths
 **Problem:** Only testing happy paths, errors go untested.
 **Solution:** Write table-driven tests with both success and failure cases.
 
-### 6. Ignoring Race Conditions
-**Problem:** Tests pass normally but fail with `-race` flag.
-**Solution:** Periodically run tests with `-race` to catch concurrency issues.
+### 4. Ignoring Race Conditions
+**Problem:** Tests pass normally but fail with `-race`.
+**Solution:** `make test` already runs with `-race`; don't skip it in favor of a bare `go test ./...`.
 
 ---
 
@@ -261,7 +266,9 @@ fi
 When using AI tools to modify code:
 
 1. **Always request test execution** after interface changes
-2. **Ask AI to update mocks** when interface methods are added/modified
-3. **Request full test suite runs** (`go test ./... -count=1`) not just single packages
-4. **Verify AI updated ALL mock locations** - search for mock files yourself
+2. **Ask AI to update every `fake*`/`stub*` double** in the same package when
+   interface methods are added or modified
+3. **Request full test suite runs** (`make test`) not just single packages
+4. **Verify AI updated every double that implements the changed interface** -
+   search the package's `_test.go` files yourself
 5. **Don't accept "tests will pass"** - require actual test execution output

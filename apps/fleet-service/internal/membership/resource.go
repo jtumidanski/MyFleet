@@ -178,12 +178,8 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Rout
 				server.WriteError(w, server.ErrValidation)
 				return
 			}
-			m, err := prov.GetActiveByUserID(userID)
+			m, err := proc.GetActiveByUserID(userID)
 			if err != nil {
-				if errors.Is(err, ErrNotFound) {
-					server.WriteError(w, server.ErrNotFound)
-					return
-				}
 				server.WriteError(w, err)
 				return
 			}

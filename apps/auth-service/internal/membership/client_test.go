@@ -314,3 +314,30 @@ func TestActive_boundsAHangAndClassifiesItTransient(t *testing.T) {
 		t.Fatalf("Active took %v; the handler was pinned open rather than bounded by fleetLookupTimeout", elapsed)
 	}
 }
+
+// Pins the escaping Active does. main added url.QueryEscape (03da0f9) without a
+// test that fails if it is removed: every other test here passes a plain UUID,
+// for which escaping is a no-op. This one passes a userID containing `&`, which
+// under raw concatenation terminates user_id and injects the remainder as its
+// own parameter.
+func TestActive_escapesTheUserIDIntoTheQueryString(t *testing.T) {
+	const hostile = "u1&role=owner"
+
+	var seen, seenRole string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.URL.Query().Get("user_id")
+		seenRole = r.URL.Query().Get("role")
+		_, _ = w.Write([]byte(`{"fleet_id":"f1","role":"viewer"}`))
+	}))
+	defer srv.Close()
+
+	if _, err := NewClient(srv.URL).Active(context.Background(), hostile); err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if seen != hostile {
+		t.Fatalf("user_id arrived as %q, want %q — the value was not escaped", seen, hostile)
+	}
+	if seenRole != "" {
+		t.Fatalf("a second parameter role=%q was injected from the user id", seenRole)
+	}
+}

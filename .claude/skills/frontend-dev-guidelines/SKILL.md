@@ -11,7 +11,7 @@ Provide a composable entry point that activates when working on the MyFleet UI. 
 
 ## When to Use
 Activate when working on:
-- Any file inside `frontend/`
+- Any file inside `apps/web/`
 - React components (`.tsx` files in `components/` or `pages/`)
 - Custom hooks (`lib/hooks/` or `lib/hooks/api/`)
 - API service layer (`services/api/`)
@@ -19,23 +19,23 @@ Activate when working on:
 - TypeScript type definitions (`types/`)
 - React Query integration and cache management
 - Form components using react-hook-form
-- Data table configurations
 - Styling with Tailwind CSS and shadcn/ui
-- Testing with Jest and React Testing Library
+- Testing with Vitest and React Testing Library
+- The shared frontend packages `packages/shared-ts` and `packages/ui-components`
 
 ---
 
 ## Quick Start Checklist
 - [ ] **Component** follows presentational/container split (ui/ vs features/)
 - [ ] **Types** defined with JSON:API structure (`id` + `attributes`)
-- [ ] **Service** extends `BaseService` or uses direct API client pattern
+- [ ] **Service** reaches the network only through the shared `apiClient` — extending `BaseService` when the resource has a uniform single-type CRUD shape (10 of 16 do), a plain class calling `apiClient.request` when it does not
 - [ ] **Hook** uses query key factory with hierarchical keys (`as const`)
 - [ ] **Form** uses `react-hook-form` with `zodResolver` and Zod schema
 - [ ] **Validation schema** defined in `lib/schemas/` with inferred types
 - [ ] **Loading state** uses skeleton components, not spinners (except submit buttons)
-- [ ] **Error handling** uses `createErrorFromUnknown()` and toast notifications
+- [ ] **Error handling** uses `createErrorFromUnknown()` (from `@myfleet/shared-ts`) and toast notifications
 - [ ] **Styling** uses Tailwind utility classes with `cn()` helper
-- [ ] **Tests** written with Jest + React Testing Library
+- [ ] **Tests** written with Vitest + React Testing Library, as siblings of the file under test
 - [ ] **Test execution** verified before claiming completion
 
 ---
@@ -50,17 +50,17 @@ When modifying any UI code:
 
 1. **Read existing code** before making changes — understand the current patterns in use
 2. **Implement changes** following the patterns documented in this skill
-3. **Update types** if API contracts changed (`types/models/`, `types/api/`)
+3. **Update types** if API contracts changed (`types/models/`, and the envelope types in `@myfleet/shared-ts`)
 4. **Update service layer** if new API endpoints are needed
 5. **Update query hooks** if data fetching patterns changed
 6. **Run tests BEFORE claiming completion**:
    ```bash
-   npm test
+   make fe-test
    ```
 7. **Fix any failures** — Do NOT skip or ignore test failures
 8. **Verify build**:
    ```bash
-   npm run build
+   make fe-build
    ```
 9. **Report test results** with actual command output, not assumptions
 
@@ -78,12 +78,12 @@ When modifying any UI code:
 
 ### When Tests Fail
 
-If `npm test` reports failures:
+If `make fe-test` reports failures:
 
-1. **Read the error message completely** — Understand what broke
-2. **Check for missing mocks** — Most common cause of component test failures
-3. **Update mocks to match services** — Add/modify mock implementations
-4. **Re-run tests** — Verify the fix didn't break other tests
+1. **Read the error message completely** — understand what broke
+2. **Check the `vi.mock` specifiers** — they are real relative paths, so a moved or renamed service silently stops being stubbed. This is the most common cause of a component test failing after a refactor.
+3. **Check the component is rendered through `renderWithProviders`** — anything using a React Query hook or a `<Link>` needs the QueryClient and router it supplies (`src/test/renderWithProviders.tsx`)
+4. **Re-run tests** — verify the fix didn't break others
 5. **Do not proceed** until all tests pass
 
 See [Testing Guide](resources/testing-guide.md) for comprehensive testing guidelines.
@@ -103,21 +103,28 @@ See [Testing Guide](resources/testing-guide.md) for comprehensive testing guidel
 
 | Location | Primary Responsibility |
 |----------|------------------------|
-| `pages/*.tsx` | Route pages — data fetching, layout, and composition |
-| `App.tsx` / `main.tsx` | Root layout — providers, sidebar, breadcrumbs |
-| `components/ui/` | shadcn/ui base components — buttons, dialogs, inputs |
-| `components/common/` | Shared presentational components |
-| `components/features/` | Feature-specific container components |
-| `components/providers/` | React context provider wrappers |
-| `lib/api/client.ts` | Singleton API client with caching, retry, dedup |
-| `lib/api/errors.ts` | Error transformation and classification |
-| `lib/hooks/api/` | React Query hooks — queries, mutations, invalidation |
-| `lib/schemas/` | Zod validation schemas with inferred types |
+| `App.tsx` | The route tree (`AppRoutes`) and the router that hosts it |
+| `main.tsx` | Mounts `<AppProviders><App /></AppProviders>` and latches runtime config |
+| `pages/*.tsx` | Route pages — call hooks, own dialog state and permission decisions |
+| `pages/admin/` | Platform-admin console pages |
+| `components/ui/` | shadcn/ui primitives — button, dialog, input, sidebar |
+| `components/features/` | Feature components, grouped by resource, with `dialogs/` beneath |
+| `components/frame/` | Shell furniture shared by both layouts — header, nav, profile menu, breadcrumbs |
+| `components/admin/` | Admin-console layout and guard |
+| `components/providers/` | `AppProviders` — the provider stack |
+| `lib/api/client.ts` | Constructs the singleton `ApiClient` from `@myfleet/shared-ts` and wires it to the auth contract (21 lines; it is not itself an HTTP client) |
+| `lib/api/refresh.ts` · `token.ts` | Token storage and the refresh round-trip the client delegates to |
+| `lib/hooks/api/` | React Query hooks — key factories, queries, mutations, invalidation |
+| `lib/schemas/` | Zod schemas with inferred form-input types |
 | `lib/utils.ts` | `cn()` classname utility |
-| `services/api/` | Service classes — BaseService + concrete services |
-| `types/models/` | Domain model interfaces (JSON:API format) |
-| `types/api/` | API response/error type definitions |
-| `context/` | React context definitions |
+| `services/api/` | `BaseService` plus one PascalCase service per resource, each exporting a singleton |
+| `types/models/` | Domain model interfaces (`JsonApiResource<A>` + attribute types) |
+| `context/` | React context definitions — `AuthContext`, `ThemeContext` |
+| `test/` | `renderWithProviders` and the executable convention tests |
+| `packages/shared-ts` | `ApiClient`, JSON:API envelope types, `ApiError`, `createErrorFromUnknown` |
+| `packages/ui-components` | Cross-app presentational components (`StatusBadge`) and formatters |
+
+There is no `components/common/`, no `lib/api/errors.ts`, no `types/api/`, no `lib/breadcrumbs/` and no `services/api/index.ts` barrel. <!-- ALLOW-VOCAB:G-21 -->
 
 ---
 

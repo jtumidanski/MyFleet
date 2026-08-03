@@ -4,126 +4,141 @@
 
 When generating or modifying MyFleet UI code, **always** follow this sequence:
 
-1. **Read existing files** before editing — understand current patterns
-2. **Check the component location** — `ui/`, `common/`, or `features/`?
-3. **Implement changes** following established patterns
-4. **Run tests**: `npm test`
-5. **Fix failures** — Do not proceed with failing tests
-6. **Verify build**: `npm run build`
-7. **Report actual results** — Never assume success
+1. **Read existing files** before editing — understand the patterns already in use
+2. **Check the component location** — `ui/`, `features/`, `frame/`, `admin/`, or `packages/ui-components`?
+3. **Implement changes** following those patterns
+4. **Run tests**: `make fe-test`
+5. **Fix failures** — do not proceed with failing tests
+6. **Verify the build**: `make fe-build`
+7. **Report actual results** — never assume success
+
+`make fe-test` and `make fe-build` are the targets `make ci` runs, so they are what CI will judge you by. Node may need loading first: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22`.
 
 ## Core Rules
 
-### 1. Follow Existing Patterns
-When adding code to an existing file or directory, match the patterns already in use. Don't introduce new conventions without explicit instruction.
+### 1. Follow existing patterns
+When adding to an existing file or directory, match what is already there. Don't introduce a new convention without being asked.
 
-### 2. Read Before Write
-Always read a file before editing it. Understand what's already there to avoid breaking changes or duplicating functionality.
+### 2. Read before write
+Read a file before editing it.
 
-### 3. Type Everything
-TypeScript strict mode is enabled. Never use `any`. Use proper interfaces, type guards, and generics. Leverage `z.infer<>` for form types.
+### 3. Type everything
+TypeScript strict mode is on. Never `any`. Use `unknown` plus a type predicate for genuinely dynamic input, and `z.infer<>` for form types. (`FE-01`)
 
-### 4. JSON:API Model Structure
-All domain models use `{ id: string; attributes: ModelAttributes }`. Don't flatten or restructure. Access data through `.attributes.fieldName`.
+### 4. JSON:API model structure
+Domain models are `JsonApiResource<A>` — `{ id, type, attributes }`. Don't flatten. Read through `.attributes.fieldName`. (`FE-10`)
 
-### 5. Use the Component Library
-Use shadcn/ui components from `components/ui/` — Button, Card, Dialog, Select, Input, Badge, etc. Don't create custom primitives that duplicate existing components.
+### 5. Use the component library
+shadcn/ui primitives live in `components/ui/`. Don't hand-roll a primitive that already exists. Cross-app presentational components live in `packages/ui-components` (`StatusBadge`, the formatters) — app-shell furniture stays in `apps/web`.
 
-### 6. Use cn() for Classnames
-Always `cn()` for conditional or merged classes. Never string concatenation.
+### 6. Use `cn()` for classnames
+`cn()` from `lib/utils.ts` for conditional or merged classes. Never string concatenation. (`FE-02`)
 
-### 7. Use Sonner for User Feedback
-Toast notifications via `toast.success()`, `toast.error()` from `sonner`. Not `alert()`, not `console.log()`.
+### 7. Use sonner for user feedback
+`toast.success()` / `toast.error()` from `sonner`. Not `alert()`, not `console.log()`.
 
-### 8. Skeleton Loading
-Use `<Skeleton>` components for loading states in content areas. Only use `<Loader2>` spinner inside submit buttons.
+### 8. Skeleton loading
+`<Skeleton>` for content areas; `<Loader2 className="animate-spin">` only inside a submit button. (`FE-05`)
 
-### 9. Forms Use react-hook-form + Zod
-Define Zod schemas in `lib/schemas/`. Use `zodResolver`. Use shadcn/ui `Form` components for field rendering.
+### 9. Forms use react-hook-form + Zod
+Schema in `lib/schemas/<resource>.ts`, `zodResolver(schema)`, shadcn `Form`/`FormField` for rendering. (`FE-13`, `FE-14`)
 
-### 10. Immutable State Updates
-Never mutate state. Use spread operators, `Array.filter()`, `Array.map()` for new arrays.
+### 10. Immutable state updates
+Never mutate. Spread, `filter`, `map`. Query results in particular are shared with every other subscriber. (`FE-07`)
 
-### 11. Named Exports
-Use named exports for all components.
+### 11. Named exports
+Named exports for all components. There are zero default exports in `apps/web/src`. (`FE-08`)
+
+### 12. Title case for interactive text
+Button labels, dialog titles, badge text and tab labels use title case; interior prepositions and articles stay lowercase. See [Component Patterns — Text Casing Rules](patterns-components.md#text-casing-rules).
+
+### 13. Cursor pointer on clickable elements
+Every clickable element shows `cursor-pointer`. `<Button>` handles this; a clickable `div` or card does not. See [Styling — Cursor affordance for interactive elements](patterns-styling.md). (`FE-15`)
+
+### 14. Capitalize enum display values
+Backend enums arrive lowercase (`'owner'`, `'member'`, `'viewer'`) and the wire value must stay lowercase. Capitalize with the Tailwind `capitalize` class at the render site — `OnboardingPage.tsx:57`, `MemberList.tsx:158`, `InviteList.tsx:94` — not by rewriting the value.
+
+There is **no enum + label-map convention** here: `grep -rn "^export enum" apps/web/src/types/models/` returns nothing, and there is no `Labels: Record<…>` anywhere. Attribute discriminants are plain string unions. Do not introduce a label map to satisfy this rule.
 
 ## Generation Workflow
 
-When creating a **new feature** (e.g., a new resource CRUD), create files in this order:
+When creating a new resource end to end, create files in this order.
 
 ### Step 1: Types
 ```
-types/models/resource.ts
+types/models/<resource>.ts
 ```
-- Define model interface with `id` + `attributes`
-- Define attribute interface
-- Define enums with label maps if needed
-- Define create/update request types
-- Add helper functions (status checks, formatting)
+- `export interface <Resource>Attributes { … }`
+- `export type <Resource> = JsonApiResource<<Resource>Attributes>` (`JsonApiResource` from `@myfleet/shared-ts`)
+- Separate `Create<Resource>Attributes` / `Update<Resource>Attributes` for the write payloads — the create shape is not the read shape, because server-derived fields are read-only
+- String unions for discriminants, not enums
+
+There is no `types/api/`. <!-- ALLOW-VOCAB:G-21 --> Envelope types (`JsonApiDocument`, `PageMeta`, `ApiError`) come from `@myfleet/shared-ts`.
 
 ### Step 2: Service
 ```
-services/api/resource.service.ts
+services/api/<Resource>Service.ts     ← PascalCase, matches the class
 ```
-- Create class extending `BaseService` or direct pattern
-- Implement CRUD methods
-- Override `validate()` and `transformResponse()` if needed
-- Export singleton instance
-- Add to `services/api/index.ts` exports
+- `class <Resource>Service extends BaseService<A, CreateA, UpdateA>`
+- Set `resourceType` (the JSON:API `type`) and `basePath` (the full gateway path, e.g. `/api/fleet/vehicles`)
+- Add resource-specific methods on top of the inherited `list`/`get`/`create`/`patch`/`remove`, using the protected `listAt`/`createAt` for nested routes
+- `export const <resource>Service = new <Resource>Service();` — a singleton, imported directly
 
-### Step 3: React Query Hooks
-```
-lib/hooks/api/useResources.ts
-```
-- Define key factory with `as const`
-- Create query hooks
-- Create mutation hooks with cache invalidation
-- Export invalidation helpers
-- Choose appropriate stale times
+**There is no `services/api/index.ts` barrel.** <!-- ALLOW-VOCAB:G-21 --> Import the singleton from its own module: `import { vehicleService } from '../../../services/api/VehicleService';`
 
-### Step 4: Zod Schema (if forms needed)
+### Step 3: React Query hooks
 ```
-lib/schemas/resource.schema.ts
+lib/hooks/api/<resource>.ts           ← plural resource name, no `use` prefix on the file
 ```
-- Define creation schema
-- Define update schema (if different)
-- Export inferred types
-- Export default values
+- A hierarchical key factory with `as const` at every tier (`all` → `lists()` → `list(params)`, `all` → `details()` → `detail(id)`)
+- Query hooks take the nullable id directly and gate with `enabled: !!id` — the caller should not have to hold the hook back
+- `staleTime` per hook, chosen for that resource; there is no global default
+- Mutations invalidate in **`onSettled`**, not `onSuccess`, so a failed write still re-reads authoritative state
 
-### Step 5: Feature Components
+Copy the shape from `lib/hooks/api/vehicles.ts:14-90`.
+
+### Step 4: Zod schema (if the resource has a form)
 ```
-components/features/resource/
-├── ResourceBadge.tsx        (if status/type badges needed)
-├── CreateResourceDialog.tsx (form dialog)
-├── DeleteResourceDialog.tsx (confirmation dialog)
-└── ResourceDetail.tsx       (detail card, if complex)
+lib/schemas/<resource>.ts             ← no `.schema.` infix
 ```
+- `export const <resource>Schema = z.object({ … })` with per-field messages
+- `export type <Resource>FormInput = z.infer<typeof <resource>Schema>`
+- A sibling `<resource>.test.ts` where the rules are non-trivial (`fuel.test.ts`, `maintenanceSchedule.test.ts` exist)
+
+### Step 5: Feature components
+```
+components/features/<resource>/
+├── <Resource>List.tsx           presentational; takes data + an empty-state node as props
+├── <Resource>Card.tsx
+├── <Resource>Form.tsx           useForm + zodResolver; owns fields, not the mutation
+└── dialogs/
+    ├── Add<Resource>Dialog.tsx  owns the mutation and the close-on-success rule
+    └── Delete<Resource>Dialog.tsx
+```
+
+The split matters: the form component takes `onSubmit`/`onCancel`/`submitting` props and knows nothing about React Query, so it is testable without providers and reusable in a page as well as a dialog.
 
 ### Step 6: Pages
 ```
-pages/
-├── ResourcesPage.tsx        (list page)
-└── ResourceDetailPage.tsx   (detail page)
+pages/<Resource>sPage.tsx        list
+pages/<Resource>DetailPage.tsx   detail
 ```
+- The page calls the **hook**, never the service (`FE-03`)
+- The page owns dialog state, permission decisions and the form-input → API-attributes mapping
+- Container is `space-y-6`; `PageHeader` renders the header row only
 
 ### Step 7: Navigation
-- Add route to `components/app-sidebar.tsx` items array
-- Add breadcrumb route to `lib/breadcrumbs/routes.ts`
-- Add entity name resolver to `lib/breadcrumbs/resolvers.ts`
+- Add a `<Route>` to `App.tsx` — inside the `AppLayout` layout route for a fleet page, or under the `/admin` route for a console page
+- Add an entry to `NAV` in `AppLayout.tsx` (or `ADMIN_NAV` in `AdminLayout.tsx`) if it is a top-level destination
+- Add a trail row to `components/frame/breadcrumbTrails.ts`, keyed by route pattern
+
+There is no `components/app-sidebar.tsx` and no `lib/breadcrumbs/`. <!-- ALLOW-VOCAB:G-21 -->
 
 ### Step 8: Tests
-- Service tests (if validation/transformation)
-- Component tests for dialogs
-- Hook tests for complex query logic
-
-### 12. Title Case for Interactive Text
-All button labels, dialog titles, badge text, and tab/view-switcher labels must use **title case** (capitalize the first letter of each significant word). Prepositions and articles in the middle stay lowercase. See [Component Patterns — Text Casing Rules](patterns-components.md#text-casing-rules).
-
-### 13. Cursor Pointer on Clickable Elements
-All clickable elements must show `cursor-pointer`. The `<Button>` component handles this automatically. For custom clickable elements (divs, cards, etc.), add `cursor-pointer` explicitly. See [Component Patterns — Cursor Behavior](patterns-components.md#cursor-behavior).
-
-### 14. Capitalize Enum Display Values
-When rendering backend enum values to users, capitalize the first letter for display. Keep the underlying form/API value unchanged (lowercase).
+- Sibling `*.test.ts` / `*.test.tsx` next to the file under test — there is no separate tests directory, and no directory of ambient module mocks: every stub is a `vi.mock` in the test file that needs it
+- Vitest: `import { describe, it, expect, vi } from 'vitest'`
+- Anything using a hook or a `<Link>` renders through `renderWithProviders` (`src/test/renderWithProviders.tsx`), which supplies a retry-free `QueryClient` and a `MemoryRouter`
+- Stub the service module with `vi.mock('../../../services/api/MileageService', …)` (`lib/hooks/api/mileage.test.ts:11`) — the specifier is the real relative path, so a moved service breaks the mock loudly
 
 ## Validation Rules
 
@@ -131,92 +146,132 @@ Before submitting code, verify:
 
 | Rule | Check |
 |------|-------|
-| No `any` types | `grep -r ": any" --include="*.ts" --include="*.tsx"` |
-| No hardcoded colors | No `bg-white`, `text-gray-*` etc. |
-| `cn()` used for classes | No manual string concatenation |
-| Forms use Zod | All `useForm` have `zodResolver` |
-| Named exports | No `export default function` |
-| Error handling | All async ops have catch/error handling |
-| Skeleton loading | No raw spinners in content areas |
-| Title-case labels | All buttons, dialog titles, badges use title case |
-| Cursor pointer | All clickable elements have `cursor-pointer` |
-| Enum display casing | Backend enums capitalized for display |
+| No `any` types | `grep -rn ": any\|as any" apps/web/src` |
+| No hardcoded colors | Covered by `src/test/conventions.test.ts` — `make fe-test` fails on a hit |
+| `cn()` used for classes | No manual string concatenation in `className` |
+| Forms use Zod | Every `useForm` has `resolver: zodResolver(...)` |
+| Named exports | `grep -rn "export default" apps/web/src` returns nothing |
+| Error handling | Every `catch` calls `createErrorFromUnknown(err)` and surfaces it |
+| Skeleton loading | `animate-spin` only inside a submit button |
+| No `@/` alias | `grep -rnE "['\"]@/" apps/web/src` returns nothing — no alias is configured, so every import is relative |
+| Title-case labels | Buttons, dialog titles and badges use title case |
+| Cursor pointer | Clickable non-`<button>`/`<a>` elements carry `cursor-pointer` |
+| Enum display casing | Rendered with the `capitalize` class; the wire value stays lowercase |
+
+Two of these are already executable and will fail `make fe-test` on their own: the palette check and the "authenticated pages contain no `<h1>`" check, both in `src/test/conventions.test.ts`.
 
 ## Common Composition Examples
 
-### Adding a Column to DataTable
-```typescript
-const columns: ColumnDef<Resource>[] = [
-  // Text column
-  { accessorKey: "attributes.name", header: "Name" },
+### Adding a dialog with a form
 
-  // Custom render column
-  {
-    accessorKey: "attributes.status",
-    header: "Status",
-    cell: ({ row }) => <StatusBadge status={row.original.attributes.status} />,
-  },
+The dialog owns the mutation; the form owns the fields. From `LogMileageDialog.tsx:27-54`:
 
-  // Actions column
-  {
-    id: "actions",
-    cell: ({ row }) => (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          <DropdownMenuItem onClick={() => handleView(row.original)}>View</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => handleDelete(row.original)} className="text-destructive">Delete</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    ),
-  },
-];
+```tsx
+export function LogMileageDialog({ open, onOpenChange, vehicleId, defaultMileage }: Props) {
+  const createRecord = useCreateMileageRecord(vehicleId);
+
+  const handleSubmit = async (values: MileageFormInput) => {
+    try {
+      await createRecord.mutateAsync({ mileage: values.mileage });
+      toast.success('Mileage logged');
+      onOpenChange(false);
+    } catch (err) {
+      // Keep the dialog open so the user's input survives the failure.
+      const apiError = createErrorFromUnknown(err);
+      toast.error(apiError.message || 'Could not log mileage');
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Log Mileage</DialogTitle>
+        </DialogHeader>
+        <MileageForm
+          defaultMileage={defaultMileage}
+          onSubmit={handleSubmit}
+          onCancel={() => onOpenChange(false)}
+          submitting={createRecord.isPending}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
 ```
 
-### Adding a Dialog with Form
+And the form it wraps (`MileageForm.tsx:20-66`, abridged):
+
 ```tsx
-<Dialog open={open} onOpenChange={onOpenChange}>
-  <DialogContent className="sm:max-w-[425px]">
+export function MileageForm({ defaultMileage, onSubmit, onCancel, submitting }: MileageFormProps) {
+  const form = useForm<MileageFormInput>({
+    resolver: zodResolver(mileageSchema),
+    defaultValues: { mileage: defaultMileage },
+  });
+
+  return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <DialogHeader>
-          <DialogTitle>Title</DialogTitle>
-          <DialogDescription>Description</DialogDescription>
-        </DialogHeader>
-        {/* FormField components */}
-        <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button type="submit" disabled={form.formState.isSubmitting}>
-            {form.formState.isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Submit
+      <form onSubmit={form.handleSubmit((values) => onSubmit(values))} className="space-y-4">
+        <FormField
+          control={form.control}
+          name="mileage"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Mileage (miles)</FormLabel>
+              <FormControl>
+                <Input type="number" value={field.value ?? ''} … />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <div className="flex justify-end gap-2">
+          {onCancel && <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>}
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Log Mileage
           </Button>
-        </DialogFooter>
+        </div>
       </form>
     </Form>
-  </DialogContent>
-</Dialog>
+  );
+}
 ```
 
-### Adding a New Hook
+Note `submitting` is a prop, not `form.formState.isSubmitting` — the mutation's `isPending` is the truth, and it lives in the dialog.
+
+### Adding a new hook
+
+From `lib/hooks/api/vehicles.ts:14-56`:
+
 ```typescript
-export const resourceKeys = {
-  all: ['resources'] as const,
-  lists: () => [...resourceKeys.all, 'list'] as const,
-  list: (options?: QueryOptions) =>
-    [...resourceKeys.lists(), options] as const,
-  details: () => [...resourceKeys.all, 'detail'] as const,
-  detail: (id: string) =>
-    [...resourceKeys.details(), id] as const,
+export const vehicleKeys = {
+  all: ['vehicles'] as const,
+  lists: () => [...vehicleKeys.all, 'list'] as const,
+  list: (params: { fleetId: string }) => [...vehicleKeys.lists(), params] as const,
+  details: () => [...vehicleKeys.all, 'detail'] as const,
+  detail: (id: string) => [...vehicleKeys.details(), id] as const,
 };
 
-export function useResources(options?: QueryOptions) {
+export function useVehicles(fleetId: string | null | undefined) {
   return useQuery({
-    queryKey: resourceKeys.list(options),
-    queryFn: () => resourceService.getAll(options),
-    staleTime: 3 * 60 * 1000,
-    gcTime: 10 * 60 * 1000,
+    queryKey: vehicleKeys.list({ fleetId: fleetId ?? '' }),
+    queryFn: () => vehicleService.listByFleet(fleetId as string),
+    enabled: !!fleetId,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useCreateVehicle(fleetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (attributes: CreateVehicleAttributes) =>
+      vehicleService.createInFleet(fleetId, attributes),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.lists() });
+    },
   });
 }
 ```
+
+The `queryKey` is built even when `fleetId` is null, because `enabled` — not a conditional key — is what holds the fetch back. A key that changes shape between renders would fragment the cache.
