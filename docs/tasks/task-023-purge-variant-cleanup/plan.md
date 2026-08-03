@@ -1,6 +1,6 @@
 # Media Purge Variant Cleanup Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make media-service's hourly purge sweep remove every byte and row derived from a purged media object, drain the backlog of already-orphaned derived state, and bring `media.media_variant_failures` under the admin purge protocol.
 
@@ -78,7 +78,7 @@ The walk currently lives inline in `TestManifestCoversEveryTable` and filters on
 - Consumes: nothing.
 - Produces: `func CollectTableNames(root string) ([]string, error)` in `package admin` — parses every non-test `.go` file under `root`, skipping any directory named `testdata`, and returns the string literal each `func (X) TableName() string` returns. Task 4 calls it with `".."`.
 
-- [ ] **Step 1: Write the fixture**
+- [x] **Step 1: Write the fixture**
 
 Create `apps/media-service/internal/admin/testdata/fixture/ledger.go`:
 
@@ -99,7 +99,7 @@ type Entity struct{}
 func (Entity) TableName() string { return "media.fixture_table" }
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 Append to `apps/media-service/internal/admin/arch_test.go` (it is `package admin`, so `CollectTableNames` is reachable unqualified):
 
@@ -139,7 +139,7 @@ func TestCollectTableNames_skipsTestdata(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run TestCollectTableNames -v
@@ -147,7 +147,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run T
 
 Expected: FAIL to compile — `undefined: CollectTableNames`.
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 Create `apps/media-service/internal/admin/tablenames.go`:
 
@@ -238,7 +238,7 @@ func CollectTableNames(root string) ([]string, error) {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -v
@@ -246,7 +246,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -v
 
 Expected: PASS, including the pre-existing `TestManifestCoversEveryTable` and `TestManifestKeysAreUnique`, which are untouched.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add apps/media-service/internal/admin/tablenames.go \
@@ -271,7 +271,7 @@ Per **P-1**, the columns carry no `gorm:"index"` tag and the indexes are created
 - Consumes: nothing.
 - Produces: `variantfailures.Entity` gains `DeletedAt *time.Time` and `PurgeOperationID *string`. `variantfailures.ApplyIndexes(db *gorm.DB) error` is exported alongside `Migration` so a test harness can create the indexes against a hand-written table. `Store.Recorded` keeps its `(mediaObjectID, variant string) (bool, error)` signature.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `apps/media-service/internal/variantfailures/variantfailures_test.go`:
 
@@ -307,7 +307,7 @@ func TestRecorded_ignoresSoftDeletedRows(t *testing.T) {
 
 Add `"time"` to that file's import block.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailures/ -run TestRecorded_ignoresSoftDeletedRows -v
@@ -315,7 +315,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailur
 
 Expected: FAIL with `stamp the ledger row: no such column: deleted_at`.
 
-- [ ] **Step 3: Add the columns and the explicit indexes**
+- [x] **Step 3: Add the columns and the explicit indexes**
 
 In `apps/media-service/internal/variantfailures/variantfailures.go`, replace the `Entity` declaration and `Migration` (currently lines 32-44) with:
 
@@ -394,7 +394,7 @@ func ApplyIndexes(db *gorm.DB) error {
 }
 ```
 
-- [ ] **Step 4: Narrow `Recorded`**
+- [x] **Step 4: Narrow `Recorded`**
 
 Replace `Recorded` (currently lines 55-66) with:
 
@@ -427,7 +427,7 @@ func (s *Store) Recorded(mediaObjectID, variant string) (bool, error) {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailures/ -v
@@ -435,7 +435,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailur
 
 Expected: PASS — the new test plus the three pre-existing ones (`TestRecordThenRecorded`, `TestRecorded_isScopedToTheObjectAndVariant`, `TestRecord_firstReasonWins`). If any pre-existing test fails with `no such table: main.media_variant_failures`, an index tag was left on the struct; remove it (P-1).
 
-- [ ] **Step 6: Verify the whole service still builds and passes**
+- [x] **Step 6: Verify the whole service still builds and passes**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/...
@@ -443,7 +443,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/...
 
 Expected: PASS. In particular `apps/media-service/cmd` — `TestNoLossySaveRoundTrips` walks `../internal` and must stay clean.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```sh
 git add apps/media-service/internal/variantfailures/
@@ -462,7 +462,7 @@ git commit -m "feat(media-service): give the variant-failure ledger its purge co
 - Consumes: `variantfailures.Entity`'s new columns (Task 2).
 - Produces: a `Target` with `Key: "media_variant_failures"`, `Table: "media.media_variant_failures"` in `Manifest`, positioned between `media_variants` and `media_objects`. `affected_counts` in admin purge responses gains a `media_variant_failures` key.
 
-- [ ] **Step 1: Extend the test harness with the ledger table**
+- [x] **Step 1: Extend the test harness with the ledger table**
 
 In `apps/media-service/internal/admin/admin_test.go`, add to the `ddl` slice in `newMediaDB` (after the `media_variants` statement):
 
@@ -482,7 +482,7 @@ and to the `seed` slice (after the `mv-2` insert):
 		 VALUES ('mo-2', 'card', 'undecodable', CURRENT_TIMESTAMP)`,
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Append to `apps/media-service/internal/admin/admin_test.go`:
 
@@ -542,7 +542,7 @@ func TestPurge_reachesTheVariantFailureLedger(t *testing.T) {
 }
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [x] **Step 3: Run the test to verify it fails**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run TestPurge_reachesTheVariantFailureLedger -v
@@ -550,7 +550,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run T
 
 Expected: FAIL — `affected = map[media_objects:1 media_variants:1], want one media_variant_failures row`. The table is not in `Manifest`, so nothing stamps it.
 
-- [ ] **Step 4: Add the manifest target**
+- [x] **Step 4: Add the manifest target**
 
 In `apps/media-service/internal/admin/manifest.go`, insert between the `media_variants` and `media_objects` entries:
 
@@ -576,7 +576,7 @@ In `apps/media-service/internal/admin/manifest.go`, insert between the `media_va
 	},
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -v
@@ -584,7 +584,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -v
 
 Expected: PASS, all of them. `TestManifestKeysAreUnique` confirms the new key does not collide. `TestManifestCoversEveryTable` still passes because it has not been widened yet.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add apps/media-service/internal/admin/manifest.go apps/media-service/internal/admin/admin_test.go
@@ -602,7 +602,7 @@ git commit -m "feat(media-service): bring the variant-failure ledger under the a
 - Consumes: `CollectTableNames` (Task 1), the manifest entry (Task 3).
 - Produces: nothing new.
 
-- [ ] **Step 1: Rewire the test to use the widened walk**
+- [x] **Step 1: Rewire the test to use the widened walk**
 
 In `apps/media-service/internal/admin/arch_test.go`, replace `TestManifestCoversEveryTable` (lines 14-91, doc comment included) with:
 
@@ -657,7 +657,7 @@ import (
 )
 ```
 
-- [ ] **Step 2: Run the test to verify it passes**
+- [x] **Step 2: Run the test to verify it passes**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run TestManifestCoversEveryTable -v
@@ -665,7 +665,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run T
 
 Expected: PASS. The widened walk now reports four tables — `media.media_objects` and `media.media_variants` (in `Manifest`), `media.processed_events` (in `excludedTables`) and `media.media_variant_failures` (added to `Manifest` in Task 3).
 
-- [ ] **Step 3: Demonstrate the test can go red**
+- [x] **Step 3: Demonstrate the test can go red**
 
 The widened walk is only worth anything if it actually catches an uncovered table. Prove it:
 
@@ -676,7 +676,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run T
 
 Expected: FAIL with `media.media_variant_failures is in neither admin.Manifest nor admin.excludedTables`. Restore the target and re-run to confirm PASS. **Do not commit the commented-out version.**
 
-- [ ] **Step 4: Verify nothing else in the service regressed**
+- [x] **Step 4: Verify nothing else in the service regressed**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/...
@@ -684,7 +684,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/...
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add apps/media-service/internal/admin/arch_test.go
@@ -705,7 +705,7 @@ When a media object's bytes cannot be removed, `ReapSparing` keeps its row and i
 - Consumes: the manifest entry (Task 3).
 - Produces: nothing new. `ReapSparing`'s signature is unchanged.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `apps/media-service/internal/admin/admin_test.go`:
 
@@ -733,7 +733,7 @@ func TestReap_sparedObjectKeepsItsFailureLedgerRows(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run TestReap_sparedObjectKeepsItsFailureLedgerRows -v
@@ -741,7 +741,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -run T
 
 Expected: FAIL — `the spared media object's ledger rows were reaped anyway: 0 of 1 left`.
 
-- [ ] **Step 3: Add the sparing case**
+- [x] **Step 3: Add the sparing case**
 
 In `apps/media-service/internal/admin/operations.go`, extend the switch inside `ReapSparing`:
 
@@ -768,7 +768,7 @@ Also extend the doc comment on `ReapSparing` — replace the sentence "media_obj
 				// spared object never loses the rows that describe it.
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -v
@@ -776,7 +776,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/admin/ -v
 
 Expected: PASS, including `TestReap_sparedRowKeepsItsOperationIDSoTheNextTickCanRetry`, which exercises the retry after the bucket recovers.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add apps/media-service/internal/admin/operations.go apps/media-service/internal/admin/admin_test.go
@@ -802,7 +802,7 @@ git commit -m "fix(media-service): spare a spared media object's failure-ledger 
 
   Task 9 and Task 10 call all five.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/media-service/internal/mediavariant/purge_test.go`:
 
@@ -961,7 +961,7 @@ func TestDeleteByID_removesExactlyOneRow(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant/ -run 'TestObjectKeysForMediaObject|TestDeleteForMediaObject|TestListOrphaned|TestDeleteByID' -v
@@ -969,7 +969,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant/
 
 Expected: FAIL to compile — `undefined: ObjectKeysForMediaObject`, `undefined: DeleteForMediaObject`, `undefined: ListOrphaned`, `undefined: DeleteByID`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `apps/media-service/internal/mediavariant/purge.go`:
 
@@ -1050,7 +1050,7 @@ func DeleteByID(db *gorm.DB, id string) error {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant/ -v
@@ -1058,7 +1058,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant/
 
 Expected: PASS, including the pre-existing `TestUpsert_*`, `TestGetByMediaObjectAndVariant_*` and `TestMediaVariantReads_hideSoftDeleted`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add apps/media-service/internal/mediavariant/purge.go apps/media-service/internal/mediavariant/purge_test.go
@@ -1081,7 +1081,7 @@ git commit -m "feat(media-service): add the purge-side media-variant queries"
 
   Both are package-level functions on `*gorm.DB`, matching `mediaobject.DeleteRow` and `admin`'s operations rather than methods on `Store`: `Store` carries a logger and serves the request-path ledger, and a purge does not belong on the type lazy generation depends on.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/media-service/internal/variantfailures/purge_test.go`:
 
@@ -1204,7 +1204,7 @@ func TestDeleteOrphaned_capsByMediaObjectAndLeavesTheRemainder(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailures/ -run 'TestDeleteForMediaObject|TestDeleteOrphaned' -v
@@ -1212,7 +1212,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailur
 
 Expected: FAIL to compile — `undefined: DeleteForMediaObject`, `undefined: DeleteOrphaned`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `apps/media-service/internal/variantfailures/purge.go`:
 
@@ -1257,7 +1257,7 @@ func DeleteOrphaned(db *gorm.DB, limit int) (int, error) {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailures/ -v
@@ -1265,7 +1265,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailur
 
 Expected: PASS, all of them.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add apps/media-service/internal/variantfailures/purge.go apps/media-service/internal/variantfailures/purge_test.go
@@ -1292,7 +1292,7 @@ This task is a **pure move**. `RunOnce` is a verbatim port of today's `purgeExpi
   - `type Sweeper struct{ … }` with `func NewSweeper(log logrus.FieldLogger, db *gorm.DB, store ObjectRemover, cfg Config) *Sweeper` and `func (s *Sweeper) RunOnce(ctx context.Context) error`.
   - Test helpers used by Tasks 9–10: `newTestDB(t) *gorm.DB`, `newRemover() *recordingRemover` with fields `asked []string`, `removed []string`, `fail map[string]bool` and methods `wasAsked(key string) bool` / `didRemove(key string) bool`, plus `seedMediaObject`, `seedVariant`, `seedLedgerRow`, `countRows`.
 
-- [ ] **Step 1: Write the package and the verbatim port**
+- [x] **Step 1: Write the package and the verbatim port**
 
 Create `apps/media-service/internal/purge/sweeper.go`:
 
@@ -1377,7 +1377,7 @@ func (s *Sweeper) RunOnce(ctx context.Context) error {
 }
 ```
 
-- [ ] **Step 2: Write the test harness**
+- [x] **Step 2: Write the test harness**
 
 Create `apps/media-service/internal/purge/testdb_test.go`:
 
@@ -1599,7 +1599,7 @@ func hourAgo() *time.Time {
 }
 ```
 
-- [ ] **Step 3: Write T5 — the guard that protects the move**
+- [x] **Step 3: Write T5 — the guard that protects the move**
 
 Create `apps/media-service/internal/purge/sweeper_test.go`:
 
@@ -1655,7 +1655,7 @@ func TestRunOnce_leavesAdminStampedObjectsAlone(t *testing.T) {
 
 Add `"io"` and `"gorm.io/gorm"` to that file's imports.
 
-- [ ] **Step 4: Run the new package's tests**
+- [x] **Step 4: Run the new package's tests**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -v
@@ -1663,7 +1663,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -v
 
 Expected: PASS — `TestHarnessDDLMatchesTheEntities` and `TestRunOnce_leavesAdminStampedObjectsAlone`. If the drift guard fails, the DDL in `newTestDB` is missing a column an entity declares; add it.
 
-- [ ] **Step 5: Wire the sweeper into `cmd/main.go` and delete `purgeExpired`**
+- [x] **Step 5: Wire the sweeper into `cmd/main.go` and delete `purgeExpired`**
 
 In `apps/media-service/cmd/main.go`, replace the purge job block (lines 123-136) with:
 
@@ -1688,7 +1688,7 @@ In `apps/media-service/cmd/main.go`, replace the purge job block (lines 123-136)
 Delete the `purgeExpired` function entirely (lines 176-193). Add
 `"github.com/jtumidanski/myfleet/apps/media-service/internal/purge"` to the intra-repo import group, and remove the now-unused `"gorm.io/gorm"` import. (`logrus` stays — `mustJWKSKeyfunc` still takes a `*logrus.Logger`.)
 
-- [ ] **Step 6: Verify the service builds and the whole suite passes**
+- [x] **Step 6: Verify the service builds and the whole suite passes**
 
 ```sh
 go build github.com/jtumidanski/myfleet/apps/media-service/...
@@ -1698,7 +1698,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/...
 
 Expected: all PASS. `apps/media-service/internal/mediaobject` still passes `TestListPurgeable_skipsAdminStampedObjects` unmodified.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```sh
 git add apps/media-service/internal/purge/ apps/media-service/cmd/main.go
@@ -1720,7 +1720,7 @@ The behaviour change. Every byte and every row derived from a purged media objec
 - Consumes: `mediavariant.ObjectKeysForMediaObject`, `mediavariant.DeleteForMediaObject` (Task 6); `variantfailures.DeleteForMediaObject` (Task 7); `mediaobject.DeleteRow`.
 - Produces: `RunOnce` keeps its signature. A private `summary` type and `func (s *Sweeper) purgeExpired(ctx context.Context, sum *summary) error` are added; Task 10 adds `reconcile` alongside them.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `apps/media-service/internal/purge/sweeper_test.go`:
 
@@ -1876,7 +1876,7 @@ func TestRunOnce_retryAfterBytesAreAlreadyGoneCompletesThePurge(t *testing.T) {
 
 Add `"github.com/jtumidanski/myfleet/apps/media-service/internal/mediaobject"` to that file's intra-repo import group.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -v
@@ -1889,7 +1889,7 @@ Expected: FAIL, and specifically:
 
 `TestRunOnce_aFailedOriginalRemovalOffersNoVariantKeys` **passes** at this point, because today's sweep never offers variant keys at all. Step 5 makes it a real check.
 
-- [ ] **Step 3: Rewrite the per-object pass**
+- [x] **Step 3: Rewrite the per-object pass**
 
 Replace `RunOnce` in `apps/media-service/internal/purge/sweeper.go` with the following, and extend the import block with `"fmt"`, `"github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant"` and `"github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailures"`:
 
@@ -2003,7 +2003,7 @@ func (s *Sweeper) purgeExpired(ctx context.Context, sum *summary) error {
 }
 ```
 
-- [ ] **Step 4: Record that `DeleteRow` may take a transaction**
+- [x] **Step 4: Record that `DeleteRow` may take a transaction**
 
 In `apps/media-service/internal/mediaobject/purge.go`, replace the `DeleteRow` doc comment (line 41) with:
 
@@ -2016,7 +2016,7 @@ In `apps/media-service/internal/mediaobject/purge.go`, replace the `DeleteRow` d
 // an outer handle.
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -v
@@ -2024,7 +2024,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -v
 
 Expected: PASS, all of them, including `TestRunOnce_leavesAdminStampedObjectsAlone` from Task 8.
 
-- [ ] **Step 6: Demonstrate T3 can go red**
+- [x] **Step 6: Demonstrate T3 can go red**
 
 T3 could not fail against the pre-change code, so prove it against the new code instead — revert the fix and watch it go red:
 
@@ -2036,7 +2036,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -run T
 
 Expected: FAIL — `the sweep kept removing bytes after the original failed; the object is abandoned as a unit or not at all`. Restore the `break` and re-run to confirm PASS. **Do not commit the mutated version.**
 
-- [ ] **Step 7: Verify the whole service**
+- [x] **Step 7: Verify the whole service**
 
 ```sh
 go vet  github.com/jtumidanski/myfleet/apps/media-service/...
@@ -2045,7 +2045,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/...
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```sh
 git add apps/media-service/internal/purge/ apps/media-service/internal/mediaobject/purge.go
@@ -2068,7 +2068,7 @@ Drains the backlog of orphaned derived state already accumulated in deployed dat
 - Consumes: `mediavariant.ListOrphaned`, `mediavariant.DeleteByID` (Task 6); `variantfailures.DeleteOrphaned` (Task 7); `Config.ReconcileLimit` (Task 8).
 - Produces: `func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error`; `summary` gains `orphanVariants int`, `orphanFailures int`, `reconcileCapped bool`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/media-service/internal/purge/reconcile_test.go`:
 
@@ -2221,7 +2221,7 @@ func TestReconcile_isDisabledByANonPositiveLimit(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -run TestReconcile -v
@@ -2229,7 +2229,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -run T
 
 Expected: FAIL on all but `TestReconcile_isDisabledByANonPositiveLimit` (which passes vacuously today — there is no reconciliation to disable; Step 4 makes it real). The others fail with `the orphaned variant's bytes were never removed`, `removed 0 objects …, want exactly the cap of 2`, and `the orphaned ledger row survived`.
 
-- [ ] **Step 3: Extend `summary`**
+- [x] **Step 3: Extend `summary`**
 
 In `apps/media-service/internal/purge/sweeper.go`, replace the `summary` type and its two methods with:
 
@@ -2267,7 +2267,7 @@ func (sum summary) log(log logrus.FieldLogger) {
 }
 ```
 
-- [ ] **Step 4: Add the reconciliation pass and call it from `RunOnce`**
+- [x] **Step 4: Add the reconciliation pass and call it from `RunOnce`**
 
 In `apps/media-service/internal/purge/sweeper.go`, replace `RunOnce` with:
 
@@ -2350,7 +2350,7 @@ func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error {
 }
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -v
@@ -2358,7 +2358,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -v
 
 Expected: PASS, all of them — T1–T8 plus the harness drift guard.
 
-- [ ] **Step 6: Demonstrate the off-switch test can go red**
+- [x] **Step 6: Demonstrate the off-switch test can go red**
 
 `TestReconcile_isDisabledByANonPositiveLimit` passed vacuously in Step 2. Prove it is now a real check:
 
@@ -2369,7 +2369,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -run T
 
 Expected: FAIL — `reconciliation ran with the limit at 0; the off switch does not work`. Restore `<= 0` and re-run to confirm PASS. **Do not commit the mutated version.**
 
-- [ ] **Step 7: Read the cap from configuration**
+- [x] **Step 7: Read the cap from configuration**
 
 In `apps/media-service/cmd/main.go`, replace the `purge.Config{}` literal added in Task 8 with:
 
@@ -2384,7 +2384,7 @@ In `apps/media-service/cmd/main.go`, replace the `purge.Config{}` literal added 
 	})
 ```
 
-- [ ] **Step 8: Add the knob to the ConfigMap**
+- [x] **Step 8: Add the knob to the ConfigMap**
 
 In `deploy/k8s/base/media-service/configmap.yaml`, after the `MEDIA_LAZY_VARIANT_CONCURRENCY` block:
 
@@ -2399,7 +2399,7 @@ In `deploy/k8s/base/media-service/configmap.yaml`, after the `MEDIA_LAZY_VARIANT
   MEDIA_PURGE_RECONCILE_LIMIT: "500"
 ```
 
-- [ ] **Step 9: Verify the service and the manifests**
+- [x] **Step 9: Verify the service and the manifests**
 
 ```sh
 go vet  github.com/jtumidanski/myfleet/apps/media-service/...
@@ -2411,7 +2411,7 @@ kustomize build deploy/k8s/overlays/main  | grep MEDIA_PURGE_RECONCILE_LIMIT
 
 Expected: tests PASS; the local overlay renders; the `main` overlay reports `0` PVCs; the new key appears in the `main` render.
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```sh
 git add apps/media-service/internal/purge/ apps/media-service/cmd/main.go \
@@ -2432,7 +2432,7 @@ FR-TEST-2's invariant has only ever been prose in `cmd/main.go`'s adapter commen
 - Consumes: nothing.
 - Produces: nothing.
 
-- [ ] **Step 1: Write the test**
+- [x] **Step 1: Write the test**
 
 Create `apps/media-service/internal/purge/arch_test.go`:
 
@@ -2501,7 +2501,7 @@ func TestDomainPackagesDoNotImportEachOther(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it passes**
+- [x] **Step 2: Run the test to verify it passes**
 
 ```sh
 go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -run TestDomainPackagesDoNotImportEachOther -v
@@ -2509,7 +2509,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -run T
 
 Expected: PASS.
 
-- [ ] **Step 3: Demonstrate the test can go red**
+- [x] **Step 3: Demonstrate the test can go red**
 
 ```sh
 # Temporarily add this to apps/media-service/internal/mediaobject/purge.go's imports:
@@ -2519,7 +2519,7 @@ go test github.com/jtumidanski/myfleet/apps/media-service/internal/purge/ -run T
 
 Expected: FAIL — `../mediaobject/purge.go imports its sibling mediavariant …`. Remove the import and re-run to confirm PASS. **Do not commit the temporary import.**
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```sh
 git add apps/media-service/internal/purge/arch_test.go
@@ -2534,7 +2534,7 @@ git commit -m "test(media-service): enforce sibling-package independence in the 
 - Modify: `docs/tasks/task-023-purge-variant-cleanup/plan.md` (tick the boxes)
 - Create: `docs/tasks/task-023-purge-variant-cleanup/audit.md` (written by the reviewer agents)
 
-- [ ] **Step 1: Run the full CI gate**
+- [x] **Step 1: Run the full CI gate**
 
 Node is not always on `PATH`:
 
@@ -2547,7 +2547,7 @@ Expected: PASS — `lint-check`, `vet`, `test`, `build`, `fe-test`, `fe-build`, 
 
 If `lint-check` reports import-grouping or gofumpt findings in the new files, run `make lint` and re-run `make ci`.
 
-- [ ] **Step 2: Render both overlays and check the `main` invariants**
+- [x] **Step 2: Render both overlays and check the `main` invariants**
 
 ```sh
 kustomize build deploy/k8s/overlays/local >/dev/null && echo "local OK"
@@ -2560,7 +2560,7 @@ grep    'MEDIA_PURGE_RECONCILE_LIMIT'  /tmp/main-render.yaml
 
 Expected: both render; the three counts are `0` (`grep -c` exits non-zero when it finds nothing — that is the passing case here); the new key is present.
 
-- [ ] **Step 3: Server dry-run both overlays, if a cluster is reachable**
+- [x] **Step 3: Server dry-run both overlays, if a cluster is reachable**
 
 ```sh
 kubectl config current-context   # confirm this is the intended cluster before proceeding
@@ -2570,7 +2570,7 @@ kustomize build deploy/k8s/overlays/local | kubectl apply --dry-run=server -f -
 
 `--dry-run=server` persists nothing, so it is safe against the shared `bee` context. **Both** are required — the local overlay is not exempt; a missing `namespace:` once slipped through ten reviews because only the `main` dry-run was ever run. If no cluster is reachable, say so explicitly in the summary rather than silently skipping.
 
-- [ ] **Step 4: Confirm the acceptance criteria**
+- [x] **Step 4: Confirm the acceptance criteria**
 
 Walk PRD §10 and check each box against the work. In particular verify by inspection:
 
@@ -2581,7 +2581,7 @@ git -C . diff main --stat -- apps/media-service/internal/mediaobject/purge.go
 
 Expected: no `purgeExpired` in `cmd/main.go`; the only change to `mediaobject/purge.go` is the `DeleteRow` doc comment, with `ListPurgeable` and `TestListPurgeable_skipsAdminStampedObjects` untouched.
 
-- [ ] **Step 5: Run code review**
+- [x] **Step 5: Run code review**
 
 Per CLAUDE.md this is mandatory before a PR, even when the plan looks complete. Go files changed and no frontend files did, so dispatch the plan-adherence and backend reviewers:
 
