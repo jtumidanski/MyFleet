@@ -75,8 +75,11 @@ Non-goals:
   "Weekend Truck", not `8f14e45f-ceea-467a-9f8e-1b2c3d4e5f60`.
 - As a platform admin viewing a specific fleet, I want the same — the fleet's name in the
   breadcrumb, not its id.
-- As a signed-in user anywhere in the app, I want clicking the MyFleet lockup in the
-  sidebar — or the "Home" crumb — to take me to the dashboard.
+- As a signed-in user in the fleet app, I want clicking the MyFleet lockup in the sidebar —
+  or the "Home" crumb — to take me to the dashboard.
+- As a platform admin, I want the console's lockup and the first crumb to both return me to
+  the console overview, not eject me from the console, so that the frame's two "go to the
+  top" affordances agree with each other. "Back to my fleet" is how I leave.
 
 ## 4. Functional Requirements
 
@@ -213,9 +216,19 @@ Non-goals:
 
 - **FR-CRUMB-1** — A breadcrumb renders in the header row, immediately right of the
   `SidebarTrigger`, in both shells.
-- **FR-CRUMB-2** — The first crumb is always **Home** and always links to `/`, in both
-  shells — including inside the admin console. This is the user's stated requirement and
-  is consistent with the console's existing "Back to my fleet" affordance.
+- **FR-CRUMB-2** — **Each shell's trail is rooted at that shell's own root, matching where
+  that shell's brand lockup goes (FR-BRAND-2).** In `AppLayout` the first crumb is **Home**
+  and links to `/`. In `AdminLayout` the first crumb is **Admin** and links to `/admin`;
+  there is no "Home" crumb inside the console.
+
+  The original requirement asked for a Home crumb pointing at the root url, written before
+  the two shells were distinguished. Rooting the console's trail at the console is the
+  consistent choice: a breadcrumb claims to describe the path you took to get here, and
+  the console is not reached by descending from the dashboard — it is a sibling of it
+  (`App.tsx:71-78`). Leaving the console is what the sidebar's "Back to my fleet" link is
+  for (FR-NAV-7), and that link is unchanged. A Home crumb would be a second, differently
+  worded exit sitting in the one row that is supposed to describe location rather than
+  offer destinations.
 - **FR-CRUMB-3** — The last crumb represents the current page. It is rendered as
   non-interactive current-page text (`aria-current="page"`), not a link. All preceding
   crumbs are links.
@@ -230,17 +243,18 @@ Non-goals:
   | `/activity` | Home / Activity |
   | `/notifications` | Home / Notifications |
   | `/settings` | Home / Settings |
-  | `/admin` | Home / Admin |
-  | `/admin/fleets` | Home / Admin / Fleets |
-  | `/admin/fleets/:id` | Home / Admin / Fleets / *«fleet name»* |
-  | `/admin/users` | Home / Admin / Users |
-  | `/admin/purges` | Home / Admin / Purges |
-  | `/admin/audit` | Home / Admin / Audit log |
+  | `/admin` | Admin |
+  | `/admin/fleets` | Admin / Fleets |
+  | `/admin/fleets/:id` | Admin / Fleets / *«fleet name»* |
+  | `/admin/users` | Admin / Users |
+  | `/admin/purges` | Admin / Purges |
+  | `/admin/audit` | Admin / Audit log |
 
-- **FR-CRUMB-5** — On `/` the breadcrumb renders the single "Home" crumb as current-page
-  text. It does not render an empty region that collapses the header height.
-- **FR-CRUMB-6** — The intermediate "Admin" crumb links to `/admin`, and the intermediate
-  "Vehicles" and "Fleets" crumbs link to `/vehicles` and `/admin/fleets` respectively.
+- **FR-CRUMB-5** — On a shell's root route the breadcrumb renders that shell's single root
+  crumb as current-page text — "Home" on `/`, "Admin" on `/admin`. It does not render an
+  empty region that collapses the header height.
+- **FR-CRUMB-6** — Intermediate crumbs link to their own route: "Vehicles" to `/vehicles`,
+  "Admin" to `/admin`, "Fleets" to `/admin/fleets`.
 - **FR-CRUMB-7** — Routes outside both shells — `/login`, `/onboarding`, and
   `/invites/:token/accept` — render no breadcrumb, because they render no shell.
 - **FR-CRUMB-8** — The route-to-trail mapping is data, defined in one module, not a chain
@@ -392,10 +406,10 @@ records for keeping `PageHeader` out of the shared package.
 
 1. **Icon choices** (FR-NAV-2, FR-NAV-3) are proposals. `Car` for Vehicles and `Building2`
    for Fleets are the least certain; confirm during design.
-2. **Admin brand-link target** (FR-BRAND-2): this PRD sends the console's lockup to
-   `/admin` rather than `/`, reasoning that "Back to my fleet" is the existing way out of
-   the console. The user's original request said "the root url" without distinguishing the
-   shells. Confirm during design.
+2. ~~**Admin brand-link target**~~ — **Resolved.** Both the console's brand lockup
+   (FR-BRAND-2) and the console's first breadcrumb crumb (FR-CRUMB-2) target `/admin`, not
+   `/`. The two affordances are required to agree; "Back to my fleet" (FR-NAV-7) remains
+   the single, deliberate way out of the console.
 3. **Crumb truncation width** (FR-CRUMB-9): the exact `max-w-*` per crumb, and whether
    long trails should collapse middle crumbs to an ellipsis (shadcn ships a
    `BreadcrumbEllipsis`) rather than truncating each label. The longest real trail is four
@@ -449,7 +463,10 @@ records for keeping `PageHeader` out of the shared package.
 
 - [ ] A breadcrumb sits immediately right of the sidebar trigger in both shells.
 - [ ] Every route in the FR-CRUMB-4 table renders its exact trail.
-- [ ] "Home" links to `/` from every authenticated route, including inside `/admin`.
+- [ ] In the fleet shell the first crumb is "Home" and links to `/`.
+- [ ] In the admin console the first crumb is "Admin" and links to `/admin`; no "Home"
+      crumb appears anywhere under `/admin`.
+- [ ] The first crumb's target matches the same shell's brand lockup target.
 - [ ] The final crumb is non-interactive and carries `aria-current="page"`.
 - [ ] `/vehicles/:id` shows the vehicle's name and never its UUID on a successful load.
 - [ ] `/admin/fleets/:id` shows the fleet's name and never its UUID on a successful load.
