@@ -11,13 +11,16 @@ import (
 	"strings"
 )
 
-// CollectTableNames parses every non-test .go file under root and returns the
+// collectTableNames parses every non-test .go file under root and returns the
 // string literal each `func (X) TableName() string` returns.
 //
-// It exists as production code rather than as a closure inside the arch test so
+// It lives in its own file rather than as a closure inside the arch test so
 // that the walk itself can be tested against a fixture. FR-ADMIN-5's acceptance
 // criterion — "adding a table in a file not named entity.go fails the arch
-// test" — is only demonstrable that way.
+// test" — is only demonstrable that way. It is a _test.go file because it has
+// no production caller: arch_test.go is `package admin`, so an unexported
+// helper here is just as reachable, and go/parser, go/ast and filepath.WalkDir
+// have no business in the shipped binary.
 //
 // Two exclusions, both load-bearing:
 //
@@ -32,7 +35,7 @@ import (
 // Parsing rather than grepping: table names appear in comments, raw SQL and
 // test DDL throughout the service, and a grep would produce false matches the
 // first time someone documents one.
-func CollectTableNames(root string) ([]string, error) {
+func collectTableNames(root string) ([]string, error) {
 	var found []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

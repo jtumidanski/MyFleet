@@ -21,7 +21,7 @@ func TestManifestCoversEveryTable(t *testing.T) {
 		inManifest[target.Table] = true
 	}
 
-	found, err := CollectTableNames("..") // apps/media-service/internal
+	found, err := collectTableNames("..") // apps/media-service/internal
 	if err != nil {
 		// A parse failure fails the test, never a silent skip (FR-ADMIN-6).
 		t.Fatalf("collect table names: %v", err)
@@ -62,12 +62,12 @@ func TestManifestKeysAreUnique(t *testing.T) {
 // a table declared anywhere else was invisible — which is exactly how
 // media.media_variant_failures ended up in neither Manifest nor excludedTables.
 func TestCollectTableNames_seesDeclarationsOutsideEntityGo(t *testing.T) {
-	got, err := CollectTableNames("testdata/fixture")
+	got, err := collectTableNames("testdata/fixture")
 	if err != nil {
-		t.Fatalf("CollectTableNames: %v", err)
+		t.Fatalf("collectTableNames: %v", err)
 	}
 	if len(got) != 1 || got[0] != "media.fixture_table" {
-		t.Fatalf("CollectTableNames(testdata/fixture) = %v, want [media.fixture_table]", got)
+		t.Fatalf("collectTableNames(testdata/fixture) = %v, want [media.fixture_table]", got)
 	}
 }
 
@@ -77,9 +77,9 @@ func TestCollectTableNames_seesDeclarationsOutsideEntityGo(t *testing.T) {
 // production run in TestManifestCoversEveryTable would report a table that does
 // not exist and fail the build.
 func TestCollectTableNames_skipsTestdata(t *testing.T) {
-	got, err := CollectTableNames("..")
+	got, err := collectTableNames("..")
 	if err != nil {
-		t.Fatalf("CollectTableNames: %v", err)
+		t.Fatalf("collectTableNames: %v", err)
 	}
 	if len(got) == 0 {
 		t.Fatal("found no TableName declarations — the walk root is wrong, and this test would pass vacuously")
