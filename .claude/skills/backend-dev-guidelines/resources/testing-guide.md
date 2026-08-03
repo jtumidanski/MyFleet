@@ -224,8 +224,19 @@ Before committing changes, especially to core business logic:
 - [ ] If you added new business logic, ensure corresponding tests exist
 - [ ] Review changed files for accidental debug code or commented-out logic
 - [ ] Ensure no secrets, credentials, or sensitive data in code
-- [ ] Verify providers use `db.WithContext(ctx)`, not a bare `db` call
-      (`apps/fleet-service/internal/invite/provider.go:18-19,46`)
+- [ ] If the provider you touched takes a `context.Context` (2 of 19
+      `provider.go` files — `invite` and `mediavariant`; the other 17,
+      including `vehicle`, `fleet`, `user`, and `session`, have no
+      `context.Context` parameter on their provider methods at all, so there
+      is no context to attach and this rule does not apply to them), verify
+      it runs its query on `db.WithContext(ctx)`, not a bare `db` call:
+      `apps/fleet-service/internal/invite/provider.go:17-21` — "Every method
+      takes the caller's context as its first argument and runs its query on
+      db.WithContext(ctx). The *gorm.DB the provider holds is captured once
+      at startup; without WithContext every query would run on that bare
+      connection, so a client that disconnected mid-request would leave the
+      query running, and no query would carry a deadline or join the
+      request's trace."
 - [ ] Run `make ci` before opening a PR
 
 ---
