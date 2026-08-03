@@ -3,6 +3,13 @@ import { Slot } from '@radix-ui/react-slot';
 import { ChevronRight, MoreHorizontal } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
+/**
+ * DELIBERATE DEVIATION FROM UPSTREAM: capitalised aria-label.
+ *
+ * Upstream ships aria-label="breadcrumb" (lowercase), but the PRD specifies
+ * the navigation's accessible name as "Breadcrumb" (capital B) matching the
+ * markup convention.
+ */
 const Breadcrumb = React.forwardRef<HTMLElement, React.ComponentPropsWithoutRef<'nav'>>(
   ({ ...props }, ref) => <nav ref={ref} aria-label="Breadcrumb" {...props} />,
 );
