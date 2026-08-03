@@ -60,9 +60,12 @@ export interface PurgeConfirmDialogProps {
   isPending: boolean;
 }
 
+// Lowercase on purpose: these render mid-sentence, as "4 vehicles". That is the
+// opposite of BlastRadiusPanel's LABELS, where each one starts its own row.
 const COUNT_LABELS: Record<string, string> = {
   vehicles: 'vehicles',
   maintenance_records: 'maintenance records',
+  maintenance_record_documents: 'maintenance record documents',
   maintenance_schedules: 'maintenance schedules',
   fuel_logs: 'fuel logs',
   mileage_records: 'mileage records',
@@ -70,6 +73,7 @@ const COUNT_LABELS: Record<string, string> = {
   memberships: 'memberships',
   invites: 'invites',
   dashboards: 'dashboards',
+  dashboard_widgets: 'dashboard widgets',
   vehicle_media: 'vehicle media',
   fleets: 'fleets',
 };

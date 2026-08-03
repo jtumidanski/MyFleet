@@ -21,23 +21,34 @@ export interface BlastRadiusPanelProps {
   disabled?: boolean;
 }
 
-/** Domain keys in a fixed order, so the panel does not reshuffle between fetches. */
+/**
+ * Domain keys in a fixed order, so the panel does not reshuffle between fetches.
+ *
+ * Child before parent, matching the purge manifest's own ordering, so the list
+ * reads from the smallest thing destroyed up to the largest. Every key the
+ * manifest can return is named here — a key missing from this list still
+ * renders, but lands in the alphabetical tail rather than where it belongs.
+ */
 const ORDER = [
-  'vehicles',
+  'vehicle_media',
+  'maintenance_record_documents',
   'maintenance_records',
   'maintenance_schedules',
   'fuel_logs',
   'mileage_records',
   'activity_events',
-  'memberships',
-  'invites',
+  'vehicles',
+  'dashboard_widgets',
   'dashboards',
-  'vehicle_media',
+  'invites',
+  'memberships',
+  'fleets',
 ];
 
 const LABELS: Record<string, string> = {
   vehicles: 'Vehicles',
   maintenance_records: 'Maintenance records',
+  maintenance_record_documents: 'Maintenance record documents',
   maintenance_schedules: 'Maintenance schedules',
   fuel_logs: 'Fuel logs',
   mileage_records: 'Mileage records',
@@ -45,12 +56,24 @@ const LABELS: Record<string, string> = {
   memberships: 'Memberships',
   invites: 'Invites',
   dashboards: 'Dashboards',
+  dashboard_widgets: 'Dashboard widgets',
   vehicle_media: 'Vehicle media',
   fleets: 'Fleets',
 };
 
+/**
+ * A display label for a count key.
+ *
+ * The fallback sentence-cases rather than only swapping underscores for spaces.
+ * An unmapped key is meant to be a safety net — dropping it would understate the
+ * blast radius — but a net that renders "dashboard widgets" next to "Vehicles"
+ * looks like a bug in the list rather than a key nobody has labelled yet.
+ */
 function humanise(key: string): string {
-  return LABELS[key] ?? key.replace(/_/g, ' ');
+  const label = LABELS[key];
+  if (label) return label;
+  const words = key.replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 export function BlastRadiusPanel({
