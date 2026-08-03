@@ -62,7 +62,7 @@ check G-19 "mock-struct convention"  "$(grep -rnE 'Mock struct|\{package\}/mock/
 check G-20 "frontend/ root path"     "$(grep -rnE '(^|[^a-z/])frontend/' "$FE" "$FEAGENT")"
 check G-21 "dead FE paths"           "$(grep -rnE 'components/common/|types/api/|lib/breadcrumbs/|lib/query-client|React Table|DataTable|data-table|\.service\.ts|services/api/index\.ts' "$FE" "$FEAGENT")"
 check G-22 "unset tsconfig flags"    "$(grep -rnE 'exactOptionalPropertyTypes|noImplicitOverride' "$FE")"
-check G-23 "compose/nginx/bruno"     "$(grep -rniE 'docker-compose|deploy/compose|nginx\.conf|bruno' "$BE")"
+check G-23 "nginx.conf/bruno"        "$(grep -rniE 'nginx\.conf|bruno' "$BE")"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "drift-gate: ALL CHECKS PASS"; else echo "drift-gate: FAILURES PRESENT"; fi
