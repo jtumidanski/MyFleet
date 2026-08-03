@@ -43,5 +43,37 @@ export default tseslint.config(
     languageOptions: {
       globals: { ...globals.node },
     },
+    rules: {
+      // A bare negative call assertion runs BEFORE any promise-continuation
+      // dispatch, so it passes whether or not the guard it covers works.
+      // See docs/tasks/task-019-vacuous-negative-assertions/ and issue #22.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.object.property.name='not']" +
+            '[callee.property.name=/^toHaveBeenCalled/]',
+          message:
+            'Use expectNoCall(spy) from src/test/expectNoCall — a bare ' +
+            'not.toHaveBeenCalled() runs before promise-continuation dispatch ' +
+            'and can pass vacuously. See issue #22.',
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='toHaveBeenCalledTimes']" +
+            '[arguments.0.value=0]',
+          message:
+            'toHaveBeenCalledTimes(0) is not.toHaveBeenCalled() spelled ' +
+            'differently — use expectNoCall(spy). See issue #22.',
+        },
+      ],
+    },
+  },
+  {
+    // The helper necessarily contains the banned expression, and its own test
+    // must contain the bare form to demonstrate the contrast it exists to fix.
+    // Must come AFTER the block above, which also matches src/test/**.
+    files: ['src/test/expectNoCall.ts', 'src/test/expectNoCall.test.ts'],
+    rules: { 'no-restricted-syntax': 'off' },
   },
 );
