@@ -14,55 +14,93 @@ notice (vacuous). `n/a` = unconstructible (FR-TRIAGE-4); Stage 1 governs.
 
 Verdict legend: **falsifiable** / **vacuous** / **unprobeable**.
 
+## Summary
+
+All 40 inventoried sites have a recorded verdict for both stages.
+
+- **37 falsifiable.** Either Stage 1 is independently red (the assertion can
+  observe a promise-continuation dispatch directly), or Stage 1 is green
+  because the guard it depends on fires synchronously off the trigger itself,
+  in which case Stage 2 is still red (design combining-table row 2 —
+  "falsifiable only because the defeated guard fires synchronously").
+- **2 vacuous, and fixed.** Sites 10 and 11 (`useDashboardWidgets.test.ts`)
+  were green at *both* stages before migration: nothing between the trigger
+  and the assertion ever yields, and the real production guard-defeat trips
+  an earlier, unrelated assertion first rather than the target one
+  (footnote¹⁵). Migrated to `expectNoCall` and re-probed **red/red**.
+- **1 unprobeable.** Site 30 — see below; this is the single most important
+  finding in the whole record.
+- **2 exempted** (a subset of the 37 falsifiable sites, not a fourth
+  category). Sites 37 and 38 (`input.test.tsx`, `download.test.ts`) are left
+  as bare assertions, each covered by its own inline
+  `eslint-disable-next-line no-restricted-syntax` comment carrying the probe
+  evidence, per design OQ-4 — the guard-defeat's call is synchronous by
+  construction, and for site 38 the assertion's whole point is to prove the
+  revoke does *not* happen in the trigger's own tick.
+
+**Site 30 is the sharpest result of this exercise.** `useUpdateMemberRole`
+(`apps/web/src/lib/hooks/api/members.ts`) never calls `mintAccessToken` on
+any code path — confirmed by a repo-wide grep showing exactly one call site,
+inside `useRemoveMember`'s `onSuccess` (footnote¹⁶). There is no conditional
+whose deletion would make the spy fire from this function. **The assertion
+is therefore trivially true and cannot fail for any reason, flush or no
+flush — it is a vacuous test that no helper, this branch's or any other,
+can rescue.** Migrating it to `expectNoCall` makes it consistent with its
+siblings but does not make it meaningful.
+
+**Eight of the plan's own Stage-2 guards or inventory entries turned out to
+be wrong when probed, across seven sites.** This is not a criticism of the
+plan — it is the argument for FR-TRIAGE-2 (probe, don't inspect): reading the
+code predicted the wrong outcome in eight places, and only running the probe
+caught it.
+
+- Sites 3 and 34 were predicted unconstructible (FR-TRIAGE-4) and were not —
+  both had a constructible guard-defeat once one was searched for (footnotes
+  ³ and ¹⁸).
+- Sites 28 and 11 named a guard-defeat that is a structural no-op — the
+  prescribed edit changes nothing observable (footnotes ⁹ and ¹⁵).
+- Site 20 named the wrong file — the swallow this assertion depends on lives
+  one layer down, in `media.ts`, not in `PhotoGalleryDialog.tsx` (footnote¹²).
+- Site 15's prescribed guard-defeat doesn't reach the spy for this test's
+  data — the real guard is a structural `if (needsSuccessor)` check, not the
+  dialog-confirmation gate the brief named (footnote⁷).
+- Site 23's prescribed guard-defeat is confounded by an unrelated validation
+  failure (a never-selected category) that blocks submission on its own
+  (footnote¹⁴).
+- Site 34's inventory *title* separately pointed at a real test
+  ("keeps the dialog open with the typed values when the request fails")
+  that contains no negative call assertion at all; the actual site-34
+  assertion lives in a different, correctly-keyed `it.each` block ("closes on
+  %s without creating a vehicle") — this table's row reflects the correct
+  test.
+
+None of these changed a verdict for the worse: every mispredicted guard was
+run down to the real one, and every site still ended up with an honest,
+recorded Stage-2 result.
+
+**Wall time.** `make fe-test` measured **9.343s**, against the Task 1
+baseline of **11.25s** — nominally 17% faster. The NFR's 10% ceiling caps
+regression only, so this passes regardless of direction; but a 2-file,
+12-line test-only diff (the `expectNoCall`/`expectNoCallWith` migrations plus
+two exemption comments) has no mechanism to make a 745-test suite run
+faster. The swing is most plausibly machine variance or a warm filesystem
+cache between the two measurement runs, not an effect of this branch, and
+should be read with that caveat rather than as a genuine speedup.
+
 | # | File | Test title | Spy | Guard defeated (stage 2) | S1 | S2 | Verdict | Fix | Re-probe |
 |---|---|---|---|---|---|---|---|---|---|
 | 39 | `apps/web/src/pages/LoginPage.test.tsx` | cycles the theme without issuing a request | `fetchSpy` | (a) no-token early return in `updateThemePreference`; (b) signed-out page pointed at the mutation-bearing `ThemeToggle` (both required — FR-FIX-2) | red¹ (1 call) | red (3 calls to `/api/auth/me`) | falsifiable | migrated to `expectNoCall` | red |
 | 40 | `apps/web/src/lib/hooks/api/auth.test.ts` | makes no request and resolves when there is no token | `fetchMock` | (a) no-token early return in `updateThemePreference` | red¹ (1 call) | red (request lands; downstream `TypeError` on the mock's undefined response) | falsifiable | migrated to `expectNoCall` (uniformity, FR-HELPER-3 — was already falsifiable) | red |
 
-¹ Stage 1 for both sites was re-run under the **human ruling recorded in
-migration-context.md ("Stage-1 probe placement — HUMAN RULING")**, which
-supersedes the plan's original "insert immediately before the assertion"
-wording. That literal wording is degenerate — a microtask queued immediately
-before a synchronous `expect()` can never run before it, so it returns green
-for every site regardless of what precedes it, and the first pass through
-this task recorded exactly that false green for both rows above. The ruling
-instead places the probe **at the dispatch point**: immediately after the
-statement that triggers the call under test, and before any intervening
-`await`/flush. Re-run against each site's pre-migration source (`git show
-bd5c43c:<path>`) under that placement:
-
-- Site 39: probe inserted after the third `act(() => toggle().click())` and
-  before the pre-existing hand-rolled
-  `await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); })`
-  flush. Command: `npx vitest run src/pages/LoginPage.test.tsx`. Result: RED —
-  `expected "fetch" to not be called at all, but actually been called 1
-  times`, the one call being `["__probe__"]`. The pre-existing flush is real
-  and catches a probe queued at the real dispatch point, which is what this
-  site's #20 fix is supposed to do.
-- Site 40: probe inserted immediately before
-  `await expect(updateThemePreference('dark')).resolves.toBeNull();` (the
-  trigger — `updateThemePreference` is invoked directly, not through a
-  mutation). Command: `npx vitest run src/lib/hooks/api/auth.test.ts`. Result:
-  RED — same failure shape, one `__probe__` call observed; the `await` on the
-  subject call itself drains the queued microtask.
-
-Both rows are corrected from green to red accordingly, and the verdict
-changes from "falsifiable, fragile" (row 2 of the design's combining table)
-to plain **falsifiable** (row 1: red/red). Stage 2, the migration, and the
-post-migration re-probes are unaffected by this correction — they were
-already run with the probe immediately before `await expectNoCall(...)`,
-which happens to coincide with the ruled placement once the helper's internal
-flush sits between the probe and its own assertion.
-
-| 1 | `apps/web/src/components/features/vehicles/VehicleCard.test.tsx` | renders the placeholder at identical dimensions when no photo is set | `mediaService.getContentBlob` | `if (!mediaId)` early return in `VehiclePhotoThumbnail.tsx` (deleted) **and** `enabled: !!id` → `enabled: true` in `useMediaContentUrl` (`src/lib/hooks/api/media.ts`) — both required, same pair as site 2 | green (dispatch point coincides with the assertion — no yielding statement sits between `render()` and it) | red² (call recorded as `[undefined, "card"]`) | falsifiable, fragile (design combining-table row 2: green/red) | migrated to `expectNoCall`, `it` made `async` | red / red |
-| 2 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | shows the "No photo" placeholder when there is no media id, and fetches nothing | `mediaService.getContentBlob` | same pair as site 1 | green (same reasoning — no yield between `render()` and the assertion) | red² (call recorded as `[undefined, "card"]`) | falsifiable, fragile (design combining-table row 2: green/red) | migrated to `expectNoCall`, `it` made `async` | red / red |
-| 3 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | says "Photo unavailable", not "No photo", when a known photo cannot be fetched | `mediaService.getContentBlob` | `networkMode: 'always'` added to the `useQuery` in `useMediaContentUrl` — see finding³ below | red (probe inserted after `renderWithProviders(...)`, before the pre-existing `await screen.findByRole(...)`; observed 1 call) | red³ (call recorded as `["m1", "card"]`) | falsifiable — **not** FR-TRIAGE-4 (see finding³) | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 1 | `apps/web/src/components/features/vehicles/VehicleCard.test.tsx` | renders the placeholder at identical dimensions when no photo is set | `mediaService.getContentBlob` | `if (!mediaId)` early return in `VehiclePhotoThumbnail.tsx` (deleted) **and** `enabled: !!id` → `enabled: true` in `useMediaContentUrl` (`src/lib/hooks/api/media.ts`) — both required, same pair as site 2 | green (dispatch point coincides with the assertion — no yielding statement sits between `render()` and it) | red² (call recorded as `[undefined, "card"]`) | falsifiable | migrated to `expectNoCall`, `it` made `async` | red / red |
+| 2 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | shows the "No photo" placeholder when there is no media id, and fetches nothing | `mediaService.getContentBlob` | same pair as site 1 | green (same reasoning — no yield between `render()` and the assertion) | red² (call recorded as `[undefined, "card"]`) | falsifiable | migrated to `expectNoCall`, `it` made `async` | red / red |
+| 3 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | says "Photo unavailable", not "No photo", when a known photo cannot be fetched | `mediaService.getContentBlob` | `networkMode: 'always'` added to the `useQuery` in `useMediaContentUrl` — see finding³ below | red (probe inserted after `renderWithProviders(...)`, before the pre-existing `await screen.findByRole(...)`; observed 1 call) | red³ (call recorded as `["m1", "card"]`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 24 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | fires no toast when a thumbnail fails to load | `toast.error` | `toast.error('probe')` added to the `if (isError \|\| !url)` branch (with the `sonner` import) | red (probe after `renderWithProviders(...)`, before the pre-existing `await screen.findByRole(...)`) | red (2 calls — see note⁴) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 25 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | fires no toast when a thumbnail fails to load | `toast` | `toast('probe')` added to the same branch⁴ | red (same placement as site 24) | red (2 calls) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 26 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | fires no toast when a thumbnail fails to load | `toast.warning` | `toast.warning('probe')` added to the same branch⁴ | red (same placement as site 24) | red (2 calls) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 27 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | fires no toast when a thumbnail fails to load | `toast.info` | `toast.info('probe')` added to the same branch⁴ | red (same placement as site 24) | red (2 calls) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 12 | `apps/web/src/components/features/settings/MemberList.test.tsx` | does not fire the DELETE until the dialog is confirmed | `memberService.removeMember` | Remove row button changed to call `void confirmRemove(userId)` directly, bypassing the `AlertDialog` | red (probe after the first click, before the pre-existing `expect(await screen.findByText(...))`; 1 call) | red⁵ (call recorded as `["f1", "other"]`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
-| 13 | `apps/web/src/components/features/settings/MemberList.test.tsx` | fires nothing when the dialog is cancelled | `memberService.removeMember` | `closeDialog` changed to also call `void confirmRemove(...)` for the pending 'remove' row (re-entrancy note⁶) | red (probe after the cancel click, before the pre-existing `await waitFor(...)`; 1 call) | red (call recorded as `["f1", "other"]`, target assertion hit directly, no earlier-line interference) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 13 | `apps/web/src/components/features/settings/MemberList.test.tsx` | fires nothing when the dialog is cancelled | `memberService.removeMember` | `closeDialog` changed to also call `void confirmRemove(...)` for the pending 'remove' row (re-entrancy note⁶) | red (probe after the cancel click, before the pre-existing `await waitFor(...)`; 1 call) | red⁶ (call recorded as `["f1", "other"]`, target assertion hit directly, no earlier-line interference) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 14 | `apps/web/src/components/features/settings/MemberList.test.tsx` | is offered to owners on non-owner rows and confirms before PATCHing | `memberService.updateRole` | Make-owner row button changed to call `void confirmPromote(userId)` directly, bypassing the dialog | red (probe after the first click, before the pre-existing `expect(await screen.findByText(...))`; 1 call) | red⁵ (call recorded as `["f1", "other", "owner"]`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 15 | `apps/web/src/components/features/settings/MemberList.test.tsx` | offers a plain leave confirmation to a member | `memberService.updateRole` | see finding⁷ — brief's prescribed dialog-bypass edit does not reach this spy; the guard actually defeated is the `if (needsSuccessor)` check in `confirmLeave` | red (probe after the in-dialog Leave click, before the pre-existing `await waitFor(...)`; 1 call) | red⁷ (call recorded as `["f1", "", "owner"]`, after defeating the corrected guard) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 16 | `apps/web/src/components/features/settings/MemberList.test.tsx` | does not remove the leaver when the promote fails | `memberService.removeMember` | `updateRole.mutateAsync(...)` in `confirmLeave` wrapped in `.catch(() => undefined)`, so the rejection no longer stops the subsequent `removeMember.mutateAsync` | red (probe after the "Transfer & leave" click, before the pre-existing `await waitFor(...)`; 1 call) | red (call recorded as `["f1", "me"]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
@@ -447,7 +485,10 @@ footnote 14's site 23.
 defeat, but `useUpdateMemberRole` (`members.ts`) never calls
 `mintAccessToken` under any code path — a repo-wide
 `grep -rn "mintAccessToken" apps/web/src` (excluding tests) shows exactly
-one call site, inside `useRemoveMember`'s `onSuccess`. There is no
+one call site, inside `useRemoveMember`'s `onSuccess`. **Stated plainly:
+`useUpdateMemberRole` never calls `mintAccessToken` on any code path, so
+this assertion is trivially true and cannot fail for any reason, flush or no
+flush — it is a vacuous test that no helper can rescue.** There is no
 conditional to delete that would make the spy fire from this function; this
 is FR-TRIAGE-4 (unconstructible), not a guard that merely doesn't bite in
 the prescribed location (contrast footnote 12's site 20, where the real
@@ -585,6 +626,43 @@ never fires while `vi.useFakeTimers()` is active for the suite, so the
 immediately after capturing this output; it is not part of the committed
 diff.
 
+¹ *(Anchors the `red¹` S1 cells on sites 39 and 40 — the first two rows of
+the table above, migrated in Task 3, before this footnote's correction was
+made.)* Stage 1 for both sites was re-run under the **human ruling recorded
+in migration-context.md ("Stage-1 probe placement — HUMAN RULING")**, which
+supersedes the plan's original "insert immediately before the assertion"
+wording. That literal wording is degenerate — a microtask queued immediately
+before a synchronous `expect()` can never run before it, so it returns green
+for every site regardless of what precedes it, and the first pass through
+this task recorded exactly that false green for both rows above. The ruling
+instead places the probe **at the dispatch point**: immediately after the
+statement that triggers the call under test, and before any intervening
+`await`/flush. Re-run against each site's pre-migration source (`git show
+bd5c43c:<path>`) under that placement:
+
+- Site 39: probe inserted after the third `act(() => toggle().click())` and
+  before the pre-existing hand-rolled
+  `await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); })`
+  flush. Command: `npx vitest run src/pages/LoginPage.test.tsx`. Result: RED —
+  `expected "fetch" to not be called at all, but actually been called 1
+  times`, the one call being `["__probe__"]`. The pre-existing flush is real
+  and catches a probe queued at the real dispatch point, which is what this
+  site's #20 fix is supposed to do.
+- Site 40: probe inserted immediately before
+  `await expect(updateThemePreference('dark')).resolves.toBeNull();` (the
+  trigger — `updateThemePreference` is invoked directly, not through a
+  mutation). Command: `npx vitest run src/lib/hooks/api/auth.test.ts`. Result:
+  RED — same failure shape, one `__probe__` call observed; the `await` on the
+  subject call itself drains the queued microtask.
+
+Both rows are corrected from green to red accordingly, and the verdict
+changes from "falsifiable, fragile" (row 2 of the design's combining table)
+to plain **falsifiable** (row 1: red/red). Stage 2, the migration, and the
+post-migration re-probes are unaffected by this correction — they were
+already run with the probe immediately before `await expectNoCall(...)`,
+which happens to coincide with the ruled placement once the helper's internal
+flush sits between the probe and its own assertion.
+
 ## FR-TRIAGE-4 sites (unprobeable)
 
 Task 4 attempted its one predicted FR-TRIAGE-4 candidate (site 3,
@@ -611,7 +689,107 @@ disposition.
 
 ## Lint rule demonstration (FR-LINT-4)
 
-_(recorded in Task 11)_
+Both demonstrations use `apps/web/src/lib/hooks/api/users.test.ts`'s
+`does not fire a request when there are no ids` test as a scratch site: a
+line was added, `make lint-check` was run and its output captured, then the
+file was reverted with `git checkout --` before the next step. `git status
+--short apps/web/src` was confirmed empty after each revert and again once
+both demonstrations were complete.
+
+### Demonstration 1 — the bare form (FR-LINT-4)
+
+Added:
+
+```ts
+expect(userService.listByIds).not.toHaveBeenCalled();
+```
+
+Command and output:
+
+```
+$ make lint-check
+...
+> lint
+> eslint src --max-warnings 0
+
+
+/home/tumidanski/source/MyFleet/.worktrees/task-019-vacuous-negative-assertions/apps/web/src/lib/hooks/api/users.test.ts
+  81:5  error  Use expectNoCall(spy) from src/test/expectNoCall — a bare not.toHaveBeenCalled() runs before promise-continuation dispatch and can pass vacuously. See issue #22  no-restricted-syntax
+
+✖ 1 problem (1 error, 0 warnings)
+
+npm error Lifecycle script `lint` failed with error:
+npm error code 1
+npm error path .../apps/web
+npm error workspace @myfleet/web
+npm error location .../apps/web
+npm error command failed
+npm error command sh -c eslint src --max-warnings 0
+
+lint.sh: WEB LINT FAIL
+
+lint.sh: FAIL — 1 failing target(s):
+lint.sh:   web:eslint
+lint.sh: run 'tools/lint.sh' (fix mode) locally, then commit the result.
+make: *** [Makefile:34: lint-check] Error 1
+```
+
+`make lint-check` failed, naming `expectNoCall` and issue #22, as expected.
+Reverted with `git checkout -- apps/web/src/lib/hooks/api/users.test.ts`.
+
+### Demonstration 2 — `toHaveBeenCalledTimes(0)` (FR-LINT-2)
+
+Added:
+
+```ts
+expect(userService.listByIds).toHaveBeenCalledTimes(0);
+```
+
+Command and output:
+
+```
+$ make lint-check
+...
+> lint
+> eslint src --max-warnings 0
+
+
+/home/tumidanski/source/MyFleet/.worktrees/task-019-vacuous-negative-assertions/apps/web/src/lib/hooks/api/users.test.ts
+  81:5  error  toHaveBeenCalledTimes(0) is not.toHaveBeenCalled() spelled differently — use expectNoCall(spy). See issue #22  no-restricted-syntax
+
+✖ 1 problem (1 error, 0 warnings)
+
+npm error Lifecycle script `lint` failed with error:
+npm error code 1
+npm error path .../apps/web
+npm error workspace @myfleet/web
+npm error location .../apps/web
+npm error command failed
+npm error command sh -c eslint src --max-warnings 0
+
+lint.sh: WEB LINT FAIL
+
+lint.sh: FAIL — 1 failing target(s):
+lint.sh:   web:eslint
+lint.sh: run 'tools/lint.sh' (fix mode) locally, then commit the result.
+make: *** [Makefile:34: lint-check] Error 1
+```
+
+Failed with the second, distinct message, as expected. Reverted.
+
+### Confirming the positive spelling is not flagged
+
+Replaced with `expect(userService.listByIds).toHaveBeenCalledTimes(1);` and
+ran the file-scoped check directly:
+
+```
+$ npx eslint src/lib/hooks/api/users.test.ts
+$ echo $?
+0
+```
+
+No output, exit code 0 — the positive spelling is not matched by either
+selector. Reverted; `git status --short apps/web/src` confirmed empty.
 
 ## Residual gaps
 
