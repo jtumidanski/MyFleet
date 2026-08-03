@@ -1,0 +1,586 @@
+FAIL  G-01     api2go  (7)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:27:| Nested Data/Type/Attributes in requests | Use flat structures, let api2go handle envelope |
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:4:description: Handler and transport conventions for JSON:API-compliant endpoints using server.RegisterHandler and api2go integration.
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:183:// GetName uses value receiver - required by api2go interface
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:207:- `GetName()` **MUST** use value receiver `(r RestModel)` - required by api2go interface
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:224:// GetName uses value receiver - required by api2go interface
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:349:// GetName uses value receiver - required by api2go interface
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:125:**Pattern:** JSON:API-compliant DTOs with automatic marshaling/unmarshaling via api2go library.
+FAIL  G-02     ServerInformation  (7)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:130:server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(rm)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:142:server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(rm)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:26:func InitializeRoutes(si jsonapi.ServerInformation) func(db *gorm.DB) server.RouteInitializer {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:109:				server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:154:			server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:164:- `c.ServerInformation()` - JSON:API server configuration
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:94:- Define `InitializeRoutes(si jsonapi.ServerInformation) func(db *gorm.DB) server.RouteInitializer` for route registration
+FAIL  G-03     MarshalResponse  (7)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:130:server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(rm)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:142:server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(rm)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:14:- Use `server.MarshalResponse` for success responses
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:109:				server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:154:			server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:100:- Use `server.MarshalResponse[T]` for successful responses
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:219:- ✅ Use `server.MarshalResponse[T]` for success responses
+FAIL  G-04     model.* composition lib  (13)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:24:| **Eager provider execution** (query immediately, wrap in `FixedProvider`) | **Use `database.Query`/`database.SliceQuery` for lazy (deferred) evaluation — enables composition with `model.Map` and `model.ParallelMap`** |
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:13:- Return `model.Provider[T]` for lazy evaluation.
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:14:- Compose via `model.Map`, `model.SliceMap`, and `model.ParallelMap`.
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:15:- Use `model.ErrorProvider[T]` for error propagation.
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:20:    return func(db *gorm.DB) model.Provider[Entity] {
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:24:            return model.ErrorProvider[Entity](err)
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:26:        return model.FixedProvider(result)
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:31:func (p *ProcessorImpl) ByIdProvider(id uint32) model.Provider[Model] {
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:32:    return model.Map(Make)(getById(id)(p.db.WithContext(p.ctx)))
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:82:**Pattern:** Provider functions are curried - they accept query parameters and return a function that takes `*gorm.DB` and returns `model.Provider[T]`. The `*gorm.DB` should have context set via `db.WithContext(ctx)`. This enables lazy evaluation and composition with `model.Map`, `model.SliceMap`, and `model.ParallelMap`.
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:227:model.Map(Make)(entityProvider)(model.ParallelMap())
+        .claude/skills/backend-dev-guidelines/resources/patterns-functional.md:48:func Create(db *gorm.DB, log logrus.FieldLogger) func(input CreateParams) model.Provider[Entity]
+        .claude/skills/backend-dev-guidelines/resources/patterns-functional.md:58:  (model.ParallelMap())()
+FAIL  G-05     EntityProvider  (5)
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:19:func getById(id uint32) database.EntityProvider[Entity] {
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:68:- Define query functions returning `database.EntityProvider[T]` or `database.EntityProvider[[]T]`
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:76:func getById(id uint32) database.EntityProvider[entity]
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:77:func getByName(name string) database.EntityProvider[entity]
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:78:func getAll() database.EntityProvider[[]entity]
+FAIL  G-06     RouteInitializer  (6)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:26:func InitializeRoutes(si jsonapi.ServerInformation) func(db *gorm.DB) server.RouteInitializer {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:27:	return func(db *gorm.DB) server.RouteInitializer {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:45:- Return a curried function `func(db *gorm.DB) server.RouteInitializer` for dependency injection
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:94:- Define `InitializeRoutes(si jsonapi.ServerInformation) func(db *gorm.DB) server.RouteInitializer` for route registration
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:215:- ✅ Return `func(db *gorm.DB) server.RouteInitializer` from `InitializeRoutes`
+        .claude/skills/backend-dev-guidelines/resources/architecture-overview.md:55:  AddRouteInitializer(domain.InitializeRoutes(db)(GetServer())).
+FAIL  G-07     RegisterHandler(  (7)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:93:router.HandleFunc("/items", server.RegisterHandler(l)(si)("create-item", createHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:30:			router.HandleFunc("/users", server.RegisterHandler(l)(si)("get-users", listUsersHandler(db))).Methods(http.MethodGet)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:32:			router.HandleFunc("/users/{id}", server.RegisterHandler(l)(si)("get-user", getUserHandler(db))).Methods(http.MethodGet)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:34:			router.HandleFunc("/users/{id}", server.RegisterHandler(l)(si)("delete-user", deleteUserHandler(db))).Methods(http.MethodDelete)
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:95:- Use `server.RegisterHandler(l)(si)` for GET/DELETE handlers (no request body)
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:216:- ✅ Use `server.RegisterHandler(l)(si)("handler-name", handler)` for GET/DELETE
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:276:    server.RegisterHandler(l)(si)("get-users", listUsersHandler(db))).Methods(http.MethodGet)
+FAIL  G-08     services/<svc>-service  (4)
+        .claude/agents/backend-guidelines-reviewer.md:7:  Context: A feature touched services/auth-service.
+        .claude/agents/backend-guidelines-reviewer.md:9:  assistant: "Dispatching backend-guidelines-reviewer to run the DOM checklist on services/auth-service."
+        .claude/agents/backend-guidelines-reviewer.md:24:- A service path (e.g., `services/auth-service`) — audit the entire service.
+        .claude/agents/backend-guidelines-reviewer.md:39:1. Derive `service-name` as the last path segment of the service path (e.g., `services/auth-service` → `auth-service`).
+FAIL  G-09     Jest (not jest-dom)  (25)
+        .claude/skills/frontend-dev-guidelines/SKILL.md:24:- Testing with Jest and React Testing Library
+        .claude/skills/frontend-dev-guidelines/SKILL.md:38:- [ ] **Tests** written with Jest + React Testing Library
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:5:MyFleet UI uses **Jest 30** with **React Testing Library** and **jsdom** environment. Tests live alongside source files in `__tests__/` directories or as `*.test.{ts,tsx}` files.
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:10:// jest.config.js
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:92:    const mockRetry = jest.fn();
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:115:jest.mock('@/services/api', () => ({
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:117:    getRegionOptions: jest.fn(),
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:120:    create: jest.fn(),
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:124:jest.mock('sonner', () => ({
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:125:  toast: { success: jest.fn(), error: jest.fn() },
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:135:    jest.clearAllMocks();
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:140:    render(<CreateBucketDialog open onOpenChange={jest.fn()} />);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:148:    render(<CreateBucketDialog open onOpenChange={jest.fn()} />);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:155:    render(<CreateBucketDialog open onOpenChange={jest.fn()} />);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:163:    render(<CreateBucketDialog open={false} onOpenChange={jest.fn()} />);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:173:jest.mock('react-router-dom', () => ({
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:174:  ...jest.requireActual('react-router-dom'),
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:175:  useNavigate: () => jest.fn(),
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:183:jest.mock('sonner', () => ({
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:184:  toast: { success: jest.fn(), error: jest.fn(), warning: jest.fn() },
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:190:jest.mock('@/services/api', () => ({
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:192:    getAllBans: jest.fn(),
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:193:    createBan: jest.fn(),
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:194:    deleteBan: jest.fn(),
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:220:5. **Clear mocks between tests** — `jest.clearAllMocks()` in `beforeEach`
+FAIL  G-10     prior-project vocabulary  (269)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:149:Even lightweight packages (e.g., `bucketarchive`, `policyrevoke`, `replicationtrigger`) that record action events **must follow layer separation**:
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:167:func handleGetBucketRequest(db *gorm.DB) func(...) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:171:            b, err := GetByName(d.Logger(), db)(bucketName)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:186:func handleGetBucketRequest(db *gorm.DB) func(...) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:190:            b, err := NewProcessor(d.Logger(), d.Context(), db).GetBucket(bucketName)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:216:In rare cases where circular package dependencies prevent proper layering (e.g., `bucket` imports `policy`, `policy` needs `bucket`), read-only view handlers MAY use providers directly or raw DB queries for cross-domain orchestration.
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:226:// policy/resource.go - Read-only view handler
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:227:func handleGetPoliciesRequest(db *gorm.DB) func(...) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:229:        // ⚠️ EXCEPTION: Raw DB query to avoid circular dependency with bucket package
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:230:        // Documented reason: bucket package imports policy, can't import bucket here
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:231:        var bucketId uuid.UUID
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:232:        db.Table("buckets").Select("id").
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:233:            Where("name = ?", bucketName).
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:234:            Scan(&bucketId)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:236:        // Then use policy provider
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:237:        policies, _ := policy.GetByBucketId(...)(bucketId)
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:142:go test ./bucket/... -v -count=1
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:191:*ProcessorMock does not implement Processor (missing method CreateBucket)
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:197:method CreateBucket has wrong signature
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:37:			router.HandleFunc("/users/{id}/relationships/policy", server.RegisterInputHandler[AssociatePolicyRequest](l)(si)("associate-policy", associatePolicyHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:178:	PolicyId    *string   `json:"policy_id,omitempty"`
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:220:	PolicyId    *uuid.UUID `json:"policy_id,omitempty"`
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:264:	var policyId *string
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:265:	if m.PolicyId() != nil {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:266:		pid := m.PolicyId().String()
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:267:		policyId = &pid
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:277:		PolicyId:    policyId,
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:342:For relationship endpoints (e.g., `/users/{id}/relationships/policy`):
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:345:type AssociatePolicyRequest struct {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:350:func (r AssociatePolicyRequest) GetName() string {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:351:	return "policies"  // Related resource type
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:355:func (r AssociatePolicyRequest) GetID() string {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:361:func (r *AssociatePolicyRequest) SetID(idStr string) error {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:373:- `GetName()` returns the related resource type (e.g., "policies")
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:41:// Assuming "bucketCount" condition exists without checking
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:43:    {Type: "bucketCount", Operator: ">=", Value: "1"},
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:50:2. Search for "bucketCount" in ConditionType constants
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:51:3. If not found: "The condition type 'bucketCount' doesn't exist in validation/model.go.
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:60:    Params: map[string]string{"bucketId": "abc", "enabled": "true"},
+        .claude/skills/backend-dev-guidelines/resources/architecture-overview.md:34:Some services have lightweight sub-domain packages that record action events (e.g., `bucketarchive`, `policyrevoke`, `replicationtrigger`). These packages **still must follow layer separation**:
+        .claude/skills/backend-dev-guidelines/resources/architecture-overview.md:44:When a handler needs to coordinate across multiple domains (e.g., creating a bucket also creates a default policy):
+        .claude/skills/backend-dev-guidelines/resources/architecture-overview.md:46:- **Move the orchestration to the processor layer.** The bucket processor should call the policy processor — not the handler.
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:26:const data = await api.get('/api/buckets');
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:29:import { bucketsService } from "@/services/api";
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:30:const data = await bucketsService.getAll();
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:50:const handleData = (data: Bucket) => { ... };
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:54:  if (isBucket(data)) { /* typed access */ }
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:109:const updatedBuckets = buckets;
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:110:updatedBuckets.push(newBucket);
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:111:setBuckets(updatedBuckets);
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:114:setBuckets([...buckets, newBucket]);
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:117:setBucket({ ...bucket, attributes: { ...bucket.attributes, ...updates } });
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:125:  bucketsService.getAll().then(setBuckets);
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:130:  bucketsService.getAll()
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:131:    .then(data => { setBuckets(data); setError(null); })
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:133:      const errorInfo = createErrorFromUnknown(err, "Failed to fetch buckets");
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:144:export default function BucketList() { ... }
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:147:export function BucketList() { ... }
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:10:│   ├── buckets/       # BucketCard, CreateBucketDialog, BucketStatusBadge
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:11:│   ├── policies/      # PolicyCard, CreatePolicyDialog
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:61:// components/features/bans/CreateBanDialog.tsx
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:66:  prefill?: { banType?: BanType; value?: string };
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:132:const columns: ColumnDef<Ban>[] = [
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:138:    accessorKey: "attributes.banType",
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:140:    cell: ({ row }) => <BanTypeBadge type={row.original.attributes.banType} />,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:162:  data={bans}
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:166:    { icon: <Plus />, label: "Create Ban", onClick: () => setCreateDialogOpen(true) },
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:189:const [selectedBan, setSelectedBan] = useState<Ban | null>(null);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:192:const handleDeleteClick = (ban: Ban) => {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:193:  setSelectedBan(ban);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:201:  ban={selectedBan}
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:212:function BucketPageSkeleton() {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:226:if (loading) return <BucketPageSkeleton />;
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:249:export function BanStatusBadge({ ban }: { ban: Ban }) {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:250:  const active = isBanActive(ban);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:261:For expandable content areas (e.g., bucket sections):
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:280:- **Button labels**: "Create Bucket", "Save Changes", "Try Again"
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:281:- **Dialog titles**: "Create Bucket", "Delete Policy"
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:287:<Button>Create Bucket</Button>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:288:<DialogTitle>Edit Policy</DialogTitle>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:292:<Button>Create bucket</Button>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:293:<DialogTitle>Edit policy</DialogTitle>
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:27:│   └── buckets/
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:29:│           └── CreateBucketDialog.test.tsx
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:40:        └── useBucketStats.test.ts
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:109:// components/features/buckets/__tests__/CreateBucketDialog.test.tsx
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:112:import { CreateBucketDialog } from '../CreateBucketDialog';
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:119:  bucketsService: {
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:128:describe('CreateBucketDialog', () => {
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:140:    render(<CreateBucketDialog open onOpenChange={jest.fn()} />);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:148:    render(<CreateBucketDialog open onOpenChange={jest.fn()} />);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:155:    render(<CreateBucketDialog open onOpenChange={jest.fn()} />);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:157:    const input = screen.getByPlaceholderText(/enter bucket name/i);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:158:    await userEvent.type(input, 'my-bucket');
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:159:    expect(input).toHaveValue('my-bucket');
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:163:    render(<CreateBucketDialog open={false} onOpenChange={jest.fn()} />);
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:164:    expect(screen.queryByText('Create New Bucket')).not.toBeInTheDocument();
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:191:  bansService: {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:14:// services/api/bans.service.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:15:class BansService extends BaseService {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:16:  protected basePath = '/api/bans';
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:23:        errors.push({ field: 'value', message: 'Ban value is required' });
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:36:          banType: Number(data.attributes.banType),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:45:  async getAllBans(options?: QueryOptions): Promise<Ban[]> {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:46:    const bans = await api.getList<Ban>(this.basePath, options);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:47:    return bans.map(item => this.transformResponse(item));
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:51:  private isBan(data: unknown): data is Ban {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:57:export const bansService = new BansService();
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:65:// services/api/buckets.service.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:66:class BucketsService {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:67:  private basePath = '/api/buckets';
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:69:  async getAll(options?: ServiceOptions): Promise<Bucket[]> {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:70:    return api.getList<Bucket>(this.basePath, options);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:73:  async getById(bucketId: string, options?: ServiceOptions): Promise<Bucket> {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:74:    return api.getOne<Bucket>(`${this.basePath}/${bucketId}`, options);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:77:  async update(bucketId: string, data: UpdateBucketData): Promise<void> {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:78:    await api.patch(`${this.basePath}/${bucketId}`, {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:80:        type: "buckets",
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:81:        id: bucketId,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:88:export const bucketsService = new BucketsService();
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:127:return api.post<ApiResponse<Bucket>>(`/buckets/${id}/archive`, {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:128:  data: { type: "buckets", id, attributes: {} },
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:132:Match the `type` to the backend `XxxRequest`'s `GetName()` value (which is sometimes the parent resource type like `"buckets"` and sometimes a dedicated action type like `"replication-triggers"` — check the corresponding service's `rest.go`).
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:141:async updateBucket(bucket: BucketBasic, updates: Partial<BucketBasicAttributes>): Promise<BucketBasic> {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:144:      id: bucket.id,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:145:      type: 'buckets',
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:146:      attributes: { ...bucket.attributes, ...updates },
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:149:  await this.patch<void, typeof input>(bucket.id, input);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:150:  return { ...bucket, attributes: { ...bucket.attributes, ...updates } };
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:162:export { bansService } from './bans.service';
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:163:export { bucketsService } from './buckets.service';
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:164:export { policiesService } from './policies.service';
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:168:export type { Ban, BanAttributes, CreateBanRequest } from './bans.service';
+        .claude/skills/frontend-dev-guidelines/resources/patterns-api-client.md:80:  api.get('/api/buckets'),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-api-client.md:81:  api.get('/api/buckets'),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-api-client.md:82:  api.get('/api/buckets'),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:12:// lib/schemas/bucket.schema.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:15:export const createBucketSchema = z.object({
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:18:    .min(1, 'Bucket name is required')
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:19:    .max(100, 'Bucket name must be 100 characters or less'),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:30:export type CreateBucketFormData = z.infer<typeof createBucketSchema>;
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:33:export const createBucketDefaults: CreateBucketFormData = {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:45:  banType: z.nativeEnum(BanType),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:50:  // IP validation for IP type bans
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:51:  if (data.banType === BanType.IP && !ipRegex.test(data.value)) {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:59:  // Expiration required for non-permanent bans
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:63:  message: "Expiration date is required for non-permanent bans",
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:71:// lib/schemas/policy.schema.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:72:export const readPolicySchema = z.object({
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:73:  type: z.literal('read-policy'),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:77:export const writePolicySchema = z.object({
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:78:  type: z.literal('write-policy'),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:83:export const policySchema = z.discriminatedUnion('type', [
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:84:  readPolicySchema,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:85:  writePolicySchema,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:86:  adminPolicySchema,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:119:      banType: BanType.IP,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:129:      await bansService.createBan(mapToRequest(values));
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:130:      toast.success("Ban created successfully");
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:135:      toast.error("Failed to create ban: " + (error instanceof Error ? error.message : "Unknown error"));
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:148:              name="banType"
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:151:                  <FormLabel>Ban Type</FormLabel>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:158:                        <SelectValue placeholder="Select ban type" />
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:162:                      {Object.entries(BanTypeLabels).map(([value, label]) => (
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:182:                  <FormDescription>The target to ban</FormDescription>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:195:                    <FormLabel>Permanent Ban</FormLabel>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:196:                    <FormDescription>This ban will never expire</FormDescription>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:228:                Create Ban
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:242:const { register, handleSubmit, setValue, watch, reset, formState: { errors, isSubmitting } } = useForm<CreateBucketFormData>({
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:243:  resolver: zodResolver(createBucketSchema),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:244:  defaultValues: createBucketDefaults,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:295:if (error instanceof BucketNotFoundError) {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:296:  toast.error("Bucket no longer exists.");
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:297:} else if (error instanceof PolicyCreationError) {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:298:  toast.error(`Created but policy failed. ID: ${error.bucketId}`);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:12:// lib/hooks/api/useBuckets.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:13:export const bucketKeys = {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:14:  all: ['buckets'] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:15:  lists: () => [...bucketKeys.all, 'list'] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:17:    [...bucketKeys.lists(), options] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:18:  details: () => [...bucketKeys.all, 'detail'] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:20:    [...bucketKeys.details(), id] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:27:export const policyKeys = {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:28:  all: ['policies'] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:29:  lists: () => [...policyKeys.all, 'list'] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:30:  list: (options?: QueryOptions) => [...policyKeys.lists(), options] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:31:  details: () => [...policyKeys.all, 'detail'] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:32:  detail: (id: string) => [...policyKeys.details(), id] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:34:  byBucket: (bucketId: string) => [...policyKeys.all, 'byBucket', bucketId] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:35:  search: () => [...policyKeys.all, 'search'] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:36:  validation: () => [...policyKeys.all, 'validation'] as const,
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:47:export function useBuckets(options?: QueryOptions) {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:49:    queryKey: bucketKeys.list(options),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:50:    queryFn: () => bucketsService.getAll(options),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:56:export function useBucketById(id: string) {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:58:    queryKey: bucketKeys.detail(id),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:59:    queryFn: () => bucketsService.getById(id),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:68:export function useCreateBucket() {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:72:    mutationFn: (data: CreateBucketRequest) =>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:73:      bucketsService.create(data),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:76:      queryClient.invalidateQueries({ queryKey: bucketKeys.lists() });
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:89:    mutationFn: ({ bucketId, objectId }: { bucketId: string; objectId: string }) =>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:90:      objectsService.deleteObject(bucketId, objectId),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:92:    onMutate: async ({ bucketId, objectId }) => {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:95:        queryKey: objectKeys.list(bucketId),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:100:        objectKeys.list(bucketId)
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:105:        queryClient.setQueryData(objectKeys.list(bucketId), {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:118:          objectKeys.list(variables.bucketId),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:124:    onSettled: (data, error, { bucketId }) => {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:126:        queryKey: objectKeys.list(bucketId),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:138:export function useInvalidateBuckets() {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:143:      queryClient.invalidateQueries({ queryKey: bucketKeys.all }),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:145:      queryClient.invalidateQueries({ queryKey: bucketKeys.lists() }),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:146:    invalidateBucket: (id: string) =>
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:147:      queryClient.invalidateQueries({ queryKey: bucketKeys.detail(id) }),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:149:      bucketsService.clearServiceCache();
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:150:      queryClient.invalidateQueries({ queryKey: bucketKeys.all });
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:159:export function usePrefetchPolicies() {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:165:        queryKey: policyKeys.list(options),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:166:        queryFn: () => policiesService.getAll(options),
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:178:| Medium frequency | 1–2min | 5min | Bucket stats, search results |
+        .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md:179:| Low frequency | 3–5min | 10min | Policies, users, configuration |
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:12:// types/models/bucket.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:13:export interface Bucket {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:15:  attributes: BucketAttributes;
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:18:export interface BucketAttributes {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:26:  policyId?: string;
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:35:- Optional `relationships` for related resources (e.g., Bucket → Policies)
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:42:// types/models/ban.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:43:export enum BanType {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:49:export const BanTypeLabels: Record<BanType, string> = {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:50:  [BanType.IP]: 'IP Address',
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:51:  [BanType.HWID]: 'Hardware ID',
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:52:  [BanType.Account]: 'Account',
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:55:export enum BanReasonCode {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:64:export const BanReasonCodeLabels: Record<BanReasonCode, string> = {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:65:  [BanReasonCode.Unspecified]: 'Unspecified',
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:66:  [BanReasonCode.Spamming]: 'Spamming',
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:76:// types/models/ban.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:77:export function isBanExpired(ban: Ban): boolean {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:78:  if (ban.attributes.permanent) return false;
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:79:  return new Date(ban.attributes.expiresAt) <= new Date();
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:82:export function isBanActive(ban: Ban): boolean {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:83:  return !isBanExpired(ban);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:86:export function formatBanExpiration(ban: Ban): string {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:87:  if (ban.attributes.permanent) return "Permanent";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:88:  return new Date(ban.attributes.expiresAt).toLocaleString();
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:173:private isBan(data: unknown): data is Ban {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:179:    typeof (data as Ban).attributes === 'object' &&
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:180:    'banType' in (data as Ban).attributes
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:190:export interface UpdateBucketData {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:195:  banType: BanType;
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:198:  reasonCode: BanReasonCode;
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:211:import { type Ban, type CreateBanRequest } from "@/services/api";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:214:import { type Ban } from "@/types/models/ban";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:13:├── BucketsPage.tsx          # Bucket list
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:14:├── PoliciesPage.tsx         # Policy list
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:34:          <Route path="/app/buckets" element={<BucketsPage />} />
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:35:          <Route path="/app/policies" element={<PoliciesPage />} />
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:52:export function BucketsPage() {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:53:  const [buckets, setBuckets] = useState<Bucket[]>([]);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:56:  const fetchBuckets = useCallback(async () => {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:59:      const data = await bucketsService.getAll();
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:60:      setBuckets(data);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:62:      const errorInfo = createErrorFromUnknown(err, "Failed to fetch buckets");
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:69:  useEffect(() => { fetchBuckets(); }, [fetchBuckets]);
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:71:  if (loading) return <BucketsPageSkeleton />;
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:75:      <DataTable columns={columns} data={buckets} onRefresh={fetchBuckets} />
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:86:export function BucketDetailPage() {
+FAIL  G-11     RestModel / GetName()  (30)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:130:server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(rm)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:142:server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(rm)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:11:- REST models implement JSON:API interface methods (`GetName()`, `GetID()`, `SetID()`)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:56:**Switching a handler from `server.RegisterHandler` to `server.RegisterInputHandler[T]` (or vice versa) is a breaking change for every caller of that endpoint, even if the URL and HTTP method are unchanged.** `RegisterInputHandler[T]` parses the request body as a JSON:API resource envelope matching `T.GetName()` *before* the handler runs. A request without that envelope — including a bare `{}` — is rejected with `400 "Could not parse request body"` and the handler is never invoked.
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:62:1. Define the request type in `rest.go` with `GetName()` / `GetID()` / `SetID()`. For action endpoints with no attributes, the type can be a single `Id uuid.UUID` field.
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:65:   { "data": { "type": "<T.GetName()>", "id": "<resource id>", "attributes": {} } }
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:109:				server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:154:			server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:174:type RestModel struct {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:184:func (r RestModel) GetName() string {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:189:func (r RestModel) GetID() string {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:194:func (r *RestModel) SetID(idStr string) error {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:207:- `GetName()` **MUST** use value receiver `(r RestModel)` - required by api2go interface
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:208:- `GetID()` **SHOULD** use value receiver `(r RestModel)` - read-only operation
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:209:- `SetID()` **MUST** use pointer receiver `(r *RestModel)` - mutates the model
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:225:func (r CreateRequest) GetName() string {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:262:func Transform(m Model) (RestModel, error) {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:271:	return RestModel{
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:283:func TransformSlice(models []Model) ([]RestModel, error) {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:284:	restModels := make([]RestModel, len(models))
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:350:func (r AssociatePolicyRequest) GetName() string {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:373:- `GetName()` returns the related resource type (e.g., "policies")
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:115:- Define `RestModel` struct implementing JSON:API interface (`GetName()`, `GetID()`, `SetID()`)
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:117:- Implement `Transform(Model) (RestModel, error)` to convert domain models to REST representations
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:118:- Implement `TransformSlice([]Model) ([]RestModel, error)` for bulk transformations
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:203:- ✅ Implement JSON:API interface on all models (`GetName()`, `GetID()`, `SetID()`)
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:208:- ✅ Create `Transform(Model) (RestModel, error)` function
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:210:- ✅ Create `TransformSlice([]Model) ([]RestModel, error)` function
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:132:Match the `type` to the backend `XxxRequest`'s `GetName()` value (which is sometimes the parent resource type like `"buckets"` and sometimes a dedicated action type like `"replication-triggers"` — check the corresponding service's `rest.go`).
+        .claude/agents/backend-guidelines-reviewer.md:91:| DOM-17 | JSON:API interface on REST models | Read `rest.go` | RestModel implements `GetName()`, `GetID()`, `SetID()` |
+FAIL  G-12     @/ path alias  (12)
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:25:import { api } from "@/lib/api/client";
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:29:import { bucketsService } from "@/services/api";
+        .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md:73:import { createResourceSchema, type CreateResourceFormData } from "@/lib/schemas/resource.schema";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:98:import { cn } from "@/lib/utils";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:129:import { DataTable } from "@/components/data-table";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-api-client.md:111:import { isRetryableError, requiresAuthentication, getErrorActions } from "@/lib/api/errors";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md:113:import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-styling.md:215:import { useTheme } from "@/context/theme-context";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:211:import { type Ban, type CreateBanRequest } from "@/services/api";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:214:import { type Ban } from "@/types/models/ban";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:50:import { DataTable } from "@/components/data-table";
+        .claude/agents/frontend-guidelines-reviewer.md:81:| FE-03 | No direct API client calls in components | Grep components/pages for `import .* from "@/lib/api/client"` | Zero matches; service layer used |
+FAIL  G-13     __mocks__/watchAll/mux  (12)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:93:router.HandleFunc("/items", server.RegisterHandler(l)(si)("create-item", createHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:109:router.HandleFunc("/items", server.RegisterInputHandler[CreateRequest](l)(si)("create-item", createHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:30:			router.HandleFunc("/users", server.RegisterHandler(l)(si)("get-users", listUsersHandler(db))).Methods(http.MethodGet)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:31:			router.HandleFunc("/users", server.RegisterInputHandler[CreateRequest](l)(si)("create-user", createUserHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:32:			router.HandleFunc("/users/{id}", server.RegisterHandler(l)(si)("get-user", getUserHandler(db))).Methods(http.MethodGet)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:33:			router.HandleFunc("/users/{id}", server.RegisterInputHandler[UpdateRequest](l)(si)("update-user", updateUserHandler(db))).Methods(http.MethodPatch)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:34:			router.HandleFunc("/users/{id}", server.RegisterHandler(l)(si)("delete-user", deleteUserHandler(db))).Methods(http.MethodDelete)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:37:			router.HandleFunc("/users/{id}/relationships/policy", server.RegisterInputHandler[AssociatePolicyRequest](l)(si)("associate-policy", associatePolicyHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:276:    server.RegisterHandler(l)(si)("get-users", listUsersHandler(db))).Methods(http.MethodGet)
+        .claude/agents/backend-guidelines-reviewer.md:82:| DOM-08 | POST/PATCH use `RegisterInputHandler` | Grep `resource.go` for `Methods(http.MethodPost)` and `Methods(http.MethodPatch)` | Each is registered with `RegisterInputHandler[T]`, not `RegisterHandler` |
+        .claude/agents/frontend-guidelines-reviewer.md:54:cd frontend && npm test -- --watchAll=false
+        .claude/agents/frontend-guidelines-reviewer.md:110:| FE-17 | Mocks updated when services changed | Diff `__mocks__/` against changed services | Mocks reflect interface changes |
+FAIL  G-14     uuid.UUID entity ids  (13)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:231:        var bucketId uuid.UUID
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:78:    GetByIdFunc func(id uuid.UUID) (Model, error)
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:85:func (m *ProcessorMock) GetById(id uuid.UUID) (Model, error) {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:62:1. Define the request type in `rest.go` with `GetName()` / `GetID()` / `SetID()`. For action endpoints with no attributes, the type can be a single `Id uuid.UUID` field.
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:85:		return ParseId(d.Logger(), func(userId uuid.UUID) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:175:	Id          uuid.UUID `json:"-"`
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:216:	Id          uuid.UUID  `json:"-"`
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:220:	PolicyId    *uuid.UUID `json:"policy_id,omitempty"`
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:346:	Id uuid.UUID `json:"-"`
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:430:	Id   uuid.UUID `json:"-"`
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:54:func update(db *gorm.DB, id uuid.UUID, name string) (Entity, error)
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:55:func deleteByID(db *gorm.DB, id uuid.UUID) error
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:256:    Id   uuid.UUID `json:"-"`
+FAIL  G-15     uint32 entity ids  (3)
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:19:func getById(id uint32) database.EntityProvider[Entity] {
+        .claude/skills/backend-dev-guidelines/resources/patterns-provider.md:31:func (p *ProcessorImpl) ByIdProvider(id uint32) model.Provider[Model] {
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:76:func getById(id uint32) database.EntityProvider[entity]
+FAIL  G-16     gorilla mux idiom  (11)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:93:router.HandleFunc("/items", server.RegisterHandler(l)(si)("create-item", createHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:109:router.HandleFunc("/items", server.RegisterInputHandler[CreateRequest](l)(si)("create-item", createHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:28:		return func(router *mux.Router, l logrus.FieldLogger) {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:30:			router.HandleFunc("/users", server.RegisterHandler(l)(si)("get-users", listUsersHandler(db))).Methods(http.MethodGet)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:31:			router.HandleFunc("/users", server.RegisterInputHandler[CreateRequest](l)(si)("create-user", createUserHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:32:			router.HandleFunc("/users/{id}", server.RegisterHandler(l)(si)("get-user", getUserHandler(db))).Methods(http.MethodGet)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:33:			router.HandleFunc("/users/{id}", server.RegisterInputHandler[UpdateRequest](l)(si)("update-user", updateUserHandler(db))).Methods(http.MethodPatch)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:34:			router.HandleFunc("/users/{id}", server.RegisterHandler(l)(si)("delete-user", deleteUserHandler(db))).Methods(http.MethodDelete)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:37:			router.HandleFunc("/users/{id}/relationships/policy", server.RegisterInputHandler[AssociatePolicyRequest](l)(si)("associate-policy", associatePolicyHandler(db))).Methods(http.MethodPost)
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:267:router.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:275:router.HandleFunc("/users",
+FAIL  G-17     fake handler deps  (52)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:19:| **`logrus.StandardLogger()` in handlers** | **Use `d.Logger()` from `HandlerDependency` — it carries trace context** |
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:20:| **`*logrus.Logger` in processor constructors** | **Use `logrus.FieldLogger` interface — enables `d.Logger()` compatibility and testability** |
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:48:    return func(d *server.HandlerDependency, c *server.HandlerContext, req CreateRequest) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:61:    return func(d *server.HandlerDependency, c *server.HandlerContext, req CreateRequest) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:63:            // ✅ CORRECT - d.Logger() carries trace ID and handler name
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:64:            p := NewProcessor(d.Logger(), r.Context(), db)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:95:func createHandler(db *gorm.DB) server.GetHandler {  // ❌ GetHandler has no request body
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:96:    return func(d *server.HandlerDependency, c *server.HandlerContext) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:112:    return func(d *server.HandlerDependency, c *server.HandlerContext, req CreateRequest) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:130:server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(rm)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:138:    d.Logger().WithError(err).Error("Creating REST model.")
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:142:server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(rm)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:168:    return func(d *rest.HandlerDependency, c *rest.HandlerContext) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:171:            b, err := GetByName(d.Logger(), db)(bucketName)
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:187:    return func(d *rest.HandlerDependency, c *rest.HandlerContext) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/anti-patterns.md:190:            b, err := NewProcessor(d.Logger(), d.Context(), db).GetBucket(bucketName)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:83:func getUserHandler(db *gorm.DB) server.GetHandler {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:84:	return func(d *server.HandlerDependency, c *server.HandlerContext) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:85:		return ParseId(d.Logger(), func(userId uuid.UUID) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:87:				model, err := NewProcessor(d.Logger(), r.Context(), db).GetById(userId)()
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:90:						d.Logger().WithError(err).Error("User not found")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:95:					d.Logger().WithError(err).Error("Failed to fetch user")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:103:					d.Logger().WithError(err).Errorf("Creating REST model.")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:109:				server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:119:	return func(d *server.HandlerDependency, c *server.HandlerContext, req CreateRequest) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:127:			model, err := NewProcessor(d.Logger(), r.Context(), db).Create(input)()
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:130:					d.Logger().WithError(err).Errorf("Email already exists.")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:138:					d.Logger().WithError(err).Errorf("Validation failed.")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:142:				d.Logger().WithError(err).Errorf("Failed to create user.")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:149:				d.Logger().WithError(err).Errorf("Creating REST model.")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:154:			server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:162:- `d.Logger()` - Pre-configured logger with trace context
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:309:		d.Logger().WithError(err).Error("User not found")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:314:		d.Logger().WithError(err).Error("Email already exists")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:319:		d.Logger().WithError(err).Error("Validation failed")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:325:	d.Logger().WithError(err).Error("Internal error")
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:386:func handleGetUserRequest(db *gorm.DB) server.GetHandler {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:387:	return func(d *server.HandlerDependency, c *server.HandlerContext) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:390:			user, err := GetById(d.Logger(), db)(userId)
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:400:func handleGetUserRequest(db *gorm.DB) server.GetHandler {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:401:	return func(d *server.HandlerDependency, c *server.HandlerContext) http.HandlerFunc {
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:404:			user, err := NewProcessor(d.Logger(), d.Context(), db).GetById(userId)()
+        .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md:444:- Log errors with context using `d.Logger().WithError(err)`
+        .claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md:143:| `d.Logger()` in handlers | `resource.go` | Handlers must pass `d.Logger()` to processors, not `logrus.StandardLogger()` |
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:31:- The logger parameter **must** be `logrus.FieldLogger` (interface), **not** `*logrus.Logger` (concrete type). This ensures compatibility with `d.Logger()` from handlers.
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:97:- Implement handler functions matching `server.GetHandler` or `server.InputHandler[T]` signatures
+        .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md:101:- Log errors with context using `d.Logger().WithError(err)`
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:174:- [ ] **Handlers pass `d.Logger()`** to processors (not `logrus.StandardLogger()`)
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:191:7. Add `resource.go` - Route registration and thin handlers using `d.Logger()` and correct handler types
+        .claude/skills/backend-dev-guidelines/resources/ai-guidance.md:220:- ✅ Log errors with `d.Logger().WithError(err)`
+        .claude/skills/backend-dev-guidelines/resources/patterns-functional.md:44:This ensures handlers can pass `d.Logger()` (which returns `logrus.FieldLogger` with trace context) directly to processors.
+        .claude/agents/backend-guidelines-reviewer.md:81:| DOM-07 | Handlers pass `d.Logger()` | Grep `resource.go` for `NewProcessor` calls | All pass `d.Logger()`, none pass `logrus.StandardLogger()` |
+FAIL  G-18     testify in Go examples  (3)
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:21:    require.NoError(t, err)
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:24:    require.NoError(t, err)
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:47:  require.Error(t, err)
+FAIL  G-19     mock-struct convention  (5)
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:77:type ProcessorMock struct {
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:103:- `{package}/mock/processor.go` - Service-specific processor mocks
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:104:- `{package}/mock/provider.go` - Provider interface mocks
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:107:**Tip:** Use `grep -r "type.*Mock struct" .` to find all mock implementations in a service.
+        .claude/skills/backend-dev-guidelines/resources/testing-guide.md:242:**Problem:** Interface changed but mock/processor.go not updated.
+FAIL  G-20     frontend/ root path  (4)
+        .claude/skills/frontend-dev-guidelines/SKILL.md:14:- Any file inside `frontend/`
+        .claude/skills/frontend-dev-guidelines/resources/architecture-overview.md:23:frontend/
+        .claude/agents/frontend-guidelines-reviewer.md:7:  Context: A feature touched frontend/src/pages and frontend/src/services.
+        .claude/agents/frontend-guidelines-reviewer.md:24:- A frontend path (e.g., `frontend/src`) — audit the area.
+FAIL  G-21     dead FE paths  (27)
+        .claude/skills/frontend-dev-guidelines/SKILL.md:53:3. **Update types** if API contracts changed (`types/models/`, `types/api/`)
+        .claude/skills/frontend-dev-guidelines/SKILL.md:109:| `components/common/` | Shared presentational components |
+        .claude/skills/frontend-dev-guidelines/SKILL.md:119:| `types/api/` | API response/error type definitions |
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:16:├── data-table.tsx       # Generic data table wrapper
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:29:// components/common/ErrorPage.tsx
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:125:The generic `DataTable` wraps TanStack React Table.
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:129:import { DataTable } from "@/components/data-table";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:160:<DataTable
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:171:**DataTable Props:**
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:173:interface DataTableProps<TData, TValue> {
+        .claude/skills/frontend-dev-guidelines/resources/patterns-components.md:178:  headerActions?: DataTableHeaderAction[];
+        .claude/skills/frontend-dev-guidelines/resources/testing-guide.md:80:// components/common/__tests__/ErrorPage.test.tsx
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:14:// services/api/bans.service.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md:65:// services/api/buckets.service.ts
+        .claude/skills/frontend-dev-guidelines/resources/ai-guidance.md:66:services/api/resource.service.ts
+        .claude/skills/frontend-dev-guidelines/resources/ai-guidance.md:72:- Add to `services/api/index.ts` exports
+        .claude/skills/frontend-dev-guidelines/resources/ai-guidance.md:111:- Add breadcrumb route to `lib/breadcrumbs/routes.ts`
+        .claude/skills/frontend-dev-guidelines/resources/ai-guidance.md:112:- Add entity name resolver to `lib/breadcrumbs/resolvers.ts`
+        .claude/skills/frontend-dev-guidelines/resources/ai-guidance.md:147:### Adding a Column to DataTable
+        .claude/skills/frontend-dev-guidelines/resources/architecture-overview.md:14:| TanStack React Table | Data table rendering |
+        .claude/skills/frontend-dev-guidelines/resources/architecture-overview.md:94:### React Query (lib/query-client.ts)
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:5:TypeScript strict mode is enabled with enhanced checks. All types live in `types/` — domain models in `types/models/` and API types in `types/api/`.
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:95:// types/api/responses.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:125:// types/api/errors.ts
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:207:Types are re-exported from `services/api/index.ts` for convenient imports:
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:50:import { DataTable } from "@/components/data-table";
+        .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md:75:      <DataTable columns={columns} data={buckets} onRefresh={fetchBuckets} />
+FAIL  G-22     unset tsconfig flags  (4)
+        .claude/skills/frontend-dev-guidelines/resources/architecture-overview.md:90:- `exactOptionalPropertyTypes: true` — precise optional types
+        .claude/skills/frontend-dev-guidelines/resources/architecture-overview.md:91:- `noImplicitOverride: true` — explicit override keyword
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:225:  "exactOptionalPropertyTypes": true,     // { x?: string } means string, not string | undefined
+        .claude/skills/frontend-dev-guidelines/resources/patterns-types.md:226:  "noImplicitOverride": true              // Must use override keyword
+FAIL  G-23     compose/nginx/bruno  (6)
+        .claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md:94:**File:** `deploy/compose/docker-compose.yml`
+        .claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md:103:**File:** `deploy/compose/nginx.conf` (or equivalent)
+        .claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md:112:## 6. Bruno Collection
+        .claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md:113:**Directory:** `bruno/<service-name>/`
+        .claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md:117:bruno/<service-name>/
+        .claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md:118:├── bruno.json
+
+drift-gate: FAILURES PRESENT
+
+=== line counts at baseline ===
+    39 .claude/skills/backend-dev-guidelines/resources/patterns-provider.md
+    57 .claude/skills/backend-dev-guidelines/resources/architecture-overview.md
+    59 .claude/skills/backend-dev-guidelines/resources/patterns-functional.md
+   104 .claude/skills/frontend-dev-guidelines/resources/architecture-overview.md
+   121 .claude/skills/backend-dev-guidelines/SKILL.md
+   121 .claude/skills/frontend-dev-guidelines/resources/patterns-routing.md
+   128 .claude/skills/backend-dev-guidelines/resources/file-responsibilities.md
+   141 .claude/skills/frontend-dev-guidelines/SKILL.md
+   144 .claude/skills/frontend-dev-guidelines/resources/patterns-api-client.md
+   148 .claude/skills/frontend-dev-guidelines/resources/anti-patterns.md
+   152 .claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md
+   169 .claude/skills/frontend-dev-guidelines/resources/patterns-service-layer.md
+   193 .claude/skills/frontend-dev-guidelines/resources/patterns-react-query.md
+   222 .claude/skills/frontend-dev-guidelines/resources/ai-guidance.md
+   233 .claude/skills/frontend-dev-guidelines/resources/patterns-types.md
+   236 .claude/skills/frontend-dev-guidelines/resources/patterns-styling.md
+   243 .claude/skills/frontend-dev-guidelines/resources/testing-guide.md
+   249 .claude/skills/backend-dev-guidelines/resources/anti-patterns.md
+   267 .claude/skills/backend-dev-guidelines/resources/testing-guide.md
+   277 .claude/skills/backend-dev-guidelines/resources/ai-guidance.md
+   308 .claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md
+   334 .claude/skills/frontend-dev-guidelines/resources/patterns-components.md
+   444 .claude/skills/backend-dev-guidelines/resources/patterns-rest-jsonapi.md
+  4389 total
+  198 .claude/agents/backend-guidelines-reviewer.md
+  167 .claude/agents/frontend-guidelines-reviewer.md
+  365 total
