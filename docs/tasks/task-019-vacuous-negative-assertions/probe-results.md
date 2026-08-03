@@ -16,6 +16,26 @@ Verdict legend: **falsifiable** / **vacuous** / **unprobeable**.
 
 | # | File | Test title | Spy | Guard defeated (stage 2) | S1 | S2 | Verdict | Fix | Re-probe |
 |---|---|---|---|---|---|---|---|---|---|
+| 39 | `apps/web/src/pages/LoginPage.test.tsx` | cycles the theme without issuing a request | `fetchSpy` | (a) no-token early return in `updateThemePreference`; (b) signed-out page pointed at the mutation-bearing `ThemeToggle` (both required — FR-FIX-2) | green¹ | red (3 calls to `/api/auth/me`) | falsifiable, fragile | migrated to `expectNoCall` | red |
+| 40 | `apps/web/src/lib/hooks/api/auth.test.ts` | makes no request and resolves when there is no token | `fetchMock` | (a) no-token early return in `updateThemePreference` | green | red (request lands; downstream `TypeError` on the mock's undefined response) | falsifiable, fragile | migrated to `expectNoCall` (uniformity, FR-HELPER-3 — was already falsifiable) | red |
+
+¹ Task 3's brief predicted S1 = red for site 39 on the theory that the
+pre-existing hand-rolled flush would let the synthetic probe be observed.
+Observed was green. Reason: the probe is inserted **immediately before** the
+final `expect(...)`, i.e. *after* the flush has already run and yielded —
+scheduling a microtask there and synchronously asserting on the very next line
+gives that microtask no chance to run before the assertion, regardless of
+whether anything upstream already yielded. This is row 2 of the design's
+combining table (`green, red → falsifiable only because the defeated guard
+fires synchronously`), not a contradiction of it: S2 defeats the guard at the
+real dispatch point (the `click()`s, well before the flush), so the
+pre-existing flush *does* catch that real dispatch even though it can never
+catch a probe scheduled after itself. Site 40 shows the same S1=green result
+for the identical structural reason. Because the mechanism is placement-driven
+rather than site-specific, this likely holds for Stage-1 probes generally
+whenever the probe is inserted after an existing flush/await rather than at the
+point of the real dispatch — worth a heads-up to later migration tasks, not a
+blocker to this one.
 
 ## FR-TRIAGE-4 sites (unprobeable)
 

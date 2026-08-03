@@ -4,6 +4,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { updateThemePreference, useMe } from './auth';
 import { setAccessToken, clearAccessToken } from '../../api/token';
+import { expectNoCall } from '../../../test/expectNoCall';
 
 function meDocument(meta: Record<string, unknown>) {
   return {
@@ -89,7 +90,7 @@ describe('updateThemePreference', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(updateThemePreference('dark')).resolves.toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    await expectNoCall(fetchMock, 'fetch');
   });
 
   it('PATCHes the JSON:API envelope to /api/auth/me', async () => {
