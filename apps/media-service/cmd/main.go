@@ -9,7 +9,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sirupsen/logrus"
-	"gorm.io/gorm"
 
 	authmw "github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/config"
@@ -25,6 +24,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processedevents"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processing"
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/purge"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/storage"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/variantfailures"
 )
@@ -125,9 +125,10 @@ func main() {
 	// replica runs per tick (design §10.6 / A9). Hourly, not daily: jobs.Every's
 	// first tick is at T+interval, so a 24-hour sweep in a service that
 	// redeploys more often than daily never runs (design OQ-5).
+	sweeper := purge.NewSweeper(log, db, store, purge.Config{})
 	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
 		_, err := database.WithLeaderLock(db, "media-purge", func() error {
-			return purgeExpired(ctx, log, db, store)
+			return sweeper.RunOnce(ctx)
 		})
 		if err != nil {
 			log.WithError(err).Warn("media purge sweep failed")
@@ -171,25 +172,6 @@ func main() {
 		Run(); err != nil {
 		log.WithError(err).Fatal("server stopped")
 	}
-}
-
-// purgeExpired removes soft-deleted media objects past their purge window: it
-// deletes the MinIO object then the DB row for each.
-func purgeExpired(ctx context.Context, log logrus.FieldLogger, db *gorm.DB, store *storage.Client) error {
-	objs, err := mediaobject.ListPurgeable(db)
-	if err != nil {
-		return err
-	}
-	for _, o := range objs {
-		if err := store.RemoveObject(ctx, o.ObjectKey()); err != nil {
-			log.WithError(err).WithField("media_id", o.ID()).Warn("remove minio object during purge failed")
-			continue // leave the row so a later sweep retries
-		}
-		if err := mediaobject.DeleteRow(db, o.ID()); err != nil {
-			log.WithError(err).WithField("media_id", o.ID()).Warn("delete media row during purge failed")
-		}
-	}
-	return nil
 }
 
 // variantLookup adapts mediavariant.Provider to mediaobject.VariantLookup.
