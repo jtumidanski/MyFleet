@@ -113,8 +113,11 @@ Route registration and handler definitions for REST endpoints.
   `server.StatusFor` maps the sentinel to a status code.
 - **Delegate ALL business logic to processors - NEVER call provider functions directly**
 - Success responses go out through `server.WriteJSON(w, status, server.Document{...})`.
-- Do not log errors in the handler — `server.WriteError` already logs every
-  5xx itself; logging again there double-logs.
+- `server.WriteError` already logs every 5xx itself, so a handler-level log of
+  that same error is redundant — but handlers that log to attach request
+  context (`log.WithError(err).Error("list fuel logs")`,
+  `fuel/resource.go:53`) are the common pattern in this tree, not a
+  violation.
 
 **Pattern:** Thin handlers that parse input, invoke processors, handle errors, and marshal responses.
 
@@ -134,8 +137,12 @@ Serialization and transformation between domain models and JSON:API.
 - Define a narrow unexported request struct per write endpoint
   (`createAttributes`, `patchAttributes`) — they do not reuse `Attributes`.
 - Implement `Transform(Model) server.Resource` to convert domain models to
-  REST representations. Neither `Transform` nor `TransformSlice` returns an
-  error — there is nothing that can fail.
+  REST representations. 45 of the 47 `Transform*` functions in the tree
+  return no error — mapping model getters onto a struct cannot fail. The
+  exception is `activity`, whose `Transform`/`TransformSlice` return
+  `(server.Resource, error)` / `([]server.Resource, error)` because they
+  unmarshal a stored JSON payload that can be malformed
+  (`apps/fleet-service/internal/activity/rest.go:23,49`).
 - Implement `TransformSlice([]Model) []server.Resource` for bulk transformations.
 - Use flat structure for request models (no nested Data/Type/Attributes)
 - The resource ID is a separate `server.Resource` field, never an attribute
