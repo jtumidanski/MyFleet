@@ -101,3 +101,37 @@ func TestManifestKeysAreUnique(t *testing.T) {
 		seen[target.Key] = target.Table
 	}
 }
+
+// TestCollectTableNames_seesDeclarationsOutsideEntityGo is the whole point of
+// FR-ADMIN-5. The previous walk filtered on the file being named entity.go, so
+// a table declared anywhere else was invisible — which is exactly how
+// media.media_variant_failures ended up in neither Manifest nor excludedTables.
+func TestCollectTableNames_seesDeclarationsOutsideEntityGo(t *testing.T) {
+	got, err := CollectTableNames("testdata/fixture")
+	if err != nil {
+		t.Fatalf("CollectTableNames: %v", err)
+	}
+	if len(got) != 1 || got[0] != "media.fixture_table" {
+		t.Fatalf("CollectTableNames(testdata/fixture) = %v, want [media.fixture_table]", got)
+	}
+}
+
+// TestCollectTableNames_skipsTestdata is the other half. The fixture above is
+// demonstrably findable by the test that names its path directly, so this is a
+// real check and not a vacuous one: if the walk descended into testdata, the
+// production run in TestManifestCoversEveryTable would report a table that does
+// not exist and fail the build.
+func TestCollectTableNames_skipsTestdata(t *testing.T) {
+	got, err := CollectTableNames("..")
+	if err != nil {
+		t.Fatalf("CollectTableNames: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("found no TableName declarations — the walk root is wrong, and this test would pass vacuously")
+	}
+	for _, name := range got {
+		if name == "media.fixture_table" {
+			t.Fatal("the walk descended into testdata and picked up the fixture table")
+		}
+	}
+}
