@@ -119,6 +119,10 @@ export function VehicleRecordDrawer({
       await updateRecord.mutateAsync({
         id: record.id,
         attributes: {
+          // The form shows a category picker, so the edit must carry it —
+          // leaving it out meant changing the category appeared to work and
+          // then reverted on the next fetch.
+          categoryId: values.categoryId,
           performedAt: new Date(values.performedAt).toISOString(),
           description: values.description || undefined,
           mileage: values.mileage,

@@ -40,6 +40,7 @@ export interface CreateMaintenanceRecordAttributes {
 
 /** PATCH /api/fleet/maintenance-records/{id} body attributes */
 export interface UpdateMaintenanceRecordAttributes {
+  categoryId?: string;
   /** RFC3339 */
   performedAt?: string;
   description?: string;

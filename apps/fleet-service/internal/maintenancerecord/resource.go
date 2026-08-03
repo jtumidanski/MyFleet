@@ -223,6 +223,12 @@ func InitializeRoutes(
 
 		// PATCH /maintenance-records/{id} — partial update.
 		r.Patch("/maintenance-records/{id}", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
+			// CategoryID is editable: the record drawer offers the same
+			// category picker the create form does, and omitting it here made
+			// that control silently discard the user's choice. A cleared value
+			// is rejected by Validate (categoryID is an invariant), not
+			// written through.
+			CategoryID  *string  `json:"categoryId"`
 			Description *string  `json:"description"`
 			PerformedAt *string  `json:"performedAt"`
 			Mileage     *int     `json:"mileage"`
@@ -263,6 +269,9 @@ func InitializeRoutes(
 			}
 
 			updated, err := proc.Update(id, func(m Model) Model {
+				if attrs.CategoryID != nil {
+					m = m.WithCategoryID(*attrs.CategoryID)
+				}
 				if attrs.Description != nil {
 					m = m.WithDescription(*attrs.Description)
 				}

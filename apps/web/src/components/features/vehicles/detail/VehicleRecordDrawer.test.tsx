@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { VehicleRecordDrawer } from './VehicleRecordDrawer';
 import { maintenanceRecordService } from '../../../../services/api/MaintenanceRecordService';
@@ -136,6 +137,37 @@ describe('VehicleRecordDrawer', () => {
     expect(await screen.findByText('manual')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^delete$/i })).not.toBeInTheDocument();
+  });
+
+  // The drawer's edit form renders a category picker, but the PATCH body it
+  // built omitted categoryId entirely, so choosing a different category
+  // appeared to work and reverted on the next fetch. Without this test the
+  // exact bug regresses green: every other assertion in this file passes with
+  // categoryId dropped.
+  it('sends categoryId in the PATCH body when editing a maintenance record', async () => {
+    vi.mocked(maintenanceCategoryService.list).mockResolvedValue({
+      data: [
+        {
+          id: 'c1',
+          type: 'maintenanceCategories',
+          attributes: { name: 'Oil Change', systemDefined: true, kind: 'maintenance' },
+        },
+      ],
+    } as never);
+    vi.mocked(maintenanceRecordService.patch).mockResolvedValue({} as never);
+
+    const user = userEvent.setup();
+    renderDrawer(maintenanceRow, true);
+
+    await user.click(await screen.findByRole('button', { name: /^edit$/i }));
+    await user.click(await screen.findByRole('button', { name: /log record|log modification/i }));
+
+    await waitFor(() => expect(maintenanceRecordService.patch).toHaveBeenCalled());
+    const [, attributes] = vi.mocked(maintenanceRecordService.patch).mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+    ];
+    expect(attributes).toHaveProperty('categoryId', 'c1');
   });
 
   it('renders nothing open when row is null', () => {

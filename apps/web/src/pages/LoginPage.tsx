@@ -49,7 +49,11 @@ export function LoginPage() {
         <ThemeToggleButton preference={preference} onSelect={setPreference} />
       </div>
 
-      <div className="w-full max-w-xl space-y-8">
+      {/* `mx-auto` is what centres the column. Without it the capped block
+          hugs the left edge and leaves a growing band of dead space on the
+          right as the viewport widens — the page reads as broken rather than
+          as a deliberate left-aligned layout. */}
+      <div className="mx-auto w-full max-w-xl space-y-8">
         <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
           <BrandMark className="h-4 w-4" />
           MyFleet

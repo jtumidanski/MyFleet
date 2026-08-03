@@ -1,9 +1,12 @@
 package vehiclemedia
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // fakeProvider satisfies Provider for unit tests.
@@ -32,6 +35,13 @@ type fakeAdministrator struct {
 	lastTargetID  string
 	lastMediaID   string
 	lastClearIDs  []string
+
+	// SoftDelete arguments, captured for assertion. deleteErr forces the
+	// already-removed branch.
+	deletedVehicleID string
+	deletedMediaID   string
+	deleteCalls      int
+	deleteErr        error
 }
 
 func (f *fakeAdministrator) Insert(m Model) (Model, error) { return m, nil }
@@ -59,6 +69,43 @@ func (f *fakeAdministrator) SetPrimaryAtomic(vehicleID, targetID, targetMediaID 
 		}
 	}
 	return nil
+}
+
+func (f *fakeAdministrator) SoftDelete(vehicleID, mediaID string) error {
+	f.deleteCalls++
+	f.deletedVehicleID = vehicleID
+	f.deletedMediaID = mediaID
+	return f.deleteErr
+}
+
+// RemoveMedia is a delegation seam: the lookup, the delete and the successor
+// decision all live in one transaction inside the administrator, so the only
+// behaviour left to assert here is that the scope is forwarded intact and that
+// the package-private sentinel is translated. Everything else is covered
+// against a real database in administrator_test.go.
+func TestRemoveMedia_forwardsTheVehicleScopedIdentifiers(t *testing.T) {
+	fa := &fakeAdministrator{}
+	proc := NewProcessor(logrus.New(), &fakeProvider{}, fa)
+
+	if err := proc.RemoveMedia("v1", "m1"); err != nil {
+		t.Fatalf("RemoveMedia failed: %v", err)
+	}
+
+	// Scoping by vehicle AND media is what stops a caller reaching another
+	// vehicle's row; dropping either argument would be an IDOR.
+	if fa.deletedVehicleID != "v1" || fa.deletedMediaID != "m1" {
+		t.Errorf("SoftDelete(%q, %q), want (\"v1\", \"m1\")", fa.deletedVehicleID, fa.deletedMediaID)
+	}
+}
+
+// The sentinel is package-private; leaking it would map to 500 instead of 404.
+func TestRemoveMedia_translatesNotFound(t *testing.T) {
+	fa := &fakeAdministrator{deleteErr: ErrNotFound}
+	proc := NewProcessor(logrus.New(), &fakeProvider{}, fa)
+
+	if err := proc.RemoveMedia("v1", "m1"); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("RemoveMedia error = %v, want server.ErrNotFound", err)
+	}
 }
 
 func TestSetPrimary_unsetsPrevious(t *testing.T) {

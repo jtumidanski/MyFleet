@@ -5,8 +5,9 @@ import type { VehicleMediaAttributes, AddVehicleMediaAttributes } from '../../ty
 /**
  * Vehicle-media service — wraps the fleet-service vehicle-media endpoints.
  * Backend routes (apps/fleet-service/internal/vehiclemedia/resource.go, gateway-prefixed):
- *   GET  /api/fleet/vehicles/{id}/media  — list media refs for a vehicle
- *   POST /api/fleet/vehicles/{id}/media  — attach a media ref to a vehicle
+ *   GET    /api/fleet/vehicles/{id}/media            — list media refs for a vehicle
+ *   POST   /api/fleet/vehicles/{id}/media            — attach a media ref to a vehicle
+ *   DELETE /api/fleet/vehicles/{id}/media/{mediaId}  — detach a media ref
  *
  * Primary-image route is on the vehicle resource:
  *   PUT  /api/fleet/vehicles/{id}/primary-image  { mediaId }
@@ -36,6 +37,20 @@ class VehicleMediaService {
       },
     );
     return doc.data;
+  }
+
+  /**
+   * DELETE /api/fleet/vehicles/{vehicleId}/media/{mediaId} — detach a media
+   * object from a vehicle.
+   *
+   * Distinct from `DELETE /api/media/{id}`, which removes the media object
+   * itself in media-service. Removing a photo from a gallery needs BOTH: this
+   * call drops the reference the gallery lists, the other releases the bytes.
+   */
+  async removeMedia(vehicleId: string, mediaId: string): Promise<void> {
+    await apiClient.request<void>(`${this.basePath}/${vehicleId}/media/${mediaId}`, {
+      method: 'DELETE',
+    });
   }
 
   /**
