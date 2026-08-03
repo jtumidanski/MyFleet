@@ -95,6 +95,13 @@ func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve PrincipalRe
 		access, err := proc.MintAccess(principal)
 		if err != nil {
 			log.WithError(err).Error("mint access on refresh")
+			// Same reason as the transient branch above: Rotate has already
+			// consumed the presented token and committed the new one, so an exit
+			// that writes neither the rotated value nor a clear leaves the browser
+			// holding a spent token. Its next attempt then reads as a replay and
+			// Processor.Rotate revokes the whole family — signing the user out of
+			// every device over what is a local signing fault.
+			SetRefreshCookie(w, newRaw, cookieSecure)
 			server.WriteError(w, server.ErrUnauthorized)
 			return
 		}

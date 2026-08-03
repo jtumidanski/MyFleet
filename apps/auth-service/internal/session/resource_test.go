@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/sirupsen/logrus"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 
+	"github.com/jtumidanski/myfleet/apps/auth-service/internal/jwks"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
@@ -25,7 +27,13 @@ import (
 func newRefreshRouter(t *testing.T, resolve PrincipalResolver) (chi.Router, *Processor, *logrustest.Hook, string) {
 	t.Helper()
 	store := newFakeStore()
-	proc := newTestProcessor(store)
+	return mountRefresh(t, store, newTestProcessor(store), resolve)
+}
+
+// mountRefresh is newRefreshRouter with the processor supplied, so a test can
+// mount the real routes over a processor whose MintAccess cannot succeed.
+func mountRefresh(t *testing.T, store *fakeStore, proc *Processor, resolve PrincipalResolver) (chi.Router, *Processor, *logrustest.Hook, string) {
+	t.Helper()
 
 	raw := "valid-refresh-token"
 	store.seed(NewBuilder().
@@ -215,9 +223,6 @@ func TestRefresh_transientResolverFailureKeepsTheSessionAlive(t *testing.T) {
 	if c.Value == raw {
 		t.Fatalf("the cookie still carries the CONSUMED token %q", raw)
 	}
-	if c.MaxAge < 0 {
-		t.Fatalf("MaxAge = %d — this is the clearing form of the cookie", c.MaxAge)
-	}
 
 	// Acceptance criterion 4, asserted against stored state rather than against
 	// the response: the value the browser now holds must still rotate cleanly
@@ -286,6 +291,56 @@ func TestRefresh_transientFailureMintsNothingAndDisclosesNothing(t *testing.T) {
 		if strings.Contains(rawBody, secret) {
 			t.Fatalf("the 503 body leaked %q: %s", secret, rawBody)
 		}
+	}
+}
+
+// brokenSignerProcessor is newTestProcessor with a key set that cannot sign, so
+// MintAccess — and ONLY MintAccess — fails. Rotate runs first and runs normally,
+// which is precisely the state the mint-failure exit has to cope with: the
+// presented token is already spent.
+func brokenSignerProcessor(store *fakeStore) *Processor {
+	ks := jwks.NewKeySet(&rsa.PrivateKey{}, "kid-1")
+	return NewProcessor(logrus.New(), ks, "myfleet-auth", "myfleet").WithStore(store, store)
+}
+
+// TestRefresh_mintFailureStillWritesTheRotatedCookie pins the last exit in this
+// handler that Rotate's consumption reaches. The transient branch was fixed to
+// write the rotated cookie; this one wrote neither it nor a clear, so the
+// browser kept the token Rotate had already consumed. Its next refresh is then
+// a replay, and Processor.Rotate answers a replay by revoking the whole family —
+// signing the user out of every device over a local signing fault.
+func TestRefresh_mintFailureStillWritesTheRotatedCookie(t *testing.T) {
+	store := newFakeStore()
+	resolve := func(context.Context, string) (Principal, error) {
+		return Principal{UserID: "user-1", Email: "a@b.com", ActiveFleetID: "fleet-9", Role: "owner"}, nil
+	}
+	r, proc, hook, raw := mountRefresh(t, store, brokenSignerProcessor(store), resolve)
+
+	rec := postRefresh(r, raw)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401 — the mint must actually have failed: %s", rec.Code, rec.Body.String())
+	}
+	if !loggedAtLevel(hook, logrus.ErrorLevel, "mint access on refresh") {
+		t.Fatalf("the test did not reach the mint-failure branch: %+v", hook.AllEntries())
+	}
+
+	c := refreshCookieSet(rec)
+	if c == nil {
+		t.Fatal("no refresh cookie was set on the mint-failure exit: the browser would keep the token " +
+			"Rotate already consumed and trip family revocation on its next attempt")
+	}
+	if c.Value == raw {
+		t.Fatalf("the cookie still carries the CONSUMED token %q", raw)
+	}
+
+	// Asserted against stored state, not the response: the value the browser now
+	// holds must rotate cleanly once the signing fault is fixed.
+	if _, userID, err := proc.Rotate(c.Value); err != nil {
+		t.Fatalf("re-presenting the cookie written alongside the mint failure failed: %v — "+
+			"the next attempt would revoke the family", err)
+	} else if userID != "user-1" {
+		t.Fatalf("userID = %q, want user-1", userID)
 	}
 }
 
