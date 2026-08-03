@@ -381,6 +381,8 @@ treatment as footnote 8's sites 4–6.
 | 35 | `apps/web/src/pages/VehiclesPage.test.tsx` | closes on an outside pointer-down without creating a vehicle | `vehicleService.createInFleet` | `onInteractOutside` added to `DialogContent` in `VehiclesPage.tsx`, calling `createVehicle.mutateAsync(...)` | red (probe after `fireEvent.pointerDown(document.body)`, before the pre-existing `await waitFor(...)`; 1 call) | red (call recorded as `["f1", { make: undefined, model: undefined, ... }]`, target assertion hit directly, no earlier-line interference) | falsifiable | migrated to `expectNoCall(vi.mocked(...), ...)` | n/a (was never vacuous) |
 | 36 | `apps/web/src/pages/admin/AdminFleetsPage.test.tsx` | opens the confirmation dialog instead of purging directly | `createPurgeMutate` | `BlastRadiusPanel`'s `onPurge` in `AdminFleetsPage.tsx` changed from `() => setConfirmOpen(true)` to call `createPurge.mutate(...)` directly, bypassing the confirmation | green (dispatch point coincides with the assertion — nothing yields between the purge-button click and the very next line, which is the target assertion itself) | red (call recorded as `[{ scope: 'fleet', target_type: 'fleet', target_id: 'f1', confirmation: 'Test Fleet' }, { onSuccess }]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall` (local `vi.fn()`, no `vi.mocked()` needed — see finding¹⁹) | n/a (was never vacuous) |
 | 9 | `apps/web/src/components/features/activity/ActivityFeed.test.tsx` | renders the empty state without asking for any names | `listByIds` | `enabled: sorted.length > 0` → `enabled: true` in `useUsers` (`src/lib/hooks/api/users.ts`) | green (dispatch point coincides with the assertion — `renderWithProviders(...)` yields nothing before it, and the two lines between it and the target assertion are both synchronous, non-yielding `expect()`s) | red (call recorded as `[[]]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall` (local `vi.fn()` via `vi.hoisted`, no `vi.mocked()` needed — see finding¹⁹) | n/a (was never vacuous) |
+| 37 | `apps/web/src/components/ui/input.test.tsx` | does not reach for a picker on non-picker types | `showPicker` | `const isPicker = !!type && PICKER_TYPES.has(type);` → `const isPicker = true;` in `input.tsx`, so a `type="number"` input also reaches `el.showPicker()` | green²¹ (probe placed immediately before the assertion, per the HUMAN RULING — nothing yields between the preceding `await user.click(...)` resolving and the assertion; contrary to the task-10 brief's prediction of red, see finding²¹) | red (`showPicker` called twice, target assertion hit directly) | falsifiable | exempted via inline `eslint-disable-next-line no-restricted-syntax` carrying the probe evidence (design OQ-4) — not migrated | n/a (was never vacuous) |
+| 38 | `apps/web/src/lib/utils/download.test.ts` | revokes the object URL, but not before the click | `URL.revokeObjectURL` | `setTimeout(() => URL.revokeObjectURL(url), 0);` → bare `URL.revokeObjectURL(url);` in `download.ts`, so the revoke happens synchronously, before the assertion | green (assertion is synchronous in the same tick as the trigger; this is the *correct* verdict — the assertion means "not called synchronously", which is the point, per the task-10 brief) | red (`URL.revokeObjectURL` called once with `'blob:test-url'`, target assertion hit directly) | falsifiable | exempted via inline `eslint-disable-next-line no-restricted-syntax` carrying the probe evidence (design OQ-4) — not migrated; see finding²² for the fake-timer incompatibility that independently rules out migration | n/a (was never vacuous) |
 
 ¹⁵ Stage 2 for sites 10 and 11 (`useDashboardWidgets.test.ts`) is confounded
 by an earlier line in the full (unmodified) test, in both directions (pre-
@@ -554,6 +556,34 @@ Stage 2's edit still reaches the target assertion directly with no
 earlier-line interference, unlike the confounded sites in footnotes 8/17.
 Both were migrated to `expectNoCall` per FR-HELPER-3 regardless, the same
 reasoning as every other fragile site in this record.
+
+²¹ Site 37's Stage 1 came back green, contrary to the task-10 brief's
+prediction of red ("Site 37 follows `await user.click(...)`, which yields —
+expect red"). The HUMAN RULING in `migration-context.md` requires the probe
+to be placed immediately after the trigger and before any yielding statement
+between the trigger and the assertion; here there is no such intervening
+statement — `expect(showPicker).not.toHaveBeenCalled()` directly follows the
+resolved `await user.click(...)` with nothing in between that drains the
+microtask queue — so per the ruling itself, "the probe sits immediately
+before the assertion and green is the honest verdict." Confirmed empirically:
+inserting `void Promise.resolve().then(() => showPicker('__probe__'))`
+immediately before the assertion left the test passing (green). This does
+not change the site's disposition: design combining-table row 2 (green S1 /
+red S2 = "falsifiable only because the defeated guard fires synchronously")
+still applies, which is exactly the "safe by construction" shape OQ-4
+exempts — the mismatch is in the brief's prose, not in the site's
+qualification for Group D.
+
+²² Site 38's fake-timer incompatibility was independently confirmed (Task 10
+Step 3, not merely asserted from the design doc): temporarily migrating the
+assertion to `await expectNoCall(vi.mocked(URL.revokeObjectURL),
+'URL.revokeObjectURL')` (with the enclosing `it` made `async`) and running
+`npx vitest run src/lib/utils/download.test.ts --testTimeout=5000` produced
+`Test timed out in 5000ms` — the helper's internal `setTimeout(0)` flush
+never fires while `vi.useFakeTimers()` is active for the suite, so the
+`await` never resolves. The migrated form was reverted with `git checkout --`
+immediately after capturing this output; it is not part of the committed
+diff.
 
 ## FR-TRIAGE-4 sites (unprobeable)
 
