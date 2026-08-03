@@ -5,13 +5,12 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { createInviteSchema, type CreateInviteInput } from '../../../lib/schemas/fleetSettings';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
-import { useCreateInvite } from '../../../lib/hooks/api/invites';
+import { useCreateInvite, inviteErrorMessage } from '../../../lib/hooks/api/invites';
 
 interface InviteFormProps {
   fleetId: string;
@@ -28,11 +27,13 @@ export function InviteForm({ fleetId }: InviteFormProps) {
   const onSubmit = async (values: CreateInviteInput) => {
     try {
       await createInvite.mutateAsync(values);
-      toast.success(`Invite sent to ${values.email}`);
+      // Not "sent": nothing delivers invites yet, and saying so left owners
+      // waiting on an email that was never going to arrive. The invite is a row
+      // until someone copies its link out of the list below.
+      toast.success(`Invite created for ${values.email} — copy its link below to send it`);
       form.reset({ email: '', role: 'member' });
     } catch (err) {
-      const apiError = createErrorFromUnknown(err);
-      toast.error(apiError.message || 'Could not create invite');
+      toast.error(inviteErrorMessage(err, 'create'));
     }
   };
 

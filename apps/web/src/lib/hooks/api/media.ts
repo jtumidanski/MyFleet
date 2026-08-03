@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { mediaService } from '../../../services/api/MediaService';
 import { vehicleMediaService } from '../../../services/api/VehicleMediaService';
+import { vehicleKeys } from './vehicles';
 import { ApiError, type JsonApiResource } from '@myfleet/shared-ts';
 import type {
   MediaObjectAttributes,
@@ -13,7 +14,7 @@ import type {
 // all                       -> ['media']
 // detail('m1')              -> ['media', 'detail', 'm1']
 // content('m1')             -> ['media', 'content', 'm1', 'original']
-// content('m1','thumbnail') -> ['media', 'content', 'm1', 'thumbnail']
+// content('m1','card')      -> ['media', 'content', 'm1', 'card']
 // vehicleMedia(vehicleId)   -> ['media', 'vehicle', vehicleId]
 export const mediaKeys = {
   all: ['media'] as const,
@@ -268,8 +269,13 @@ export function useSetPrimaryImage(vehicleId: string) {
       void queryClient.invalidateQueries({
         queryKey: mediaKeys.vehicleMedia(vehicleId),
       });
-      // Also invalidate vehicle detail so primaryImageMediaId is refreshed
-      void queryClient.invalidateQueries({ queryKey: ['vehicles', 'detail', vehicleId] });
+      // primaryImageMediaId is mirrored onto the vehicle, so BOTH the detail
+      // and every list card that renders a thumbnail from it go stale — see
+      // VehicleCard, which reads attributes.primaryImageMediaId. Missing the
+      // list invalidation left the old photo on the vehicles page until the
+      // 60s staleTime lapsed.
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.lists() });
     },
   });
 }
@@ -302,7 +308,42 @@ export function useDeleteMediaObject(options: MediaDeleteOptions = {}) {
   });
 }
 
-/** DELETE /api/media/{id} — soft delete. Invalidates vehicle media list. */
-export function useDeleteMedia(vehicleId: string) {
-  return useDeleteMediaObject({ invalidateKeys: [mediaKeys.vehicleMedia(vehicleId)] });
+/**
+ * Removes a photo from a vehicle's gallery.
+ *
+ * Two services own half of this each, and BOTH halves are required:
+ *   1. fleet-service holds the vehicle_media reference the gallery lists.
+ *   2. media-service holds the object the bytes come from.
+ *
+ * Deleting only the object (which is what this hook used to do) left the
+ * reference in place, so the gallery kept rendering a tile — now a broken one —
+ * and the removal looked like it had silently failed.
+ *
+ * Order matters. The reference goes first because it is the one the user can
+ * see; if the object delete then fails, the gallery is still correct and the
+ * orphan is swept by media-service's purge. Doing it the other way round would
+ * leave a listed reference pointing at bytes that are already gone. That is
+ * also why the object delete is best-effort: a failure there is invisible to
+ * the user and must not report the removal as failed.
+ */
+export function useRemoveVehiclePhoto(vehicleId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (mediaId: string) => {
+      await vehicleMediaService.removeMedia(vehicleId, mediaId);
+      try {
+        await mediaService.remove(mediaId);
+      } catch {
+        /* reference is gone; the object is media-service's to reap */
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: mediaKeys.vehicleMedia(vehicleId) });
+      // Removing the primary promotes a successor server-side, so the mirrored
+      // primaryImageMediaId is stale on the vehicle detail AND on every list
+      // card that renders a thumbnail from it.
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.lists() });
+    },
+  });
 }

@@ -116,6 +116,7 @@ func main() {
 		AppBaseURL:     config.Get("APP_BASE_URL", "http://localhost"),
 		HomePath:       config.Get("APP_HOME_PATH", "/"),
 		OnboardingPath: config.Get("APP_ONBOARDING_PATH", "/onboarding"),
+		LoginPath:      config.Get("APP_LOGIN_PATH", "/login"),
 		CookieSecure:   cookieSecure,
 	}
 
@@ -133,7 +134,11 @@ func main() {
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(ks.Keyfunc(), authmw.WithLogger(log)))
-				user.InitializeRoutes(log, db)(pr)
+				// Decision 1 again: compose the concrete fleet client into a
+				// function value so the user package never imports it.
+				user.InitializeRoutes(log, db, func(ctx context.Context, fleetID string) ([]string, error) {
+					return fleetClient.FleetMemberIDs(ctx, fleetID)
+				})(pr)
 			})
 		}).
 		AddRouteInitializer(func(r chi.Router) {

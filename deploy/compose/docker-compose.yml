@@ -1,7 +1,36 @@
 name: myfleet
 services:
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      # Serve the UI under /mail so the Traefik route below needs no
+      # stripprefix — a stripped prefix breaks the SPA's asset paths.
+      MP_WEBROOT: mail
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      # Published as well as routed, so the inbox is reachable even when
+      # Traefik is not up — this is the first thing a developer checks.
+      - "8025:8025"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8025/mail/ >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailpit.rule=PathPrefix(`/mail`)"
+      - "traefik.http.routers.mailpit.entrypoints=web"
+      - "traefik.http.services.mailpit.loadbalancer.server.port=8025"
+
   traefik:
-    image: traefik:v3.1
+    # v3.1's Docker provider pins client API v1.24, which daemons from Docker
+    # 25 onward refuse ("client version 1.24 is too old. Minimum supported API
+    # version is 1.40"). The provider then discovers NO containers, so every
+    # /api/* route 404s while the stack itself looks perfectly healthy — the
+    # failure is silent unless you read the Traefik log. v3.7 negotiates the
+    # API version with the daemon.
+    image: traefik:v3.7.10
     command: --configFile=/etc/traefik/traefik.yml
     ports: ["80:80", "8081:8080"]
     volumes:
@@ -75,6 +104,11 @@ services:
       # per request (FR-ADMIN-AUTH-3). Empty by default so a local stack has no
       # platform admin unless one is asked for.
       PLATFORM_ADMIN_BOOTSTRAP_EMAILS: ${PLATFORM_ADMIN_BOOTSTRAP_EMAILS:-}
+      # Without this the service falls back to its `true` default and stamps
+      # Secure on the OIDC state and refresh cookies, which this stack serves
+      # over plaintext HTTP. deploy/k8s/base/auth-service/configmap.yaml
+      # already sets false for the same reason; compose was simply missing it.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
@@ -211,6 +245,13 @@ services:
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       FLEET_INTERNAL_URL: http://fleet-service:8080
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      SMTP_ENABLED: "true"
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_TLS_MODE: none
+      SMTP_FROM_ADDRESS: invites@myfleet.local
+      SMTP_FROM_NAME: MyFleet
+      PUBLIC_WEB_URL: http://localhost
     depends_on:
       postgres:
         condition: service_healthy
@@ -219,6 +260,8 @@ services:
       auth-service:
         condition: service_healthy
       fleet-service:
+        condition: service_healthy
+      mailpit:
         condition: service_healthy
     labels:
       - "traefik.enable=true"

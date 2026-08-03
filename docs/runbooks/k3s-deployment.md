@@ -155,7 +155,7 @@ it out of image layers (the build context is the repo root for every service).
 | `auth-service-secret` | `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_PRIVATE_KEY_PEM`, `OIDC_STATE_SECRET` |
 | `fleet-service-secret` | `DATABASE_URL` |
 | `media-service-secret` | `DATABASE_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` |
-| `notification-service-secret` | `DATABASE_URL` |
+| `notification-service-secret` | `DATABASE_URL`, `SMTP_USERNAME`, `SMTP_PASSWORD` |
 | `myfleet-tls` | `tls.crt`, `tls.key` — cert for the `websecure` route set |
 
 `myfleet-tls` is not optional. Without it Traefik registers no router on :443,
@@ -330,15 +330,33 @@ CI publishes, same shape as the schema-missing `CrashLoopBackOff` above.
 
 ### How images get pinned after the first sync
 
-`.github/workflows/main.yml`'s `main` push pipeline runs `build-test` →
-`publish` (image build/push, matrix of 5: the four Go services plus `web`),
-then fans out into two jobs that both depend only on `publish` and run in
-parallel: `trivy` (a CRITICAL/HIGH vulnerability gate, same matrix,
-`fail-fast: false` so one service's findings don't hide another's) and `tag`
-(pushes the next semver tag). Trivy does **not** gate `tag` — a failing scan
-still lets the version tag land. The only job downstream of both is
-`bump-overlay`, which declares `needs: [publish, trivy]` (not `tag`). A
-failing Trivy scan on any image blocks `bump-overlay`, so
+`.github/workflows/main.yml`'s `main` push pipeline starts four jobs at once:
+the three verification-gate jobs — `backend` (vet/build/test), `frontend`
+(test/build) and `manifests` (overlay render + invariants) — plus `publish`
+(image build/push, matrix of 5: the four Go services plus `web`). `publish`
+deliberately declares no `needs`: it pushes the SHA tag only, and a SHA-tagged
+image is inert — nothing resolves it until `bump-overlay` writes that SHA into
+the overlay — so there is no reason to hold image builds behind ~3 minutes of
+test time.
+
+`:latest` is a different matter and is **not** pushed by `publish`. Because
+`deploy/k8s/base/*/deployment.yaml` reference it (see the bootstrap note
+above), it is a real deploy input for a fresh cluster's first sync. A separate
+`retag-latest` job moves it, gated exactly like `bump-overlay` —
+`needs: [backend, frontend, manifests, publish, trivy]` — using `docker buildx
+imagetools create` to re-point the existing manifest list without rebuilding or
+re-uploading any layer.
+
+`trivy` (a CRITICAL/HIGH vulnerability gate, same matrix, `fail-fast: false` so
+one service's findings don't hide another's) depends only on `publish`, since
+it needs the image and nothing else.
+
+The two jobs with an effect outside the workflow both wait on the full gate:
+`tag` (pushes the next semver tag) declares `needs: [backend, frontend,
+manifests, publish]`, and `bump-overlay` declares `needs: [backend, frontend,
+manifests, publish, trivy]`. So an untested commit can be neither tagged nor
+deployed. Trivy does **not** gate `tag` — a failing scan still lets the version
+tag land. A failing Trivy scan on any image does block `bump-overlay`, so
 `deploy/k8s/overlays/main/kustomization.yaml` keeps its previous `newTag` and
 the cluster keeps running the last good SHA — the gate fails closed, even
 though the SHA already got a version tag.
@@ -348,7 +366,7 @@ cancel-in-progress: false}` so overlapping runs (two merges to `main` in quick
 succession) queue rather than race, and a stale-run guard: before rewriting
 `newTag`, it checks that `main`'s current tip still matches the SHA this run
 built; if a later merge's `bump-overlay` already landed while this run was
-still going through `build-test`/`publish`/`trivy`, it exits cleanly instead of
+still going through the gate/`publish`/`trivy`, it exits cleanly instead of
 pinning the overlay backwards to a stale commit.
 
 ## 7. Post-deploy verification
@@ -425,6 +443,144 @@ Then, in a browser on `https://myfleet.tumidanski.com`:
 - confirm a commit to `main` bumps the overlay SHA and Argo CD rolls the
   affected Deployments with no manual intervention
 
+## 8. Invite email (SMTP) — enabling it
+
+Invite email ships **off**. `SMTP_ENABLED: "false"` in
+`deploy/k8s/base/notification-service/configmap.yaml` makes the whole path a
+documented no-op: invites are still created, `invite.created` is still emitted
+and consumed, the `skipped_disabled` outcome increments, and nothing dials a
+relay. Everything below is what it takes to turn it on. Do the prerequisite
+first — flipping the flag without it produces mail that lands in spam and
+burns the domain's sending reputation, which is slow to undo.
+
+### 8.1 Prerequisite — a verified sending domain
+
+Out of repo, and the reason this ships disabled. You need SPF, DKIM and DMARC
+published for the domain in `SMTP_FROM_ADDRESS` (`myfleet.tumidanski.com`).
+
+The config surface is provider-generic on purpose, so switching providers later
+is a Secret edit and a pod restart, not a code change. The reference provider is
+Resend (free tier: 3,000/month, 100/day):
+
+- host `smtp.resend.com`, port `587`, STARTTLS
+- username is the literal string `resend`
+- password is the API key
+
+Verify the DNS records have actually propagated before continuing — a verified
+domain in the provider's dashboard is not the same as a resolvable record:
+
+```sh
+dig +short TXT myfleet.tumidanski.com            # SPF
+dig +short TXT _dmarc.myfleet.tumidanski.com     # DMARC
+# DKIM selector is provider-specific; Resend prints it during domain setup
+```
+
+### 8.2 Apply the relay credentials
+
+`SMTP_USERNAME` and `SMTP_PASSWORD` live in `notification-service-secret`
+(step 3), never in the ConfigMap. `secrets.example.yaml` already ships both keys
+as `REPLACE_ME`. Edit your kept `deploy/k8s/secrets.yaml` and re-apply:
+
+```sh
+kubectl apply -n myfleet -f deploy/k8s/secrets.yaml
+```
+
+Applying a Secret does **not** restart the consuming pod — the env vars are read
+once at process start. Roll it explicitly in 8.3.
+
+### 8.3 Flip the flag
+
+`SMTP_ENABLED` lives in the base ConfigMap, so this is a commit to `main` that
+Argo CD syncs, not a `kubectl edit` (`selfHeal` reverts manual edits):
+
+```yaml
+# deploy/k8s/base/notification-service/configmap.yaml
+SMTP_ENABLED: "true"
+```
+
+Then force the pod to pick up both the new ConfigMap and the Secret:
+
+```sh
+kubectl -n myfleet rollout restart deploy/notification-service
+kubectl -n myfleet rollout status  deploy/notification-service
+```
+
+### 8.4 Startup is the failure point — check the logs first
+
+`mailer.ConfigFromEnv` validates at **startup and panics**, deliberately, so a
+misconfiguration surfaces as a `CrashLoopBackOff` on the rollout rather than as
+one silently failed email per invite hours later. When `SMTP_ENABLED` is `true`
+it hard-requires `SMTP_HOST`, `SMTP_FROM_ADDRESS` and `PUBLIC_WEB_URL`, and
+requires `SMTP_USERNAME`/`SMTP_PASSWORD` unless `SMTP_TLS_MODE` is `none`.
+
+```sh
+kubectl -n myfleet logs deploy/notification-service --tail=50
+```
+
+A panic naming an `SMTP_*` key means the Secret did not reach the pod — the
+usual cause is applying the Secret without restarting, or a `secrets.yaml`
+document-fusion mistake (see the `>>` warning in step 3, which drops the
+`*-service-secret` Secrets silently).
+
+`SMTP_TLS_MODE` accepts exactly `starttls`, `tls` or `none`. Anything else is a
+startup panic. `none` is plaintext and **local-only** — `tools/check-manifests.sh`
+fails the build if it ever renders into the main overlay, so it cannot reach
+production by way of a base edit.
+
+### 8.5 Verify delivery
+
+There is no in-cluster mail sink; verification is an end-to-end send. Create an
+invite in the UI to an address you control, then:
+
+```sh
+# All five outcomes are on this counter. "sent" is the one you want.
+kubectl -n myfleet exec deploy/notification-service -- \
+  wget -qO- http://localhost:8080/metrics | grep myfleet_invite_emails_total
+```
+
+| Outcome | Means |
+|---|---|
+| `sent` | delivered to the relay |
+| `skipped_disabled` | `SMTP_ENABLED` is still `false` — the flag did not take |
+| `skipped_stale` | invite already accepted, expired, or deleted before the email went out |
+| `failed_permanent` | relay rejected the recipient (5xx) — one attempt, no retry |
+| `failed_transient` | dial/4xx/timeout — retried on a bounded 2s/8s/32s schedule, then given up on |
+
+`failed_transient` climbing steadily means the relay is unreachable or the
+credentials are wrong (an auth refusal classifies as transient and burns all
+four attempts). Check the pod logs for the SMTP error — the message body and the
+invite token are deliberately never logged, so the log line will name the
+protocol failure and nothing else.
+
+**Retry is bounded and mail is not durable.** A relay outage longer than the
+~42s budget drops that invite's email permanently; the event ledger is marked
+either way, so it is not retried on redelivery. The recovery path is the
+**Copy link** button on the pending invite in the UI, which is why that control
+exists. There is no dead-letter queue.
+
+### 8.6 Turning it back off
+
+Set `SMTP_ENABLED: "false"` and roll. The consumer short-circuits before any
+network call, so this is safe to do mid-incident and costs nothing but
+undelivered invites — which remain recoverable via **Copy link**.
+
+### 8.7 Local development — Mailpit, not a real relay
+
+Neither compose nor k3s-local ever dials a real relay; both point at a bundled
+[Mailpit](https://mailpit.axllent.org/) sink with `SMTP_TLS_MODE: none` and no
+credentials. `make ci` needs no relay at all — every mailer test uses an
+in-memory fake.
+
+```sh
+# docker compose: Mailpit's inbox is published directly and also routed at /mail
+make up
+open http://localhost:8025
+
+# k3s-local: no ingress route (Mailpit's SPA breaks under a stripped prefix)
+kubectl port-forward -n myfleet svc/mailpit 8025:8025
+open http://localhost:8025
+```
+
 ## Known constraints
 
 **`myfleet.home` cannot hold a session — use `myfleet.tumidanski.me` instead.**
@@ -454,6 +610,10 @@ shared Postgres whose backup policy is out of scope here. Worth a follow-up.
 Out-of-band Secrets are unaffected, being untracked.
 
 **A second MyFleet environment on this broker would cross-talk.** Kafka topics
-are a flat namespace and the consumer group is fixed at `notification`, so two
-environments would share both. Isolation means making those constants
-configurable — a code change, not a manifest change.
+are a flat namespace and both consumer groups are hard-coded — `notification`
+(`apps/notification-service/internal/consumer/consume.go`) and `invite-email`
+(`apps/notification-service/internal/mailconsumer/consume.go`) — so two
+environments would share all of them. Isolation means making those constants
+configurable — a code change, not a manifest change. Note the second
+environment would also *send real invite email* to whatever addresses the first
+one's invites carry, if both have `SMTP_ENABLED=true`.

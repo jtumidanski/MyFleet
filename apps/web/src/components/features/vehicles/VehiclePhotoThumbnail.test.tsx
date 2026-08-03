@@ -45,15 +45,16 @@ describe('VehiclePhotoThumbnail', () => {
     expect(img).toHaveAttribute('src', expect.stringContaining('blob:'));
   });
 
-  it('requests the thumbnail variant, not the original', async () => {
+  it('requests the card variant, not the original', async () => {
     // The whole point of the backend half of this task: a card must cost
-    // kilobytes, not the full-size upload.
+    // kilobytes, not the full-size upload — and at a resolution that matches the
+    // 16:9 hero it is rendered into, which `thumbnail` (320px) did not.
     vi.mocked(mediaService.getContentBlob).mockResolvedValue(new Blob(['x']));
 
     renderWithProviders(<VehiclePhotoThumbnail mediaId="m1" vehicleLabel="2019 Honda Civic" />);
 
     await waitFor(() => {
-      expect(mediaService.getContentBlob).toHaveBeenCalledWith('m1', 'thumbnail');
+      expect(mediaService.getContentBlob).toHaveBeenCalledWith('m1', 'card');
     });
   });
 
@@ -124,5 +125,46 @@ describe('VehiclePhotoThumbnail', () => {
     // The skeleton occupies exactly the thumbnail's box so the card does not
     // reflow when the image arrives.
     expect(container.querySelector('.h-20.w-20')).toBeInTheDocument();
+  });
+
+  describe('boxClassName override', () => {
+    const BOX = 'aspect-[16/9] w-full rounded-none';
+
+    it('reaches the no-photo placeholder', () => {
+      renderWithProviders(<VehiclePhotoThumbnail vehicleLabel="Civic" boxClassName={BOX} />);
+      expect(screen.getByRole('img', { name: 'No photo' })).toHaveClass('aspect-[16/9]', 'w-full');
+    });
+
+    it('reaches the loading skeleton', () => {
+      // The blob promise is left pending, so the component stays in isLoading.
+      vi.mocked(mediaService.getContentBlob).mockReturnValue(new Promise(() => {}));
+      const { container } = renderWithProviders(
+        <VehiclePhotoThumbnail mediaId="m1" vehicleLabel="Civic" boxClassName={BOX} />,
+      );
+      expect(container.querySelector('.aspect-\\[16\\/9\\]')).toBeInTheDocument();
+    });
+
+    it('reaches the failed-photo placeholder', async () => {
+      vi.mocked(mediaService.getContentBlob).mockRejectedValue(new Error('nope'));
+      renderWithProviders(
+        <VehiclePhotoThumbnail mediaId="m1" vehicleLabel="Civic" boxClassName={BOX} />,
+      );
+      const placeholder = await screen.findByRole('img', { name: 'Photo unavailable' });
+      expect(placeholder).toHaveClass('aspect-[16/9]', 'w-full');
+    });
+
+    it('reaches the loaded image', async () => {
+      vi.mocked(mediaService.getContentBlob).mockResolvedValue(new Blob(['x']));
+      renderWithProviders(
+        <VehiclePhotoThumbnail mediaId="m1" vehicleLabel="Civic" boxClassName={BOX} />,
+      );
+      const img = await screen.findByAltText('Photo of Civic');
+      expect(img).toHaveClass('aspect-[16/9]', 'w-full', 'object-cover');
+    });
+
+    it('keeps the 80x80 square when no override is given', () => {
+      renderWithProviders(<VehiclePhotoThumbnail vehicleLabel="Civic" />);
+      expect(screen.getByRole('img', { name: 'No photo' })).toHaveClass('h-20', 'w-20');
+    });
   });
 });

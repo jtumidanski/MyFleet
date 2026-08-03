@@ -24,8 +24,13 @@ class FuelService extends BaseService<
   protected readonly basePath = '/api/fleet/fuel-logs';
 
   /** GET /api/fleet/vehicles/{vehicleId}/fuel-logs */
-  listByVehicle(vehicleId: string) {
-    return this.listAt(`/api/fleet/vehicles/${vehicleId}/fuel-logs`);
+  listByVehicle(vehicleId: string, params?: { page?: number; pageSize?: number }) {
+    const search = new URLSearchParams();
+    if (params?.page != null) search.set('page[number]', String(params.page));
+    if (params?.pageSize != null) search.set('page[size]', String(params.pageSize));
+    const qs = search.toString();
+    const path = `/api/fleet/vehicles/${vehicleId}/fuel-logs`;
+    return this.listAt(qs ? `${path}?${qs}` : path);
   }
 
   /** POST /api/fleet/vehicles/{vehicleId}/fuel-logs */

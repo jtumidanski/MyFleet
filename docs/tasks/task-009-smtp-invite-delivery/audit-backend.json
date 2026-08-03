@@ -1,0 +1,100 @@
+{
+  "service": "task-009-smtp-invite-delivery (fleet-service + notification-service + shared-go)",
+  "path": "apps/fleet-service, apps/notification-service, packages/shared-go, packages/dto-go",
+  "date": "2026-08-02",
+  "build": "pass",
+  "testsPassed": 6,
+  "testsFailed": 0,
+  "overallStatus": "needs-work",
+  "domains": [
+    {
+      "name": "apps/fleet-service/internal/invite",
+      "type": "domain",
+      "checks": [
+        { "id": "DOM-01", "name": "builder.go exists with validating Build()", "status": "fail", "evidence": "apps/fleet-service/internal/invite/builder.go:33 — Build() returns b.m, enforces no invariants" },
+        { "id": "DOM-02", "name": "ToEntity() method", "status": "pass", "evidence": "apps/fleet-service/internal/invite/entity.go:43" },
+        { "id": "DOM-03", "name": "Make(Entity) function", "status": "warn", "evidence": "apps/fleet-service/internal/invite/entity.go:28 — returns Model, not (Model, error)" },
+        { "id": "DOM-04", "name": "Transform function", "status": "pass", "evidence": "apps/fleet-service/internal/invite/rest.go:21" },
+        { "id": "DOM-05", "name": "TransformSlice used by list handler", "status": "pass", "evidence": "apps/fleet-service/internal/invite/rest.go:42; resource.go:130" },
+        { "id": "DOM-06", "name": "Processor accepts logrus.FieldLogger", "status": "pass", "evidence": "apps/fleet-service/internal/invite/processor.go:20" },
+        { "id": "DOM-07", "name": "Handlers log errors with a request-scoped logger", "status": "fail", "evidence": "apps/fleet-service/internal/invite/resource.go:1-273 — zero log calls in 5 handlers; internal.go:53,63 logs without correlation ID" },
+        { "id": "DOM-08", "name": "POST uses typed input handler", "status": "pass", "evidence": "apps/fleet-service/internal/invite/resource.go:48; body-less actions bare per patterns-rest-jsonapi.md:69-72" },
+        { "id": "DOM-09", "name": "Transform errors handled", "status": "pass", "evidence": "apps/fleet-service/internal/invite/rest.go:21 — Transform returns no error" },
+        { "id": "DOM-10", "name": "Providers context-carrying", "status": "fail", "evidence": "apps/fleet-service/internal/invite/provider.go:26,30,41,52,64 — bare p.db, no WithContext (testing-guide.md:213)" },
+        { "id": "DOM-11", "name": "No os.Getenv() in handlers", "status": "pass", "evidence": "zero matches in apps/fleet-service/internal/invite/; limits injected at cmd/main.go:185-189" },
+        { "id": "DOM-12", "name": "No business logic in handlers", "status": "fail", "evidence": "apps/fleet-service/internal/invite/resource.go:93,99-106,212,222,227" },
+        { "id": "DOM-13", "name": "Handlers don't call providers directly", "status": "pass", "evidence": "apps/fleet-service/internal/invite/resource.go:88,125,138,179,217,241 — proc.* only" },
+        { "id": "DOM-14", "name": "Writes go processor to administrator", "status": "fail", "evidence": "apps/fleet-service/internal/invite/resource.go:43,108,163,227,256 — handlers call adm.* directly" },
+        { "id": "DOM-15", "name": "administrator.go exists", "status": "pass", "evidence": "apps/fleet-service/internal/invite/administrator.go:43,90" },
+        { "id": "DOM-16", "name": "Domain error to HTTP status mapping", "status": "pass", "evidence": "packages/shared-go/server/errors.go:18,38" },
+        { "id": "DOM-17", "name": "JSON:API interface on REST models", "status": "pass", "evidence": "packages/shared-go/server/jsonapi.go:9-14; rest.go:34-38 (house convention, not api2go)" },
+        { "id": "DOM-18", "name": "Flat request models", "status": "warn", "evidence": "apps/fleet-service/internal/invite/resource.go:48-51 — inline anonymous struct, not a named type in rest.go" },
+        { "id": "DOM-19", "name": "Table-driven tests", "status": "pass", "evidence": "apps/fleet-service/internal/invite/processor_test.go:86,113,134" },
+        { "id": "DOM-19b", "name": "REST status mapping tested", "status": "fail", "evidence": "no resource_test.go in apps/fleet-service/internal/invite/; resource.go:195-198 cross-fleet 404 untested" }
+      ]
+    },
+    {
+      "name": "apps/notification-service/internal/mailer",
+      "type": "infrastructure",
+      "checks": [
+        { "id": "SUB-01", "name": "Logic not in handler", "status": "pass", "evidence": "apps/notification-service/internal/mailer/sender.go:1-8 — declared infrastructure; transport only" },
+        { "id": "SUB-02", "name": "No direct DB writes", "status": "pass", "evidence": "no gorm import in apps/notification-service/internal/mailer/" },
+        { "id": "SUB-03", "name": "Typed input handler for POST", "status": "pass", "evidence": "N/A — package exposes no HTTP handlers" },
+        { "id": "SUB-04", "name": "No manual JSON parsing in handlers", "status": "pass", "evidence": "N/A — no handlers" }
+      ]
+    },
+    {
+      "name": "apps/notification-service/internal/mailconsumer",
+      "type": "infrastructure",
+      "checks": [
+        { "id": "SUB-01", "name": "Logic not in handler", "status": "pass", "evidence": "apps/notification-service/internal/mailconsumer/consume.go:100; collaborators injected at :58" },
+        { "id": "SUB-02", "name": "No direct DB writes", "status": "pass", "evidence": "apps/notification-service/internal/mailconsumer/consume.go:37-40 — Inbox seam" },
+        { "id": "SUB-03", "name": "Typed input handler for POST", "status": "pass", "evidence": "N/A — Kafka consumer, no HTTP handlers" },
+        { "id": "SUB-04", "name": "No manual JSON parsing in handlers", "status": "pass", "evidence": "no json decoding in apps/notification-service/internal/mailconsumer/consume.go" }
+      ]
+    },
+    {
+      "name": "security",
+      "type": "sec",
+      "checks": [
+        { "id": "SEC-01", "name": "Internal endpoint off the JWT tree", "status": "pass", "evidence": "apps/fleet-service/internal/invite/internal_test.go:147; cmd/main.go:182 vs :199" },
+        { "id": "SEC-01b", "name": "Internal endpoint off the public internet", "status": "pass", "evidence": "deploy/k8s/overlays/main/ingressroute.yaml:16-23,88-96" },
+        { "id": "SEC-02", "name": "Token absent from event payload", "status": "pass", "evidence": "packages/dto-go/events/payloads.go:47-51; apps/fleet-service/internal/events/emit_test.go:77" },
+        { "id": "SEC-02b", "name": "Token absent from logs/errors/metrics", "status": "pass", "evidence": "apps/notification-service/internal/mailconsumer/consume_test.go:350; mailer/metrics.go:11-17" },
+        { "id": "SEC-03", "name": "No open redirect", "status": "pass", "evidence": "apps/notification-service/internal/mailconsumer/consume.go:172-173; mailer/config.go:61" },
+        { "id": "SEC-04", "name": "No hardcoded secrets", "status": "pass", "evidence": "apps/notification-service/internal/mailer/config.go:52-65" },
+        { "id": "SEC-05", "name": "Header injection blocked", "status": "pass", "evidence": "apps/fleet-service/internal/invite/processor.go:70-79; mailer/compose.go:38,82; mailer/compose_test.go:91" },
+        { "id": "SEC-06", "name": "TLS verification on, no downgrade", "status": "pass", "evidence": "apps/notification-service/internal/mailer/smtp.go:64,107-110,111; tools/check-manifests.sh:55-56" },
+        { "id": "SEC-07", "name": "Credentials sent only after TLS upgrade", "status": "pass", "evidence": "apps/notification-service/internal/mailer/smtp.go:44,50,111" },
+        { "id": "SEC-08", "name": "Resend authz, no cross-fleet existence leak", "status": "warn", "evidence": "apps/fleet-service/internal/invite/resource.go:185,195-198,200,205 — correct but untested" },
+        { "id": "SEC-09", "name": "No internal error text disclosure", "status": "fail", "evidence": "packages/shared-go/server/jsonapi.go:35 + errors.go:41; fed raw errors at invite/resource.go:89,110,229" },
+        { "id": "SEC-10", "name": "Bearer token not in URL path", "status": "warn", "evidence": "apps/fleet-service/internal/invite/resource.go:237; apps/notification-service/internal/mailconsumer/consume.go:172" }
+      ]
+    },
+    {
+      "name": "correctness",
+      "type": "correctness",
+      "checks": [
+        { "id": "C-1", "name": "Resend ignores RowsAffected and accepted_at", "status": "fail", "evidence": "apps/fleet-service/internal/invite/administrator.go:95-101,103-113" },
+        { "id": "C-2", "name": "Token-leak test blind to non-string log fields", "status": "warn", "evidence": "apps/notification-service/internal/mailconsumer/consume_test.go:382-390" },
+        { "id": "C-3", "name": "TLSModeNone does not reject configured credentials", "status": "warn", "evidence": "apps/notification-service/internal/mailer/config.go:76; smtp.go:121-125,163" }
+      ]
+    }
+  ],
+  "blocking": [
+    "DOM-07: apps/fleet-service/internal/invite/resource.go:1-273 — zero error logging across 5 handlers; internal.go:53,63 logs without correlation ID",
+    "SEC-09: apps/fleet-service/internal/invite/resource.go:89,110,229 — raw GORM errors reach the client via jsonapi.go:35",
+    "C-1: apps/fleet-service/internal/invite/administrator.go:95-101 — Resend ignores RowsAffected, not conditioned on accepted_at IS NULL",
+    "DOM-19b: apps/fleet-service/internal/invite — no resource_test.go; resource.go:195-198 cross-fleet 404 untested",
+    "DOM-01: apps/fleet-service/internal/invite/builder.go:33 — Build() enforces no invariants",
+    "DOM-10: apps/fleet-service/internal/invite/provider.go:26,62 — providers use a bare startup *gorm.DB, no WithContext",
+    "DOM-12/DOM-14: apps/fleet-service/internal/invite/resource.go:43,93,99-106,108,163,212,222,227,256 — business logic and administrator calls in handlers"
+  ],
+  "nonBlocking": [
+    "SEC-10: apps/fleet-service/internal/invite/resource.go:237 — bearer token in the URL path, now distributed by email",
+    "C-2: apps/notification-service/internal/mailconsumer/consume_test.go:382 — fmtValue returns \"\" for non-string/error log fields",
+    "C-3: apps/notification-service/internal/mailer/config.go:76 — credentials permitted with SMTP_TLS_MODE=none",
+    "DOM-18: apps/fleet-service/internal/invite/resource.go:48-51 — inline anonymous request struct instead of a named type in rest.go",
+    "DOM-03: apps/fleet-service/internal/invite/entity.go:28 — Make returns Model, not (Model, error)"
+  ]
+}

@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vehicle page — layout options</title>
+<style>
+/* ── MyFleet tokens (copied from apps/web/src/index.css) ───────────────── */
+:root{
+  --background:0 0% 100%; --foreground:222.2 84% 4.9%;
+  --card:0 0% 100%; --card-foreground:222.2 84% 4.9%;
+  --primary:222.2 47.4% 11.2%; --primary-foreground:210 40% 98%;
+  --secondary:210 40% 96.1%; --secondary-foreground:222.2 47.4% 11.2%;
+  --muted:210 40% 96.1%; --muted-foreground:215.4 16.3% 46.9%;
+  --accent:210 40% 96.1%; --destructive:0 84.2% 60.2%;
+  --border:214.3 31.8% 91.4%; --input:214.3 31.8% 91.4%; --ring:222.2 84% 4.9%;
+  --success:142.4 71.8% 29.2%; --success-subtle:140.6 84.2% 92.5%;
+  --success-subtle-foreground:142.8 64.2% 24.1%; --success-border:141 78.9% 85.1%;
+  --warning:26 90.5% 37.1%; --warning-subtle:48 96.5% 88.8%;
+  --warning-subtle-foreground:22.7 82.5% 31.4%; --warning-border:48 96.6% 76.7%;
+  --danger:0 72.2% 41.1%; --danger-subtle:0 93.3% 94.1%;
+  --danger-subtle-foreground:0 70% 35.3%; --danger-border:0 96.3% 89.4%;
+  --info:224.3 76.3% 48%; --info-subtle:214.3 94.6% 92.7%;
+  --info-subtle-foreground:226 70.7% 40.2%; --info-border:213.3 96.9% 87.3%;
+  --violet-subtle:270 90% 95%; --violet-subtle-fg:272 50% 35%; --violet-border:270 70% 88%;
+  --radius:.5rem;
+}
+.dark{
+  --background:222.2 84% 4.9%; --foreground:210 40% 98%;
+  --card:222.2 84% 4.9%; --card-foreground:210 40% 98%;
+  --primary:210 40% 98%; --primary-foreground:222.2 47.4% 11.2%;
+  --secondary:217.2 32.6% 17.5%; --secondary-foreground:210 40% 98%;
+  --muted:217.2 32.6% 17.5%; --muted-foreground:215 20.2% 65.1%;
+  --accent:217.2 32.6% 17.5%; --destructive:0 62.8% 30.6%;
+  --border:217.2 32.6% 17.5%; --input:217.2 32.6% 17.5%; --ring:212.7 26.8% 83.9%;
+  --success:141.7 76.6% 73.1%; --success-subtle:142 40% 14%;
+  --success-subtle-foreground:142 70% 78%; --success-border:142 35% 24%;
+  --warning:38 92% 70%; --warning-subtle:32 45% 14%;
+  --warning-subtle-foreground:40 90% 76%; --warning-border:34 40% 26%;
+  --danger:0 90.6% 70.8%; --danger-subtle:0 45% 15%;
+  --danger-subtle-foreground:0 90% 78%; --danger-border:0 40% 26%;
+  --info:213.1 93.9% 67.8%; --info-subtle:220 45% 16%;
+  --info-subtle-foreground:213 95% 78%; --info-border:218 40% 27%;
+  --violet-subtle:272 40% 18%; --violet-subtle-fg:270 85% 82%; --violet-border:270 35% 30%;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:hsl(var(--background));color:hsl(var(--foreground));
+  font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,dl,dd,figure{margin:0}
+button{font:inherit;color:inherit}
+table{border-collapse:collapse;width:100%}
+
+/* ── mockup chrome (NOT part of the design) ───────────────────────────── */
+.chrome{position:sticky;top:0;z-index:40;display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;
+  padding:.6rem 1.25rem;background:hsl(var(--secondary));border-bottom:1px solid hsl(var(--border))}
+.chrome .brand{font-weight:600;letter-spacing:-.01em;margin-right:.5rem}
+.chrome .hint{color:hsl(var(--muted-foreground));font-size:12px;margin-left:auto}
+.seg{display:inline-flex;border:1px solid hsl(var(--border));border-radius:var(--radius);overflow:hidden;background:hsl(var(--card))}
+.seg button{border:0;background:transparent;padding:.4rem .8rem;cursor:pointer;font-size:13px;white-space:nowrap}
+.seg button+button{border-left:1px solid hsl(var(--border))}
+.seg button[aria-pressed=true]{background:hsl(var(--primary));color:hsl(var(--primary-foreground))}
+
+/* ── primitives ───────────────────────────────────────────────────────── */
+.card{background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:var(--radius)}
+.card>.body{padding:1.25rem}
+.card>.head{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;
+  padding:1rem 1.25rem;border-bottom:1px solid hsl(var(--border))}
+.card>.head h2{font-size:14px;font-weight:600}
+.btn{display:inline-flex;align-items:center;gap:.4rem;border-radius:calc(var(--radius) - 2px);
+  border:1px solid transparent;padding:.4rem .75rem;font-size:13px;font-weight:500;cursor:pointer;
+  background:hsl(var(--primary));color:hsl(var(--primary-foreground));white-space:nowrap}
+.btn.outline{background:transparent;border-color:hsl(var(--border));color:hsl(var(--foreground))}
+.btn.ghost{background:transparent;color:hsl(var(--muted-foreground));border-color:transparent}
+.btn.ghost:hover{background:hsl(var(--accent));color:hsl(var(--foreground))}
+.btn.danger{background:transparent;border-color:hsl(var(--border));color:hsl(var(--danger))}
+.btn.sm{padding:.25rem .55rem;font-size:12px}
+.btn.block{width:100%;justify-content:flex-start}
+.badge{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.15rem .6rem;
+  font-size:12px;font-weight:500;border:1px solid}
+.badge.ok{background:hsl(var(--success-subtle));color:hsl(var(--success-subtle-foreground));border-color:hsl(var(--success-border))}
+.badge.warn{background:hsl(var(--warning-subtle));color:hsl(var(--warning-subtle-foreground));border-color:hsl(var(--warning-border))}
+.badge.bad{background:hsl(var(--danger-subtle));color:hsl(var(--danger-subtle-foreground));border-color:hsl(var(--danger-border))}
+.badge.info{background:hsl(var(--info-subtle));color:hsl(var(--info-subtle-foreground));border-color:hsl(var(--info-border))}
+.badge.mod{background:hsl(var(--violet-subtle));color:hsl(var(--violet-subtle-fg));border-color:hsl(var(--violet-border))}
+.badge.mute{background:hsl(var(--muted));color:hsl(var(--muted-foreground));border-color:hsl(var(--border))}
+.muted{color:hsl(var(--muted-foreground))}
+.xs{font-size:12px}
+.row{display:flex;align-items:center;gap:.5rem}
+.wrap{flex-wrap:wrap}
+.spread{display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap}
+.tbl th{text-align:left;font-weight:500;color:hsl(var(--muted-foreground));font-size:12px;
+  padding:.4rem .75rem;border-bottom:1px solid hsl(var(--border))}
+.tbl td{padding:.55rem .75rem;border-bottom:1px solid hsl(var(--border));font-size:13px}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover{background:hsl(var(--muted)/.6)}
+.num{font-variant-numeric:tabular-nums}
+.photo{background:linear-gradient(135deg,hsl(var(--muted)),hsl(var(--accent)));
+  border:1px solid hsl(var(--border));border-radius:var(--radius);display:grid;place-items:center;
+  color:hsl(var(--muted-foreground));font-size:11px;overflow:hidden}
+.stack{display:flex;flex-direction:column;gap:1rem}
+.page{padding:1.5rem 1.25rem 5rem;max-width:1600px;margin:0 auto}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* stat strip */
+.stats{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.stat{background:hsl(var(--card));border:1px solid hsl(var(--border));border-radius:var(--radius);padding:.7rem .9rem}
+.stat .k{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:hsl(var(--muted-foreground))}
+.stat .v{font-size:20px;font-weight:600;letter-spacing:-.02em;line-height:1.25;margin-top:.15rem}
+.stat .s{font-size:12px;color:hsl(var(--muted-foreground))}
+
+/* dialogs */
+dialog{border:1px solid hsl(var(--border));border-radius:var(--radius);padding:0;width:min(560px,92vw);
+  background:hsl(var(--card));color:hsl(var(--foreground));box-shadow:0 24px 48px -12px rgb(0 0 0/.35)}
+dialog::backdrop{background:rgb(0 0 0/.55)}
+dialog .dhead{padding:1.1rem 1.25rem .25rem}
+dialog .dhead h3{font-size:16px;font-weight:600}
+dialog .dbody{padding:1rem 1.25rem;display:grid;gap:.85rem}
+dialog .dfoot{display:flex;justify-content:flex-end;gap:.5rem;padding:1rem 1.25rem;border-top:1px solid hsl(var(--border))}
+.field{display:grid;gap:.3rem}
+.field label{font-size:12px;font-weight:500}
+.field input,.field select,.field textarea{width:100%;padding:.45rem .6rem;font:inherit;font-size:13px;
+  border:1px solid hsl(var(--input));border-radius:calc(var(--radius) - 2px);
+  background:hsl(var(--background));color:hsl(var(--foreground))}
+.grid2{display:grid;gap:.85rem;grid-template-columns:1fr 1fr}
+@media(max-width:520px){.grid2{grid-template-columns:1fr}}
+
+/* drawer (option C) */
+.drawer{position:fixed;inset:0;z-index:50;display:none}
+.drawer[open]{display:block}
+.drawer .scrim{position:absolute;inset:0;background:rgb(0 0 0/.5)}
+.drawer .panel{position:absolute;top:0;right:0;height:100%;width:min(440px,92vw);overflow:auto;
+  background:hsl(var(--card));border-left:1px solid hsl(var(--border));padding:1.25rem;display:grid;gap:1rem;align-content:start}
+
+/* ── OPTION A: command center ─────────────────────────────────────────── */
+#optA .hero{display:grid;grid-template-columns:200px 1fr auto;gap:1.25rem;align-items:center}
+#optA .hero .photo{height:130px}
+#optA .cols{display:grid;gap:1rem;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);align-items:start}
+#optA .sched{display:grid;gap:.75rem;grid-template-columns:1fr 1fr}
+.schedtile{border:1px solid hsl(var(--border));border-radius:var(--radius);padding:.75rem;display:grid;gap:.35rem}
+.schedtile.due{border-color:hsl(var(--warning-border));background:hsl(var(--warning-subtle)/.45)}
+.bar{height:4px;border-radius:999px;background:hsl(var(--muted));overflow:hidden}
+.bar i{display:block;height:100%;background:hsl(var(--warning))}
+@media(max-width:1180px){#optA .cols{grid-template-columns:1fr}}
+@media(max-width:760px){#optA .hero{grid-template-columns:1fr}#optA .sched{grid-template-columns:1fr}}
+
+/* ── OPTION B: tabbed workspace ───────────────────────────────────────── */
+#optB .topbar{position:sticky;top:49px;z-index:20;background:hsl(var(--background));
+  border-bottom:1px solid hsl(var(--border));padding:.85rem 0 0}
+#optB .tabs{display:flex;gap:.25rem;overflow-x:auto;margin-top:.85rem}
+#optB .tabs button{border:0;background:transparent;padding:.55rem .9rem;cursor:pointer;font-size:13px;
+  font-weight:500;color:hsl(var(--muted-foreground));border-bottom:2px solid transparent;white-space:nowrap}
+#optB .tabs button[aria-selected=true]{color:hsl(var(--foreground));border-bottom-color:hsl(var(--primary))}
+#optB .pane{display:none;padding-top:1.25rem}
+#optB .pane.on{display:block}
+#optB .two{display:grid;gap:1rem;grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}
+#optB .gallery{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+#optB .gallery .photo{height:120px}
+@media(max-width:1024px){#optB .two{grid-template-columns:1fr}}
+
+/* ── OPTION C: rail + records ─────────────────────────────────────────── */
+#optC .shell{display:grid;gap:1.25rem;grid-template-columns:320px minmax(0,1fr);align-items:start}
+#optC .rail{position:sticky;top:70px;display:grid;gap:1rem}
+#optC .rail .photo{height:160px}
+#optC .facts{display:grid;gap:.7rem}
+#optC .facts .k{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:hsl(var(--muted-foreground))}
+#optC .strip{display:grid;gap:.75rem;grid-template-columns:repeat(auto-fit,minmax(210px,1fr))}
+#optC .chips{display:flex;gap:.4rem;flex-wrap:wrap}
+.chip{border:1px solid hsl(var(--border));background:transparent;color:hsl(var(--muted-foreground));
+  border-radius:999px;padding:.2rem .7rem;font-size:12px;cursor:pointer}
+.chip[aria-pressed=true]{background:hsl(var(--primary));color:hsl(var(--primary-foreground));border-color:hsl(var(--primary))}
+#optC .thumbs{display:grid;gap:.5rem;grid-template-columns:repeat(3,1fr)}
+#optC .thumbs .photo{height:56px}
+@media(max-width:1024px){#optC .shell{grid-template-columns:1fr}#optC .rail{position:static}}
+
+[hidden]{display:none !important}
+</style>
+</head>
+<body>
+
+<!-- ══ mockup chrome ══ -->
+<div class="chrome">
+  <span class="brand">Vehicle page</span>
+  <div class="seg" role="group" aria-label="Layout option">
+    <button data-opt="A" aria-pressed="true">A · Command Center</button>
+    <button data-opt="B" aria-pressed="false">B · Tabbed Workspace</button>
+    <button data-opt="C" aria-pressed="false">C · Rail + Records</button>
+  </div>
+  <button class="btn outline sm" id="themeBtn">◐ Dark</button>
+  <span class="hint">Static mockup · buttons open real dialogs · resize the window to see the responsive behaviour</span>
+</div>
+
+<!-- ══════════════════════ OPTION A ══════════════════════ -->
+<main class="page" id="optA">
+  <div class="stack">
+
+    <div class="card">
+      <div class="body hero">
+        <div class="photo" style="height:130px">primary photo</div>
+        <div>
+          <div class="row wrap">
+            <h1 style="font-size:22px;font-weight:600;letter-spacing:-.02em">The Beast</h1>
+            <span class="badge warn">● Upcoming Maintenance</span>
+          </div>
+          <p class="muted" style="margin-top:.2rem">2019 Toyota 4Runner TRD Off-Road · VIN JTEBU5JR9K5123456</p>
+          <p class="xs muted" style="margin-top:.5rem">Trail rig. Keep an eye on the rear diff fluid.</p>
+        </div>
+        <div class="row wrap" style="align-self:flex-start;justify-content:flex-end">
+          <button class="btn" data-dialog="log">+ Log activity ▾</button>
+          <button class="btn outline" data-dialog="edit">Edit</button>
+          <button class="btn ghost" data-dialog="more" aria-label="More actions">⋯</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Odometer</div><div class="v num">84,210</div><div class="s">mi · 3 days ago</div></div>
+      <div class="stat"><div class="k">Next service</div><div class="v">790 mi</div><div class="s">Oil &amp; filter</div></div>
+      <div class="stat"><div class="k">Open schedules</div><div class="v num">4</div><div class="s">1 overdue</div></div>
+      <div class="stat"><div class="k">Cost · 12 mo</div><div class="v num">$2,410</div><div class="s">14 records</div></div>
+      <div class="stat"><div class="k">Avg economy</div><div class="v num">17.8</div><div class="s">mpg · last 6 fill-ups</div></div>
+    </div>
+
+    <div class="cols">
+      <!-- left column -->
+      <div class="stack">
+        <div class="card">
+          <div class="head">
+            <h2>Maintenance schedules</h2>
+            <button class="btn sm" data-dialog="schedule">Add schedule</button>
+          </div>
+          <div class="body sched">
+            <div class="schedtile due">
+              <div class="spread"><strong class="xs">Oil &amp; filter</strong><span class="badge warn">Due soon</span></div>
+              <div class="xs muted">Every 5,000 mi · due at 85,000</div>
+              <div class="bar"><i style="width:84%"></i></div>
+              <div class="row"><button class="btn sm outline" data-dialog="complete">Mark complete</button></div>
+            </div>
+            <div class="schedtile due" style="border-color:hsl(var(--danger-border));background:hsl(var(--danger-subtle)/.45)">
+              <div class="spread"><strong class="xs">Tire rotation</strong><span class="badge bad">Overdue 1,200 mi</span></div>
+              <div class="xs muted">Every 7,500 mi · was due at 83,000</div>
+              <div class="bar"><i style="width:100%;background:hsl(var(--danger))"></i></div>
+              <div class="row"><button class="btn sm outline" data-dialog="complete">Mark complete</button></div>
+            </div>
+            <div class="schedtile">
+              <div class="spread"><strong class="xs">Brake fluid</strong><span class="badge ok">Healthy</span></div>
+              <div class="xs muted">Every 24 months · due Mar 2027</div>
+              <div class="bar"><i style="width:31%;background:hsl(var(--success))"></i></div>
+              <div class="row"><button class="btn sm outline" data-dialog="complete">Mark complete</button></div>
+            </div>
+            <div class="schedtile">
+              <div class="spread"><strong class="xs">Rear diff fluid</strong><span class="badge ok">Healthy</span></div>
+              <div class="xs muted">Every 30,000 mi · due at 100,000</div>
+              <div class="bar"><i style="width:47%;background:hsl(var(--success))"></i></div>
+              <div class="row"><button class="btn sm outline" data-dialog="complete">Mark complete</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="head">
+            <h2>History</h2>
+            <div class="row wrap">
+              <div class="chips">
+                <button class="chip" aria-pressed="true">All</button>
+                <button class="chip" aria-pressed="false">Maintenance</button>
+                <button class="chip" aria-pressed="false">Mods</button>
+              </div>
+              <button class="btn sm" data-dialog="record">Log record</button>
+            </div>
+          </div>
+          <table class="tbl">
+            <thead><tr><th>Date</th><th>Item</th><th>Mileage</th><th>Cost</th><th>Vendor</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="num muted">Jul 12</td><td>Front brake pads &amp; rotors</td><td class="num">82,940</td><td class="num">$612.40</td><td class="muted">Sam's Auto</td><td><button class="btn ghost sm" data-dialog="attach">📎 2</button></td></tr>
+              <tr><td class="num muted">Jun 02</td><td>Oil &amp; filter <span class="badge mute">Maintenance</span></td><td class="num">80,110</td><td class="num">$78.25</td><td class="muted">DIY</td><td></td></tr>
+              <tr><td class="num muted">May 18</td><td>Rock sliders installed <span class="badge mod">Mod</span></td><td class="num">79,430</td><td class="num">$980.00</td><td class="muted">4x4 Shop</td><td><button class="btn ghost sm" data-dialog="attach">📎 3</button></td></tr>
+              <tr><td class="num muted">Apr 04</td><td>Tire rotation</td><td class="num">76,220</td><td class="num">$0.00</td><td class="muted">DIY</td><td></td></tr>
+              <tr><td class="num muted">Feb 21</td><td>Cabin + engine air filter</td><td class="num">73,880</td><td class="num">$41.10</td><td class="muted">DIY</td><td></td></tr>
+            </tbody>
+          </table>
+          <div class="body"><button class="btn outline sm">Show all 14 records</button></div>
+        </div>
+      </div>
+
+      <!-- right column -->
+      <div class="stack">
+        <div class="card">
+          <div class="head"><h2>Mileage</h2><button class="btn sm outline" data-dialog="mileage">Log mileage</button></div>
+          <div class="body">
+            <svg viewBox="0 0 300 60" width="100%" height="60" aria-label="Mileage trend">
+              <polyline fill="none" stroke="hsl(var(--info))" stroke-width="2"
+                points="0,52 40,48 80,41 120,36 160,28 200,22 240,13 300,6"/>
+            </svg>
+            <table class="tbl" style="margin-top:.5rem">
+              <tbody>
+                <tr><td class="muted">Jul 30</td><td class="num" style="font-weight:500">84,210 mi</td><td class="muted xs">manual</td></tr>
+                <tr><td class="muted">Jul 12</td><td class="num" style="font-weight:500">82,940 mi</td><td class="muted xs">maintenance</td></tr>
+                <tr><td class="muted">Jun 28</td><td class="num" style="font-weight:500">81,700 mi</td><td class="muted xs">fuel</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="head"><h2>Fuel</h2><button class="btn sm outline" data-dialog="fuel">Log fill-up</button></div>
+          <div class="body">
+            <div class="row" style="gap:1.5rem;margin-bottom:.6rem">
+              <div><div class="xs muted">Last fill</div><div class="num" style="font-weight:600">18.4 mpg</div></div>
+              <div><div class="xs muted">$ / mile</div><div class="num" style="font-weight:600">$0.19</div></div>
+            </div>
+            <table class="tbl">
+              <tbody>
+                <tr><td class="muted">Jul 28</td><td class="num">16.2 gal</td><td class="num">$58.31</td><td class="num muted">18.4 mpg</td></tr>
+                <tr><td class="muted">Jul 14</td><td class="num">15.9 gal</td><td class="num">$55.02</td><td class="num muted">17.1 mpg</td></tr>
+                <tr><td class="muted">Jun 30</td><td class="num">17.1 gal</td><td class="num">$61.90</td><td class="num muted">17.9 mpg</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="head"><h2>Photos</h2><button class="btn sm outline" data-dialog="upload">Upload</button></div>
+          <div class="body" style="display:grid;gap:.5rem;grid-template-columns:repeat(3,1fr)">
+            <div class="photo" style="height:70px">1</div><div class="photo" style="height:70px">2</div><div class="photo" style="height:70px">3</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="head"><h2>Timeline</h2></div>
+          <div class="body stack" style="gap:.7rem">
+            <div><div class="xs">Jamie logged a fill-up</div><div class="xs muted">Jul 28 · 16.2 gal</div></div>
+            <div><div class="xs">Alex completed <strong>Front brakes</strong></div><div class="xs muted">Jul 12</div></div>
+            <div><div class="xs">Jamie updated the nickname</div><div class="xs muted">Jul 02</div></div>
+            <button class="btn ghost sm" style="justify-self:start">View all activity</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ══════════════════════ OPTION B ══════════════════════ -->
+<main class="page" id="optB" hidden>
+  <div class="topbar">
+    <div class="spread">
+      <div class="row wrap">
+        <button class="btn ghost sm">←</button>
+        <h1 style="font-size:19px;font-weight:600;letter-spacing:-.02em">The Beast</h1>
+        <span class="badge warn">● Upcoming Maintenance</span>
+        <span class="muted xs">2019 Toyota 4Runner TRD Off-Road</span>
+      </div>
+      <div class="row">
+        <button class="btn" data-dialog="log">+ Log activity ▾</button>
+        <button class="btn outline" data-dialog="edit">Edit</button>
+        <button class="btn ghost" data-dialog="more">⋯</button>
+      </div>
+    </div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-pane="ov">Overview</button>
+      <button role="tab" aria-selected="false" data-pane="mt">Maintenance <span class="badge bad" style="margin-left:.3rem">1</span></button>
+      <button role="tab" aria-selected="false" data-pane="mf">Mileage &amp; Fuel</button>
+      <button role="tab" aria-selected="false" data-pane="ph">Photos</button>
+      <button role="tab" aria-selected="false" data-pane="ac">Activity</button>
+    </div>
+  </div>
+
+  <!-- Overview -->
+  <section class="pane on" data-pane="ov">
+    <div class="stack">
+      <div class="stats">
+        <div class="stat"><div class="k">Odometer</div><div class="v num">84,210</div><div class="s">mi · 3 days ago</div></div>
+        <div class="stat"><div class="k">Next service</div><div class="v">790 mi</div><div class="s">Oil &amp; filter</div></div>
+        <div class="stat"><div class="k">Cost · 12 mo</div><div class="v num">$2,410</div><div class="s">14 records</div></div>
+        <div class="stat"><div class="k">Avg economy</div><div class="v num">17.8</div><div class="s">mpg</div></div>
+      </div>
+      <div class="two">
+        <div class="stack">
+          <div class="card">
+            <div class="head"><h2>Details</h2><button class="btn sm outline" data-dialog="edit">Edit</button></div>
+            <div class="body">
+              <div class="grid2" style="gap:1rem">
+                <div><div class="xs muted">Mileage</div><div class="num">84,210 mi</div></div>
+                <div><div class="xs muted">VIN</div><div class="num">JTEBU5JR9K5123456</div></div>
+                <div><div class="xs muted">Trim</div><div>TRD Off-Road</div></div>
+                <div><div class="xs muted">Year / Make / Model</div><div>2019 Toyota 4Runner</div></div>
+              </div>
+              <div style="margin-top:1rem"><div class="xs muted">Notes</div><p class="xs">Trail rig. Keep an eye on the rear diff fluid.</p></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="head"><h2>Photos</h2><button class="btn sm outline" data-dialog="upload">Upload</button></div>
+            <div class="body" style="display:grid;gap:.5rem;grid-template-columns:repeat(4,1fr)">
+              <div class="photo" style="height:72px">1</div><div class="photo" style="height:72px">2</div>
+              <div class="photo" style="height:72px">3</div><div class="photo" style="height:72px">+5</div>
+            </div>
+          </div>
+        </div>
+        <div class="stack">
+          <div class="card">
+            <div class="head"><h2>Up next</h2><button class="btn sm outline" data-pane-jump="mt">All schedules</button></div>
+            <div class="body stack" style="gap:.6rem">
+              <div class="spread"><div><div class="xs" style="font-weight:500">Tire rotation</div><div class="xs muted">was due at 83,000</div></div><span class="badge bad">Overdue</span></div>
+              <div class="spread"><div><div class="xs" style="font-weight:500">Oil &amp; filter</div><div class="xs muted">due at 85,000</div></div><span class="badge warn">790 mi</span></div>
+              <div class="spread"><div><div class="xs" style="font-weight:500">Brake fluid</div><div class="xs muted">due Mar 2027</div></div><span class="badge ok">Healthy</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="head"><h2>Recent activity</h2><button class="btn sm outline" data-pane-jump="ac">All</button></div>
+            <div class="body stack" style="gap:.7rem">
+              <div><div class="xs">Jamie logged a fill-up</div><div class="xs muted">Jul 28</div></div>
+              <div><div class="xs">Alex completed <strong>Front brakes</strong></div><div class="xs muted">Jul 12</div></div>
+              <div><div class="xs">Jamie updated the nickname</div><div class="xs muted">Jul 02</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Maintenance -->
+  <section class="pane" data-pane="mt">
+    <div class="stack">
+      <div class="card">
+        <div class="head"><h2>Schedules</h2><button class="btn sm" data-dialog="schedule">Add schedule</button></div>
+        <table class="tbl">
+          <thead><tr><th>Item</th><th>Recurrence</th><th>Next due</th><th>Status</th><th></th></tr></thead>
+          <tbody>
+            <tr><td>Tire rotation</td><td class="muted">Every 7,500 mi</td><td class="num">83,000 mi</td><td><span class="badge bad">Overdue 1,200 mi</span></td><td><button class="btn sm outline" data-dialog="complete">Complete</button></td></tr>
+            <tr><td>Oil &amp; filter</td><td class="muted">Every 5,000 mi</td><td class="num">85,000 mi</td><td><span class="badge warn">Due soon</span></td><td><button class="btn sm outline" data-dialog="complete">Complete</button></td></tr>
+            <tr><td>Brake fluid</td><td class="muted">Every 24 months</td><td class="num">Mar 2027</td><td><span class="badge ok">Healthy</span></td><td><button class="btn sm outline" data-dialog="complete">Complete</button></td></tr>
+            <tr><td>Rear diff fluid</td><td class="muted">Every 30,000 mi</td><td class="num">100,000 mi</td><td><span class="badge ok">Healthy</span></td><td><button class="btn sm outline" data-dialog="complete">Complete</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="head">
+          <h2>History</h2>
+          <div class="row wrap">
+            <div class="chips"><button class="chip" aria-pressed="true">All</button><button class="chip">Maintenance</button><button class="chip">Mods</button></div>
+            <button class="btn sm" data-dialog="record">Log record</button>
+          </div>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>Date</th><th>Item</th><th>Category</th><th>Mileage</th><th>Cost</th><th>Vendor</th><th></th></tr></thead>
+          <tbody>
+            <tr><td class="num muted">Jul 12</td><td>Front brake pads &amp; rotors</td><td class="muted">Brakes</td><td class="num">82,940</td><td class="num">$612.40</td><td class="muted">Sam's Auto</td><td><button class="btn ghost sm" data-dialog="attach">📎 2</button></td></tr>
+            <tr><td class="num muted">Jun 02</td><td>Oil &amp; filter</td><td class="muted">Fluids</td><td class="num">80,110</td><td class="num">$78.25</td><td class="muted">DIY</td><td></td></tr>
+            <tr><td class="num muted">May 18</td><td>Rock sliders installed <span class="badge mod">Mod</span></td><td class="muted">Armor</td><td class="num">79,430</td><td class="num">$980.00</td><td class="muted">4x4 Shop</td><td><button class="btn ghost sm" data-dialog="attach">📎 3</button></td></tr>
+            <tr><td class="num muted">Apr 04</td><td>Tire rotation</td><td class="muted">Tires</td><td class="num">76,220</td><td class="num">$0.00</td><td class="muted">DIY</td><td></td></tr>
+            <tr><td class="num muted">Feb 21</td><td>Cabin + engine air filter</td><td class="muted">Filters</td><td class="num">73,880</td><td class="num">$41.10</td><td class="muted">DIY</td><td></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mileage & Fuel -->
+  <section class="pane" data-pane="mf">
+    <div class="two">
+      <div class="card">
+        <div class="head"><h2>Mileage</h2><button class="btn sm" data-dialog="mileage">Log mileage</button></div>
+        <div class="body">
+          <svg viewBox="0 0 300 70" width="100%" height="70"><polyline fill="none" stroke="hsl(var(--info))" stroke-width="2" points="0,62 40,57 80,49 120,42 160,33 200,26 240,15 300,7"/></svg>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>Date</th><th>Mileage</th><th>Source</th></tr></thead>
+          <tbody>
+            <tr><td class="muted">Jul 30</td><td class="num">84,210 mi</td><td class="muted">manual</td></tr>
+            <tr><td class="muted">Jul 12</td><td class="num">82,940 mi</td><td class="muted">maintenance</td></tr>
+            <tr><td class="muted">Jun 28</td><td class="num">81,700 mi</td><td class="muted">fuel</td></tr>
+            <tr><td class="muted">Jun 02</td><td class="num">80,110 mi</td><td class="muted">maintenance</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="head"><h2>Fuel</h2><button class="btn sm" data-dialog="fuel">Log fill-up</button></div>
+        <div class="body row" style="gap:2rem">
+          <div><div class="xs muted">Avg economy</div><div class="num" style="font-size:20px;font-weight:600">17.8 mpg</div></div>
+          <div><div class="xs muted">$ / mile</div><div class="num" style="font-size:20px;font-weight:600">$0.19</div></div>
+          <div><div class="xs muted">12 mo spend</div><div class="num" style="font-size:20px;font-weight:600">$1,480</div></div>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>Date</th><th>Gallons</th><th>$/gal</th><th>Total</th><th>Odometer</th></tr></thead>
+          <tbody>
+            <tr><td class="muted">Jul 28</td><td class="num">16.204</td><td class="num">$3.599</td><td class="num">$58.31</td><td class="num">84,010</td></tr>
+            <tr><td class="muted">Jul 14</td><td class="num">15.902</td><td class="num">$3.460</td><td class="num">$55.02</td><td class="num">83,712</td></tr>
+            <tr><td class="muted">Jun 30</td><td class="num">17.100</td><td class="num">$3.620</td><td class="num">$61.90</td><td class="num">83,406</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Photos -->
+  <section class="pane" data-pane="ph">
+    <div class="card">
+      <div class="head"><h2>Photos &amp; documents</h2><button class="btn sm" data-dialog="upload">Upload</button></div>
+      <div class="body gallery">
+        <div class="photo">exterior-front</div><div class="photo">exterior-rear</div><div class="photo">interior</div>
+        <div class="photo">engine bay</div><div class="photo">receipt-brakes.pdf</div><div class="photo">sliders-install</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Activity -->
+  <section class="pane" data-pane="ac">
+    <div class="card">
+      <div class="head"><h2>Vehicle timeline</h2><div class="row"><button class="btn ghost sm">← Prev</button><span class="xs muted">Page 1 of 4</span><button class="btn ghost sm">Next →</button></div></div>
+      <div class="body stack" style="gap:.85rem">
+        <div><div class="xs">Jamie logged a fill-up · 16.204 gal · $58.31</div><div class="xs muted">Jul 28, 2026 · 4:12 PM</div></div>
+        <div><div class="xs">Alex completed schedule <strong>Front brakes</strong></div><div class="xs muted">Jul 12, 2026 · 9:40 AM</div></div>
+        <div><div class="xs">Alex logged maintenance record <strong>Front brake pads &amp; rotors</strong></div><div class="xs muted">Jul 12, 2026 · 9:38 AM</div></div>
+        <div><div class="xs">Jamie updated the nickname to <strong>The Beast</strong></div><div class="xs muted">Jul 02, 2026 · 7:15 PM</div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ══════════════════════ OPTION C ══════════════════════ -->
+<main class="page" id="optC" hidden>
+  <div class="shell">
+    <!-- sticky rail -->
+    <aside class="rail">
+      <div class="card">
+        <div class="body stack" style="gap:.85rem">
+          <div class="photo" style="height:160px">primary photo</div>
+          <div>
+            <div class="row wrap"><h1 style="font-size:18px;font-weight:600;letter-spacing:-.02em">The Beast</h1><span class="badge warn">● Upcoming</span></div>
+            <p class="xs muted">2019 Toyota 4Runner TRD Off-Road</p>
+          </div>
+          <div class="facts">
+            <div><div class="k">Odometer</div><div class="num" style="font-weight:600;font-size:16px">84,210 mi</div></div>
+            <div><div class="k">VIN</div><div class="num xs">JTEBU5JR9K5123456</div></div>
+            <div><div class="k">Notes</div><div class="xs">Trail rig. Keep an eye on the rear diff fluid.</div></div>
+          </div>
+          <div class="thumbs">
+            <div class="photo">1</div><div class="photo">2</div><div class="photo">+6</div>
+          </div>
+          <button class="btn outline sm" data-dialog="edit">Edit vehicle</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head"><h2>Quick actions</h2></div>
+        <div class="body stack" style="gap:.4rem">
+          <button class="btn outline block sm" data-dialog="mileage">🧭 Log mileage</button>
+          <button class="btn outline block sm" data-dialog="fuel">⛽ Log fill-up</button>
+          <button class="btn outline block sm" data-dialog="record">🔧 Log maintenance</button>
+          <button class="btn outline block sm" data-dialog="record">✨ Log modification</button>
+          <button class="btn outline block sm" data-dialog="schedule">🗓 Add schedule</button>
+          <button class="btn outline block sm" data-dialog="upload">📷 Upload photo</button>
+          <button class="btn danger block sm" data-dialog="more">🗑 Delete vehicle</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- main feed -->
+    <div class="stack">
+      <div class="stats">
+        <div class="stat"><div class="k">Next service</div><div class="v">790 mi</div><div class="s">Oil &amp; filter</div></div>
+        <div class="stat"><div class="k">Overdue</div><div class="v num" style="color:hsl(var(--danger))">1</div><div class="s">Tire rotation</div></div>
+        <div class="stat"><div class="k">Cost · 12 mo</div><div class="v num">$2,410</div><div class="s">14 records</div></div>
+        <div class="stat"><div class="k">Avg economy</div><div class="v num">17.8</div><div class="s">mpg</div></div>
+      </div>
+
+      <div class="card">
+        <div class="head"><h2>Up next</h2><button class="btn sm outline" data-dialog="schedule">Add schedule</button></div>
+        <div class="body strip">
+          <div class="schedtile due" style="border-color:hsl(var(--danger-border));background:hsl(var(--danger-subtle)/.45)">
+            <div class="spread"><strong class="xs">Tire rotation</strong><span class="badge bad">Overdue</span></div>
+            <div class="xs muted">1,200 mi past due</div>
+            <button class="btn sm outline" data-dialog="complete">Mark complete</button>
+          </div>
+          <div class="schedtile due">
+            <div class="spread"><strong class="xs">Oil &amp; filter</strong><span class="badge warn">790 mi</span></div>
+            <div class="xs muted">due at 85,000 mi</div>
+            <button class="btn sm outline" data-dialog="complete">Mark complete</button>
+          </div>
+          <div class="schedtile">
+            <div class="spread"><strong class="xs">Brake fluid</strong><span class="badge ok">Healthy</span></div>
+            <div class="xs muted">due Mar 2027</div>
+            <button class="btn sm outline" data-dialog="complete">Mark complete</button>
+          </div>
+          <div class="schedtile">
+            <div class="spread"><strong class="xs">Rear diff fluid</strong><span class="badge ok">Healthy</span></div>
+            <div class="xs muted">due at 100,000 mi</div>
+            <button class="btn sm outline" data-dialog="complete">Mark complete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="head">
+          <h2>Records</h2>
+          <div class="chips">
+            <button class="chip" aria-pressed="true">All</button>
+            <button class="chip">Maintenance</button>
+            <button class="chip">Mods</button>
+            <button class="chip">Fuel</button>
+            <button class="chip">Mileage</button>
+          </div>
+        </div>
+        <table class="tbl">
+          <thead><tr><th>Date</th><th>Type</th><th>Item</th><th>Odometer</th><th>Cost</th><th></th></tr></thead>
+          <tbody>
+            <tr data-drawer><td class="num muted">Jul 30</td><td><span class="badge info">Mileage</span></td><td>Odometer reading</td><td class="num">84,210</td><td class="num muted">—</td><td class="muted xs">›</td></tr>
+            <tr data-drawer><td class="num muted">Jul 28</td><td><span class="badge mute">Fuel</span></td><td>16.204 gal @ $3.599</td><td class="num">84,010</td><td class="num">$58.31</td><td class="muted xs">›</td></tr>
+            <tr data-drawer><td class="num muted">Jul 14</td><td><span class="badge mute">Fuel</span></td><td>15.902 gal @ $3.460</td><td class="num">83,712</td><td class="num">$55.02</td><td class="muted xs">›</td></tr>
+            <tr data-drawer><td class="num muted">Jul 12</td><td><span class="badge ok">Maintenance</span></td><td>Front brake pads &amp; rotors <span class="muted xs">📎 2</span></td><td class="num">82,940</td><td class="num">$612.40</td><td class="muted xs">›</td></tr>
+            <tr data-drawer><td class="num muted">Jun 02</td><td><span class="badge ok">Maintenance</span></td><td>Oil &amp; filter</td><td class="num">80,110</td><td class="num">$78.25</td><td class="muted xs">›</td></tr>
+            <tr data-drawer><td class="num muted">May 18</td><td><span class="badge mod">Mod</span></td><td>Rock sliders installed <span class="muted xs">📎 3</span></td><td class="num">79,430</td><td class="num">$980.00</td><td class="muted xs">›</td></tr>
+          </tbody>
+        </table>
+        <div class="body row"><button class="btn outline sm">Load more</button><span class="xs muted">Showing 6 of 41</span></div>
+      </div>
+
+      <div class="two card">
+        <div class="head"><h2>Trends &amp; activity</h2></div>
+        <div class="body" style="display:grid;gap:1.25rem;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
+          <div>
+            <div class="xs muted" style="margin-bottom:.4rem">Mileage over time</div>
+            <svg viewBox="0 0 300 60" width="100%" height="60"><polyline fill="none" stroke="hsl(var(--info))" stroke-width="2" points="0,52 40,48 80,41 120,36 160,28 200,22 240,13 300,6"/></svg>
+          </div>
+          <div>
+            <div class="xs muted" style="margin-bottom:.4rem">Recent activity</div>
+            <div class="stack" style="gap:.6rem">
+              <div><div class="xs">Jamie logged a fill-up</div><div class="xs muted">Jul 28</div></div>
+              <div><div class="xs">Alex completed <strong>Front brakes</strong></div><div class="xs muted">Jul 12</div></div>
+              <div><div class="xs">Jamie updated the nickname</div><div class="xs muted">Jul 02</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- ══ drawer (Option C row click) ══ -->
+<div class="drawer" id="drawer">
+  <div class="scrim" data-close-drawer></div>
+  <div class="panel">
+    <div class="spread"><h3 style="font-size:16px;font-weight:600">Front brake pads &amp; rotors</h3><button class="btn ghost sm" data-close-drawer>✕</button></div>
+    <div class="row wrap"><span class="badge ok">Maintenance</span><span class="badge mute">Brakes</span></div>
+    <div class="facts" style="display:grid;gap:.7rem">
+      <div><div class="xs muted">Performed</div><div>Jul 12, 2026</div></div>
+      <div><div class="xs muted">Odometer</div><div class="num">82,940 mi</div></div>
+      <div><div class="xs muted">Cost</div><div class="num">$612.40</div></div>
+      <div><div class="xs muted">Vendor</div><div>Sam's Auto</div></div>
+      <div><div class="xs muted">Notes</div><p class="xs">Replaced both front rotors, ceramic pads. Rears still ~60%.</p></div>
+    </div>
+    <div>
+      <div class="xs muted" style="margin-bottom:.4rem">Attachments</div>
+      <div style="display:grid;gap:.5rem;grid-template-columns:1fr 1fr">
+        <div class="photo" style="height:80px">invoice.pdf</div><div class="photo" style="height:80px">rotor.jpg</div>
+      </div>
+    </div>
+    <div class="row"><button class="btn outline sm">Edit</button><button class="btn danger sm">Delete</button></div>
+  </div>
+</div>
+
+<!-- ══ dialogs (shared by all three options) ══ -->
+<dialog id="dlg-edit">
+  <form method="dialog">
+    <div class="dhead"><h3>Edit vehicle</h3><p class="xs muted">Year, make and model are immutable after creation.</p></div>
+    <div class="dbody">
+      <div class="grid2">
+        <div class="field"><label>Nickname</label><input value="The Beast"></div>
+        <div class="field"><label>Current mileage</label><input value="84210" inputmode="numeric"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Year / Make / Model</label><input value="2019 Toyota 4Runner" disabled></div>
+        <div class="field"><label>VIN</label><input value="JTEBU5JR9K5123456" disabled></div>
+      </div>
+      <div class="field"><label>Notes</label><textarea rows="3">Trail rig. Keep an eye on the rear diff fluid.</textarea></div>
+    </div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Cancel</button><button class="btn" value="save">Save changes</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-record">
+  <form method="dialog">
+    <div class="dhead"><h3>Log maintenance record</h3><p class="xs muted">Mileage pre-filled from the latest reading.</p></div>
+    <div class="dbody">
+      <div class="grid2">
+        <div class="field"><label>Category</label><select><option>Fluids — oil &amp; filter</option><option>Brakes</option><option>Tires</option></select></div>
+        <div class="field"><label>Performed at</label><input type="date" value="2026-08-02"></div>
+      </div>
+      <div class="field"><label>Description</label><input placeholder="Front brake pads &amp; rotors"></div>
+      <div class="grid2">
+        <div class="field"><label>Mileage</label><input value="84210" inputmode="numeric"></div>
+        <div class="field"><label>Cost</label><input placeholder="0.00" inputmode="decimal"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Vendor</label><input placeholder="DIY"></div>
+        <div class="field"><label>Attachments</label><button type="button" class="btn outline" style="justify-content:center">📎 Attach files</button></div>
+      </div>
+      <div class="field"><label>Notes</label><textarea rows="2"></textarea></div>
+    </div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Cancel</button><button class="btn" value="save">Log record</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-mileage">
+  <form method="dialog">
+    <div class="dhead"><h3>Log mileage</h3></div>
+    <div class="dbody">
+      <div class="field"><label>Odometer reading</label><input value="84210" inputmode="numeric"><span class="xs muted">Last reading: 84,210 mi on Jul 30</span></div>
+    </div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Cancel</button><button class="btn" value="save">Log mileage</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-fuel">
+  <form method="dialog">
+    <div class="dhead"><h3>Log fill-up</h3></div>
+    <div class="dbody">
+      <div class="grid2">
+        <div class="field"><label>Date</label><input type="date" value="2026-08-02"></div>
+        <div class="field"><label>Odometer</label><input value="84210" inputmode="numeric"></div>
+      </div>
+      <div class="grid2">
+        <div class="field"><label>Gallons</label><input placeholder="16.204" inputmode="decimal"></div>
+        <div class="field"><label>Price / gallon</label><input placeholder="3.599" inputmode="decimal"></div>
+      </div>
+      <div class="field"><label>Total cost</label><input placeholder="calculated" disabled></div>
+    </div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Cancel</button><button class="btn" value="save">Log fill-up</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-schedule">
+  <form method="dialog">
+    <div class="dhead"><h3>Add maintenance schedule</h3></div>
+    <div class="dbody">
+      <div class="field"><label>Category</label><select><option>Fluids — oil &amp; filter</option><option>Tires — rotation</option></select></div>
+      <div class="field"><label>Recurrence</label><select><option>Mileage</option><option>Time</option><option>Either</option></select></div>
+      <div class="grid2">
+        <div class="field"><label>Every N months</label><input placeholder="6" inputmode="numeric"></div>
+        <div class="field"><label>Every N miles</label><input placeholder="5000" inputmode="numeric"></div>
+      </div>
+    </div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Cancel</button><button class="btn" value="save">Create schedule</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-complete">
+  <form method="dialog">
+    <div class="dhead"><h3>Mark schedule complete</h3><p class="xs muted">This logs a completion and rolls the next due date forward.</p></div>
+    <div class="dbody">
+      <div class="grid2">
+        <div class="field"><label>Completed on</label><input type="date" value="2026-08-02"></div>
+        <div class="field"><label>Odometer</label><input value="84210" inputmode="numeric"></div>
+      </div>
+      <div class="field"><label><input type="checkbox" checked style="width:auto;margin-right:.4rem">Also create a maintenance record</label></div>
+    </div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Cancel</button><button class="btn" value="save">Mark complete</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-upload">
+  <form method="dialog">
+    <div class="dhead"><h3>Upload photos &amp; documents</h3></div>
+    <div class="dbody">
+      <div class="photo" style="height:150px;border-style:dashed">Drop files here, or click to browse</div>
+    </div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Cancel</button><button class="btn" value="save">Upload</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-attach">
+  <form method="dialog">
+    <div class="dhead"><h3>Attachments · Front brake pads &amp; rotors</h3></div>
+    <div class="dbody" style="grid-template-columns:1fr 1fr;display:grid">
+      <div class="photo" style="height:130px">invoice.pdf</div><div class="photo" style="height:130px">rotor.jpg</div>
+    </div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Close</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-more">
+  <form method="dialog">
+    <div class="dhead"><h3>Delete this vehicle?</h3><p class="xs muted">It moves to the deleted list. An owner can restore it later.</p></div>
+    <div class="dbody"><p class="xs muted">Records, photos and fuel logs stay attached and come back on restore.</p></div>
+    <div class="dfoot"><button class="btn outline" value="cancel">Cancel</button><button class="btn" style="background:hsl(var(--destructive));color:#fff" value="delete">Delete vehicle</button></div>
+  </form>
+</dialog>
+
+<script>
+// option switcher
+const panes = {A:document.getElementById('optA'),B:document.getElementById('optB'),C:document.getElementById('optC')};
+document.querySelectorAll('.chrome .seg button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('.chrome .seg button').forEach(x=>x.setAttribute('aria-pressed',String(x===b)));
+    Object.entries(panes).forEach(([k,el])=>{el.hidden = k!==b.dataset.opt});
+    window.scrollTo({top:0});
+  });
+});
+
+// theme
+const themeBtn=document.getElementById('themeBtn');
+themeBtn.addEventListener('click',()=>{
+  const dark=document.body.classList.toggle('dark');
+  themeBtn.textContent = dark ? '◑ Light' : '◐ Dark';
+});
+
+// dialogs
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-dialog]');
+  if(!t) return;
+  const d=document.getElementById('dlg-'+t.dataset.dialog);
+  if(d) d.showModal();
+});
+
+// option B tabs
+document.querySelectorAll('#optB .tabs button').forEach(b=>{
+  b.addEventListener('click',()=>selectPane(b.dataset.pane));
+});
+document.querySelectorAll('#optB [data-pane-jump]').forEach(b=>{
+  b.addEventListener('click',()=>selectPane(b.dataset.paneJump));
+});
+function selectPane(name){
+  document.querySelectorAll('#optB .tabs button').forEach(x=>x.setAttribute('aria-selected',String(x.dataset.pane===name)));
+  document.querySelectorAll('#optB .pane').forEach(p=>p.classList.toggle('on',p.dataset.pane===name));
+}
+
+// filter chips (visual only)
+document.addEventListener('click',e=>{
+  const c=e.target.closest('.chip');
+  if(!c) return;
+  c.parentElement.querySelectorAll('.chip').forEach(x=>x.setAttribute('aria-pressed',String(x===c)));
+});
+
+// option C drawer
+const drawer=document.getElementById('drawer');
+document.querySelectorAll('#optC tr[data-drawer]').forEach(r=>{
+  r.style.cursor='pointer';
+  r.addEventListener('click',()=>drawer.setAttribute('open',''));
+});
+document.querySelectorAll('[data-close-drawer]').forEach(b=>b.addEventListener('click',()=>drawer.removeAttribute('open')));
+document.addEventListener('keydown',e=>{if(e.key==='Escape')drawer.removeAttribute('open')});
+</script>
+</body>
+</html>

@@ -18,10 +18,23 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { memberKeys, useRemoveMember } from './members';
-import { inviteKeys, useCreateInvite, useRevokeInvite, useAcceptInvite } from './invites';
+import { memberKeys, useRemoveMember, useUpdateMemberRole } from './members';
+import { authKeys } from './auth';
+import { mintAccessToken } from '../../api/refresh';
+import { toast } from 'sonner';
+import {
+  inviteKeys,
+  useCreateInvite,
+  useRevokeInvite,
+  useAcceptInvite,
+  useResendInvite,
+} from './invites';
 import { fleetKeys } from './fleets';
 import { useRenameFleet } from './fleetSettings';
+import { userKeys } from './users';
+import { memberService } from '../../../services/api/MemberService';
+import { inviteService } from '../../../services/api/InviteService';
+import { ApiError, createErrorFromUnknown } from '@myfleet/shared-ts';
 
 // ---------------------------------------------------------------------------
 // Key factory hierarchy
@@ -53,6 +66,11 @@ describe('inviteKeys', () => {
 vi.mock('../../../services/api/MemberService', () => ({
   memberService: {
     removeMember: vi.fn().mockResolvedValue(undefined),
+    updateRole: vi.fn().mockResolvedValue({
+      id: 'm1',
+      type: 'memberships',
+      attributes: { fleetId: 'f1', userId: 'user-1', role: 'owner', status: 'active' },
+    }),
   },
 }));
 
@@ -61,7 +79,15 @@ vi.mock('../../../services/api/InviteService', () => ({
     createInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
     revokeInvite: vi.fn().mockResolvedValue(undefined),
     acceptInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
+    resendInvite: vi.fn().mockResolvedValue({ id: 'inv-1', type: 'invites', attributes: {} }),
   },
+}));
+
+// Both exports: the API client imports refreshAccessToken from this module, so
+// a partial mock would break its import.
+vi.mock('../../api/refresh', () => ({
+  mintAccessToken: vi.fn().mockResolvedValue('fresh-token'),
+  refreshAccessToken: vi.fn().mockResolvedValue('fresh-token'),
 }));
 
 vi.mock('../../../services/api/FleetSettingsService', () => ({
@@ -115,7 +141,7 @@ describe('mutation invalidation contracts — real hooks', () => {
     });
 
     await act(async () => {
-      result.current.mutate('user-1');
+      result.current.mutate({ userId: 'user-1', isSelf: false });
     });
 
     await waitFor(() =>
@@ -128,6 +154,143 @@ describe('mutation invalidation contracts — real hooks', () => {
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.lists() }));
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
+  });
+
+  // FR-4.1: role and active_fleet_id are JWT claims minted at login. After the
+  // actor's OWN membership disappears, the token still claims the fleet, so the
+  // SPA must re-mint before /auth/me is believed.
+  //
+  // mintAccessToken, NOT refreshAccessToken: the removal already committed
+  // server-side, so a transient mint failure must not clear a still-valid token
+  // and log the user out of a session they are mid-way through leaving. Same
+  // reasoning as useAcceptInvite.
+  it('useRemoveMember mints a fresh token and refetches identity on a self-leave', async () => {
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'me', isSelf: true });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mintAccessToken).toHaveBeenCalledTimes(1);
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+  });
+
+  // FR-4.4: removing SOMEONE ELSE leaves the actor's own claims untouched, so
+  // re-minting would be a pointless round trip on every removal.
+  it('useRemoveMember does not mint a token when removing another member', async () => {
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'someone-else', isSelf: false });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mintAccessToken).not.toHaveBeenCalled();
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+  });
+
+  // FR-4.3: names are keyed off the member list, so a membership change must
+  // drop the cached name map too.
+  it('useRemoveMember invalidates the user name cache', async () => {
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'user-1', isSelf: false });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: userKeys.all }));
+  });
+
+  // A failed mint after a self-leave means stale claims, not a dead session —
+  // the removal already committed server-side. The surviving token still
+  // claims the just-left fleet, so authKeys.all must NOT be invalidated on a
+  // failed mint: refetching /auth/me with the stale token would report the
+  // fleet the user just left, and RequireAuth would never redirect. Same
+  // reasoning, and same shape, as useAcceptInvite's mint-failure test above.
+  it('useRemoveMember still succeeds, without refetching identity, when the mint fails on a self-leave', async () => {
+    vi.mocked(mintAccessToken).mockResolvedValueOnce(null);
+
+    const { result } = renderHook(() => useRemoveMember('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'me', isSelf: true });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+    expect(toast.error).toHaveBeenCalled();
+  });
+
+  it('useUpdateMemberRole PATCHes the role and invalidates members and fleets', async () => {
+    const { result } = renderHook(() => useUpdateMemberRole('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'user-1', role: 'owner' });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(memberService.updateRole).toHaveBeenCalledWith('f1', 'user-1', 'owner');
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.lists() }));
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
+  });
+
+  // FR-4.4 again: promoting someone else does not touch the actor's claims.
+  it('useUpdateMemberRole does not mint a token', async () => {
+    const { result } = renderHook(() => useUpdateMemberRole('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'user-1', role: 'owner' });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mintAccessToken).not.toHaveBeenCalled();
+  });
+
+  // 409 = demoting the sole owner. The custom message is the one thing this
+  // hook's onError does beyond the shared toast fallback, so it needs direct
+  // coverage rather than relying on useRemoveMember's 409 test to stand in.
+  it('useUpdateMemberRole surfaces a dedicated toast on a sole-owner 409', async () => {
+    vi.mocked(memberService.updateRole).mockRejectedValueOnce(new Error('conflict'));
+    vi.mocked(createErrorFromUnknown).mockReturnValueOnce(
+      new ApiError(409, 'conflict', 'conflict'),
+    );
+
+    const { result } = renderHook(() => useUpdateMemberRole('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate({ userId: 'user-1', role: 'member' });
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).toHaveBeenCalledWith(
+      'This fleet would be left with no owner. Promote someone else first.',
+    );
   });
 
   // --------------------------------------------------------------------------
@@ -219,5 +382,112 @@ describe('mutation invalidation contracts — real hooks', () => {
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: memberKeys.all }));
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: fleetKeys.all }));
     expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.all }));
+  });
+
+  // The JWT still carries the pre-accept active_fleet_id claim (empty for a
+  // first-time invitee), and /auth/me reports that claim. Without a fresh token
+  // the new member is bounced back to onboarding by RequireAuth.
+  //
+  // This asserts the mint COMPLETES before the identity refetch starts, not
+  // merely that it was called first: invocationCallOrder records call time, so
+  // an un-awaited mint would satisfy an ordering-only assertion while still
+  // racing /auth/me against the token write.
+  it('useAcceptInvite waits for the fresh token before refetching identity', async () => {
+    let releaseMint: ((token: string) => void) | undefined;
+    vi.mocked(mintAccessToken).mockImplementationOnce(
+      () =>
+        new Promise<string | null>((resolve) => {
+          releaseMint = resolve;
+        }),
+    );
+
+    const { result } = renderHook(() => useAcceptInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('tok-abc');
+    });
+
+    await waitFor(() => expect(mintAccessToken).toHaveBeenCalledTimes(1));
+
+    const authInvalidations = () =>
+      (invalidateSpy.mock.calls as Array<[{ queryKey?: unknown }]>).filter(
+        (c) => JSON.stringify(c[0]?.queryKey) === JSON.stringify(authKeys.all),
+      ).length;
+
+    // Mint is still pending: identity must not have been refetched yet.
+    expect(authInvalidations()).toBe(0);
+
+    await act(async () => {
+      releaseMint?.('fresh-token');
+    });
+
+    await waitFor(() => expect(authInvalidations()).toBe(1));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+
+  // A failed mint means stale claims, not a dead session — the invite is
+  // already spent server-side. Clearing the still-valid token here (which
+  // refreshAccessToken would do) logs the user out on the success path.
+  it('useAcceptInvite still succeeds, without refetching identity, when the mint fails', async () => {
+    vi.mocked(mintAccessToken).mockResolvedValueOnce(null);
+
+    const { result } = renderHook(() => useAcceptInvite(), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('tok-abc');
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
+    expect(toast.error).toHaveBeenCalled();
+  });
+
+  // --------------------------------------------------------------------------
+  // useResendInvite
+  //
+  // Resend rotates the token, so a stale inviteKeys.list cache would hand the
+  // copy button a dead token — invalidation is REQUIRED, not cosmetic.
+  // useInvites reads inviteKeys.list({ fleetId }); asserting against
+  // inviteKeys.lists() here matches the sibling tests and still catches a
+  // typo'd or narrowed key via React Query's default prefix invalidation.
+  // --------------------------------------------------------------------------
+  it('useResendInvite invalidates inviteKeys.lists() on success', async () => {
+    const { result } = renderHook(() => useResendInvite('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('inv-1');
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));
+  });
+
+  // A user who hits the resend cooldown 429 and reloads must not see a dead
+  // token: invalidation runs in onSettled, so it must fire on rejection too.
+  it('useResendInvite invalidates inviteKeys.lists() even when the mutation rejects', async () => {
+    vi.mocked(inviteService.resendInvite).mockRejectedValueOnce(new Error('429'));
+
+    const { result } = renderHook(() => useResendInvite('f1'), {
+      wrapper: makeWrapper(queryClient),
+    });
+
+    await act(async () => {
+      result.current.mutate('inv-1');
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+
+    const calls = invalidateSpy.mock.calls.map((c) => c[0]);
+    expect(calls).toContainEqual(expect.objectContaining({ queryKey: inviteKeys.lists() }));
   });
 });

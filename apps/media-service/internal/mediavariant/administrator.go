@@ -1,6 +1,9 @@
 package mediavariant
 
-import "gorm.io/gorm"
+import (
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
 
 // Administrator is the write interface for media-variant data access.
 type Administrator interface {
@@ -9,6 +12,17 @@ type Administrator interface {
 	// generation idempotent: a re-delivered media.uploaded event regenerates
 	// and overwrites the variants rather than duplicating them.
 	ReplaceForMediaObject(mediaObjectID string, variants []Model) error
+
+	// Upsert writes a single variant additively, leaving every other variant of
+	// the same media object untouched. It keys on the unique
+	// (media_object_id, variant) index, so two processes racing to generate the
+	// same variant leave exactly one row rather than two.
+	//
+	// This is the ONLY write lazy generation may use. ReplaceForMediaObject
+	// deletes every row for the media object before inserting, so calling it
+	// with a single card model would destroy that object's thumbnail and
+	// display.
+	Upsert(m Model) error
 }
 
 type dbAdministrator struct{ db *gorm.DB }
@@ -29,4 +43,28 @@ func (a *dbAdministrator) ReplaceForMediaObject(mediaObjectID string, variants [
 		}
 		return nil
 	})
+}
+
+func (a *dbAdministrator) Upsert(m Model) error {
+	e := m.ToEntity()
+	// DoUpdates names its columns explicitly. created_at is deliberately absent
+	// and UpdateAll is deliberately not used: either would rewrite the row's age
+	// on every regeneration, which is the column-wipe defect task-006 existed to
+	// eliminate. entityguard will not catch it here — it recognises .Save( call
+	// sites only — so the explicit list is the whole guard, alongside
+	// TestUpsert_preservesCreatedAt.
+	return a.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "media_object_id"}, {Name: "variant"}},
+		// The arbiter index is PARTIAL (see ApplyPartialIndexes): without a
+		// matching predicate Postgres cannot infer it and the upsert errors.
+		// This also means a soft-deleted variant is NOT a conflict target — a
+		// regeneration inserts a fresh live row instead of quietly resurrecting
+		// one that a purge owns.
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "deleted_at IS NULL"},
+		}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"object_key", "width", "height", "content_type",
+		}),
+	}).Create(&e).Error
 }

@@ -49,7 +49,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 			now := time.Now().UTC()
 			resources := make([]server.Resource, 0, len(ms))
 			for _, m := range ms {
-				resources = append(resources, TransformWithStatus(m, statusDeps.DeriveStatus(m, now)))
+				resources = append(resources, TransformDerived(m, statusDeps.Derive(m, now)))
 			}
 			server.WriteJSON(w, http.StatusOK, server.Document{
 				Data: resources,
@@ -58,17 +58,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 		})
 
 		// POST /fleets/{id}/vehicles — create a vehicle
-		r.Post("/fleets/{id}/vehicles", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
-			Nickname       string `json:"nickname"`
-			Make           string `json:"make"`
-			Model          string `json:"model"`
-			Trim           string `json:"trim"`
-			Year           int    `json:"year"`
-			VIN            string `json:"vin"`
-			CurrentMileage int    `json:"currentMileage"`
-			Notes          string `json:"notes"`
-		},
-		) {
+		r.Post("/fleets/{id}/vehicles", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs createAttributes) {
 			identity := auth.IdentityFromContext(req.Context())
 			fleetID := chi.URLParam(req, "id")
 			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
@@ -116,18 +106,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerCheck
 				server.WriteError(w, err)
 				return
 			}
-			// Status is derived on read (design §10.2), never stored.
-			st := statusDeps.DeriveStatus(m, time.Now().UTC())
-			server.WriteJSON(w, http.StatusOK, server.Document{Data: TransformWithStatus(m, st)})
+			// Status, last activity, and due detail are derived on read
+			// (design §10.2), never stored.
+			server.WriteJSON(w, http.StatusOK, server.Document{
+				Data: TransformDerived(m, statusDeps.Derive(m, time.Now().UTC())),
+			})
 		})
 
 		// PATCH /vehicles/{id} — partial update
-		r.Patch("/vehicles/{id}", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
-			Nickname       *string `json:"nickname"`
-			CurrentMileage *int    `json:"currentMileage"`
-			Notes          *string `json:"notes"`
-		},
-		) {
+		r.Patch("/vehicles/{id}", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs patchAttributes) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
 			// Fetch first to get fleetID for authz, then mutate.

@@ -9,6 +9,12 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 interface FuelFormProps {
   /** Pre-filled from latest mileage record (auto-fill). */
   defaultMileage?: number;
+  /**
+   * Prefills the form for editing an existing fuel log. Omitted fields fall
+   * back to the create-flow defaults below (now / blank / `defaultMileage`).
+   * Merged in last, same pattern as `MaintenanceRecordForm`.
+   */
+  defaultValues?: Partial<FuelFormInput>;
   onSubmit: (values: FuelFormInput) => Promise<void> | void;
   onCancel?: () => void;
   submitting?: boolean;
@@ -17,10 +23,16 @@ interface FuelFormProps {
 /**
  * Form for logging a fuel entry.
  *
- * - Mileage pre-filled from latest mileage record.
+ * - Mileage pre-filled from latest mileage record, or overridden by `defaultValues`.
  * - Either pricePerGallon or totalCost must be provided (server derives the missing one, §10.5).
  */
-export function FuelForm({ defaultMileage, onSubmit, onCancel, submitting }: FuelFormProps) {
+export function FuelForm({
+  defaultMileage,
+  defaultValues,
+  onSubmit,
+  onCancel,
+  submitting,
+}: FuelFormProps) {
   const now = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM for datetime-local
 
   const form = useForm<FuelFormInput>({
@@ -31,6 +43,7 @@ export function FuelForm({ defaultMileage, onSubmit, onCancel, submitting }: Fue
       gallons: undefined,
       totalCost: undefined,
       pricePerGallon: undefined,
+      ...defaultValues,
     },
   });
 

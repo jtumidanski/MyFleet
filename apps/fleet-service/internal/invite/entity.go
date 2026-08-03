@@ -68,6 +68,7 @@ func Make(e Entity) Model {
 		expiresAt:       e.ExpiresAt,
 		acceptedAt:      e.AcceptedAt,
 		invitedByUserID: e.InvitedByUserID,
+		updatedAt:       e.UpdatedAt,
 	}
 }
 
@@ -82,5 +83,6 @@ func (m Model) ToEntity() Entity {
 		ExpiresAt:       m.expiresAt,
 		AcceptedAt:      m.acceptedAt,
 		InvitedByUserID: m.invitedByUserID,
+		UpdatedAt:       m.updatedAt,
 	}
 }

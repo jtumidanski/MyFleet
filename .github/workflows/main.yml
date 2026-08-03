@@ -17,9 +17,24 @@ env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/jtumidanski/myfleet
 
+# The verification gate (backend + frontend + manifests) and `publish` run
+# concurrently. Publishing is safe to start before the gate finishes because a
+# SHA-tagged image is inert: nothing resolves `…-<service>:<sha>` until
+# `bump-overlay` writes that SHA into the overlay.
+#
+# `:latest` is NOT inert — deploy/k8s/base/*/deployment.yaml all reference it,
+# and it is the seed a fresh cluster syncs against before the first bump (see
+# the bootstrap section of docs/runbooks/k3s-deployment.md). So `publish` pushes
+# the SHA tag only, and the `retag-latest` job below moves `:latest` afterwards,
+# behind the same gate as `bump-overlay`. An untested or vulnerable commit can
+# therefore be neither tagged, nor deployed, nor made the bootstrap seed.
+#
+# The cost of ungating `publish` is that a commit failing the gate still burns
+# its 5 publish jobs. That is ~2.5 minutes of runner time on a doomed commit,
+# traded for ~3 minutes off the path to a running deployment on every good one.
 jobs:
-  # ── Build & test gate ────────────────────────────────────────────────────────
-  build-test:
+  # ── Verification gate: Go ────────────────────────────────────────────────────
+  backend:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,6 +42,30 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
+          # Cache handled explicitly below. setup-go's built-in cache derives
+          # its key from OS/arch/go-version/file-hash only, with no way to
+          # namespace it and no restore-keys fallback — so every Go job in the
+          # repo computes the same key and races to save. Observed on run
+          # 30760611639: lint-go won, backend logged "Failed to save: Unable to
+          # reserve cache … another job may be creating this cache", and the
+          # cache that landed was golangci-lint's GOCACHE, which holds no -race
+          # objects and so does nothing for `make test`.
+          cache: false
+
+      # Keyed per workload, so the race-instrumented objects `make test` needs
+      # are not overwritten by a lint job's cache. The restore-keys fallback
+      # means a dependency bump degrades to a warm-ish cache rather than a cold
+      # one. Shares a prefix with pr.yml's backend job on purpose: they do the
+      # same work, so a PR run should restore what main last built.
+      - name: Cache Go build and module caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-
 
       - name: Vet
         run: make vet
@@ -37,9 +76,16 @@ jobs:
       - name: Test
         run: make test
 
+  # ── Verification gate: web ───────────────────────────────────────────────────
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
 
       - name: Install frontend dependencies
         run: npm ci
@@ -50,15 +96,19 @@ jobs:
       - name: Frontend build
         run: make fe-build
 
-      # Renders both overlays and asserts their invariants — chiefly that the
-      # :80 and :443 IngressRoutes carry identical route sets, so the
-      # internal-deny rule cannot go missing from one entrypoint. Gating this
-      # inside build-test means a broken overlay blocks `publish`, rather than
-      # being discovered when Argo CD syncs it to the cluster.
-      #
-      # Note the workflow's paths-ignore skips overlay-only pushes (the
-      # bump-overlay commits); those change nothing but `newTag`, which cannot
-      # affect route parity.
+  # ── Verification gate: deploy manifests ──────────────────────────────────────
+  # Renders both overlays and asserts their invariants — chiefly that the :80
+  # and :443 IngressRoutes carry identical route sets, so the internal-deny rule
+  # cannot go missing from one entrypoint. A broken overlay blocks `bump-overlay`
+  # rather than being discovered when Argo CD syncs it to the cluster.
+  #
+  # Note the workflow's paths-ignore skips overlay-only pushes (the bump-overlay
+  # commits); those change nothing but `newTag`, which cannot affect route parity.
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Install kustomize
         run: |
           curl -sSL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
@@ -70,9 +120,16 @@ jobs:
       - name: Check manifests
         run: make manifests
 
+      # See pr.yml's manifests job for why this lives here. On this workflow it
+      # is also a deploy gate: bump-overlay waits on `manifests`, so a Carfax
+      # template that has drifted between the TS default, the served
+      # config.json and the ConfigMap cannot reach the cluster.
+      - name: Check Carfax URL template
+        run: make carfax-template
+
   # ── Publish container images to GHCR ─────────────────────────────────────────
+  # Deliberately has no `needs`: see the note above the jobs block.
   publish:
-    needs: build-test
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -96,11 +153,18 @@ jobs:
           context: .
           file: apps/${{ matrix.service }}/Dockerfile
           push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # SHA tag only. `retag-latest` moves `:latest` once the gate passes.
+          tags: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+          # No `cache-from`/`cache-to`. The GHA layer cache was measured to be
+          # net-negative here: `cache-to: type=gha,mode=max` spent ~30s per
+          # service exporting layers ("preparing build cache 16.2s" + "sending
+          # cache export 13.7s" on run 30758773601) to save at most the ~8s
+          # `go mod download` layer, since the compile itself is invalidated by
+          # any source change regardless. It also crowded the repo's 10 GB
+          # Actions cache — 10.6 GB of buildkit blobs across 431 entries, which
+          # was evicting the Go build cache that `backend` actually benefits
+          # from. Dropping it makes each build cold and still faster.
+
 
   # ── Vulnerability scan (Trivy) ────────────────────────────────────────────────
   trivy:
@@ -112,9 +176,9 @@ jobs:
       fail-fast: false
       matrix:
         service: [auth-service, fleet-service, media-service, notification-service, web]
+    # No checkout: this job resolves an image by ref and reads nothing from the
+    # repository. Reinstate it if a .trivyignore is ever added.
     steps:
-      - uses: actions/checkout@v4
-
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -132,9 +196,34 @@ jobs:
           vuln-type: os,library
           severity: CRITICAL,HIGH
 
+  # ── Move :latest onto the verified image ─────────────────────────────────────
+  # deploy/k8s/base/*/deployment.yaml reference `:latest`, so this tag is a real
+  # deploy input for a fresh cluster's first sync — it gets the same gate as
+  # bump-overlay, Trivy included. imagetools re-points the existing manifest
+  # list; it does not rebuild or re-upload any layer.
+  retag-latest:
+    needs: [backend, frontend, manifests, publish, trivy]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, fleet-service, media-service, notification-service, web]
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Point :latest at ${{ github.sha }}
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest" \
+            "${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}"
+
   # ── Version tagging ───────────────────────────────────────────────────────────
   tag:
-    needs: publish
+    needs: [backend, frontend, manifests, publish]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -160,12 +249,12 @@ jobs:
 
   # ── Bump the deployed image SHAs ──────────────────────────────────────────────
   bump-overlay:
-    needs: [publish, trivy]
+    needs: [backend, frontend, manifests, publish, trivy]
     runs-on: ubuntu-latest
     # Serialize bump-overlay across overlapping runs (e.g. two merges to main in
     # quick succession) so a later run's push can never be undone by an earlier
-    # run finishing after it. Scoped to this job, not the whole workflow, so
-    # build-test/publish/trivy for different commits can still run in parallel —
+    # run finishing after it. Scoped to this job, not the whole workflow, so the
+    # gate/publish/trivy jobs for different commits can still run in parallel —
     # only the overlay-pinning push needs to be a single queue. Never cancel a
     # queued/running bump: cancelling mid-push risks a half-written commit.
     concurrency:
@@ -181,9 +270,9 @@ jobs:
           set -euo pipefail
           # Stale-run guard: main may have moved past the commit this run built
           # if a later merge's bump-overlay already landed while this run was
-          # still going through build-test/publish/trivy. Rewriting to this
-          # run's (older) SHA would roll the overlay backwards while every step
-          # still stays green, so bail out loudly instead of pinning stale bits.
+          # still going through the gate/publish/trivy. Rewriting to this run's
+          # (older) SHA would roll the overlay backwards while every step still
+          # stays green, so bail out loudly instead of pinning stale bits.
           tip="$(git rev-parse HEAD)"
           if [ "$tip" != "${{ github.sha }}" ]; then
             echo "main's tip is now $tip, not this run's ${{ github.sha }} — a newer push already landed (or will bump the overlay itself). Skipping to avoid rewriting the overlay to a stale SHA."

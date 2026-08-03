@@ -1,6 +1,7 @@
 package admin_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/admin/admintest"
@@ -16,7 +17,7 @@ func TestInviteProvider_hidesSoftDeleted(t *testing.T) {
 	prov := invite.NewProvider(db)
 	token := f.FleetID + "-token"
 
-	if _, err := prov.GetByToken(token); err != nil {
+	if _, err := prov.GetByToken(context.Background(), token); err != nil {
 		t.Fatalf("fixture invite should be readable by token: %v", err)
 	}
 
@@ -25,13 +26,13 @@ func TestInviteProvider_hidesSoftDeleted(t *testing.T) {
 		t.Fatalf("soft delete: %v", err)
 	}
 
-	if _, err := prov.GetByID(f.InviteID); err != invite.ErrNotFound {
+	if _, err := prov.GetByID(context.Background(), f.InviteID); err != invite.ErrNotFound {
 		t.Errorf("GetByID must report a soft-deleted invite as not found, got %v", err)
 	}
-	if _, err := prov.GetByToken(token); err != invite.ErrNotFound {
+	if _, err := prov.GetByToken(context.Background(), token); err != invite.ErrNotFound {
 		t.Errorf("a soft-deleted invite must not be acceptable by token, got %v", err)
 	}
-	if is, err := prov.ListByFleetID(f.FleetID); err != nil || len(is) != 0 {
+	if is, err := prov.ListByFleetID(context.Background(), f.FleetID); err != nil || len(is) != 0 {
 		t.Errorf("ListByFleetID must ignore soft-deleted rows, got %d err %v", len(is), err)
 	}
 }

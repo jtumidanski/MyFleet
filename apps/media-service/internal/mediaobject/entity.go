@@ -17,7 +17,12 @@ type Entity struct {
 	Size             int64
 	OriginalFilename string
 	Status           string `gorm:"not null"`
-	CreatedAt        time.Time
+	// Standing protection, not a bug fix: ToEntity() already assigns this, so
+	// nothing here was ever corrupted. That correctness is incidental — it holds
+	// only while Model happens to carry createdAt — and two db.Save call sites
+	// (Update and UpdateInTx) depend on it. `<-:create` makes it structural
+	// (task-006 design §5.3).
+	CreatedAt        time.Time  `gorm:"<-:create"`
 	DeletedAt        *time.Time `gorm:"index"`
 	PurgeAfter       *time.Time
 	PurgeOperationID *string `gorm:"type:uuid;index"`
@@ -42,6 +47,7 @@ func Make(e Entity) Model {
 		createdAt:        e.CreatedAt,
 		deletedAt:        e.DeletedAt,
 		purgeAfter:       e.PurgeAfter,
+		purgeOperationID: e.PurgeOperationID,
 	}
 }
 
@@ -60,5 +66,6 @@ func (m Model) ToEntity() Entity {
 		CreatedAt:        m.createdAt,
 		DeletedAt:        m.deletedAt,
 		PurgeAfter:       m.purgeAfter,
+		PurgeOperationID: m.purgeOperationID,
 	}
 }

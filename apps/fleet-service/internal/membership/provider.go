@@ -74,11 +74,24 @@ func (p *dbProvider) GetByFleetAndUser(fleetID, userID string) (Model, error) {
 	return Make(e), nil
 }
 
-// CountOwners feeds the sole-owner guard: counting a purged owner would let
-// the last live owner remove themselves.
+// CountOwners counts the ACTIVE, live owners of a fleet.
+//
+// Both predicates are load-bearing and they guard different holes.
+//
+// status = 'active': ValidateRoleChange refuses to act on a non-active target,
+// so without it a fleet holding one active owner and one revoked owner would
+// count 2 and the last real owner would become demotable. Vestigial today —
+// every row is written "active" and never changed — so it asserts intent.
+//
+// deleted_at IS NULL: an owner soft-deleted by an admin purge must not count
+// either, or the last LIVE owner could remove themselves while the purge is
+// still inside its recovery window and a cancel would restore a fleet with no
+// owner at all.
 func (p *dbProvider) CountOwners(fleetID string) (int, error) {
 	var count int64
-	if err := p.db.Model(&Entity{}).Where("fleet_id = ? AND role = ? AND deleted_at IS NULL", fleetID, "owner").Count(&count).Error; err != nil {
+	if err := p.db.Model(&Entity{}).
+		Where("fleet_id = ? AND role = ? AND status = ? AND deleted_at IS NULL", fleetID, "owner", "active").
+		Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return int(count), nil

@@ -19,11 +19,18 @@ type Entity struct {
 	CurrentMileage      int
 	PrimaryImageMediaID string
 	Notes               string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	DeletedAt           *time.Time `gorm:"index"`
-	PurgeAfter          *time.Time
-	PurgeOperationID    *string `gorm:"type:uuid;index"`
+	// Both layers are deliberate (task-006 design §4). `<-:create` protects the
+	// COLUMN: db.Save in Administrator.Update UPDATEs every column, and GORM
+	// gives CreatedAt none of the auto-management it gives UpdatedAt, so an
+	// untagged column is written as 0001-01-01 on every PATCH. Assigning the
+	// field in ToEntity() protects the MODEL that Make(e) returns after the
+	// write — DeriveStatus falls back to CreatedAt(), so a zero there reports a
+	// healthy vehicle as "Inactive" even when the row is fine.
+	CreatedAt        time.Time `gorm:"<-:create"`
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeAfter       *time.Time
+	PurgeOperationID *string `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.vehicles" }
@@ -48,6 +55,7 @@ func Make(e Entity) Model {
 		updatedAt:           e.UpdatedAt,
 		deletedAt:           e.DeletedAt,
 		purgeAfter:          e.PurgeAfter,
+		purgeOperationID:    e.PurgeOperationID,
 	}
 }
 
@@ -65,7 +73,9 @@ func (m Model) ToEntity() Entity {
 		CurrentMileage:      m.currentMileage,
 		PrimaryImageMediaID: m.primaryImageMediaID,
 		Notes:               m.notes,
+		CreatedAt:           m.createdAt,
 		DeletedAt:           m.deletedAt,
 		PurgeAfter:          m.purgeAfter,
+		PurgeOperationID:    m.purgeOperationID,
 	}
 }

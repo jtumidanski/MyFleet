@@ -93,3 +93,37 @@ func TestValidate_rejectsAnOverLongUpdate(t *testing.T) {
 		t.Fatalf("Validate(over-long update) = %v, want ErrValidation", err)
 	}
 }
+
+// The record drawer offers the same category picker the create form does, so
+// the category has to be re-assignable. It was not: the PATCH handler carried
+// no categoryId at all, so an edit silently kept the original.
+func TestWithCategoryID_reassignsTheCategory(t *testing.T) {
+	m, err := validBuilder().Build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	updated := m.WithCategoryID("c2")
+
+	if updated.CategoryID() != "c2" {
+		t.Errorf("CategoryID() = %q, want %q", updated.CategoryID(), "c2")
+	}
+	// Immutability: the receiver is a value, so the original must be untouched.
+	if m.CategoryID() != "c1" {
+		t.Errorf("original mutated: CategoryID() = %q, want %q", m.CategoryID(), "c1")
+	}
+}
+
+// categoryID is an invariant, and Processor.Update re-runs Validate after the
+// mutation function. A PATCH that clears the category must therefore fail
+// rather than persist a categoryless record.
+func TestValidate_rejectsAClearedCategory(t *testing.T) {
+	m, err := validBuilder().Build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+
+	if err := Validate(m.WithCategoryID("")); !errors.Is(err, server.ErrValidation) {
+		t.Fatalf("cleared category err = %v, want ErrValidation", err)
+	}
+}

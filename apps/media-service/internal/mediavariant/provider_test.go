@@ -15,12 +15,34 @@ import (
 // GORM AutoMigrate mishandles schema-qualified table names (media.media_variants)
 // on SQLite when the entity carries index tags, so the table is created directly
 // — the same approach mediaobject's tests take.
+//
+// The uniqueness on (media_object_id, variant) is created here as the same
+// PARTIAL index Migration applies, not as an inline UNIQUE constraint. It is
+// restated because AutoMigrate does not run in these tests, and without it
+// SQLite rejects Upsert's ON CONFLICT clause outright — so a suite that omitted
+// it would pass against a schema production does not have.
+//
+// Partial specifically: a plain constraint would let a variant soft-deleted by
+// an admin purge keep occupying the slot, and these tests would then prove the
+// wrong behaviour.
 func newVariantTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// The ":memory:" DSN carries no cache=shared, so every physical connection
+	// is an independent empty database. Nothing in this package's tests runs
+	// concurrently today, but capping the pool to one connection keeps the
+	// ATTACH and CREATE TABLE below from silently applying to a different,
+	// schema-less connection than a later query lands on — the same fix
+	// processing's newCardTestDB needed once it drove concurrent goroutines
+	// against one gorm.DB.
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
 	if err := db.Exec("ATTACH DATABASE ':memory:' AS media").Error; err != nil {
 		t.Fatalf("attach media schema: %v", err)
 	}
@@ -37,6 +59,9 @@ func newVariantTestDB(t *testing.T) *gorm.DB {
 		purge_operation_id TEXT
 	)`).Error; err != nil {
 		t.Fatalf("create media_variants: %v", err)
+	}
+	if err := ApplyPartialIndexes(db); err != nil {
+		t.Fatalf("partial indexes: %v", err)
 	}
 	return db
 }

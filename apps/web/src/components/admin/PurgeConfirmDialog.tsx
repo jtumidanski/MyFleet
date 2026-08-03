@@ -112,7 +112,13 @@ export function PurgeConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      {/*
+        dismissible={false} while the purge is in flight (main's Dialog gained
+        this): Escape, outside-click and the close button are refused together,
+        so an operator cannot half-dismiss a dialog whose request is already on
+        its way to a server that will act on it.
+      */}
+      <DialogContent dismissible={!isPending}>
         <DialogHeader>
           <DialogTitle>{label}</DialogTitle>
           <DialogDescription>

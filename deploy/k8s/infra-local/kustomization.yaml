@@ -17,5 +17,6 @@ resources:
   - postgres.yaml
   - minio.yaml
   - redpanda.yaml
+  - mailpit.yaml
   - traefik.yaml
   - ingressroute.yaml

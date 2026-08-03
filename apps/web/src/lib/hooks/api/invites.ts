@@ -11,8 +11,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { inviteService } from '../../../services/api/InviteService';
+import { mintAccessToken } from '../../api/refresh';
 import { memberKeys } from './members';
 import { fleetKeys } from './fleets';
+import { authKeys } from './auth';
 import type { CreateInviteAttributes } from '../../../types/models/invite';
 
 // ---------------------------------------------------------------------------
@@ -30,6 +32,7 @@ export const inviteKeys = {
   all: ['invites'] as const,
   lists: () => [...inviteKeys.all, 'list'] as const,
   list: (params: { fleetId: string }) => [...inviteKeys.lists(), params] as const,
+  pending: () => [...inviteKeys.all, 'pending'] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -46,6 +49,27 @@ export function useInvites(fleetId: string | null | undefined) {
     enabled: !!fleetId,
     staleTime: 60 * 1000,
     gcTime: 5 * 60 * 1000,
+    select: (result) => result.data,
+  });
+}
+
+/**
+ * GET /api/fleet/invites/pending — invites waiting for the signed-in user.
+ *
+ * Unlike every other invite query this one is not fleet-scoped, and it is meant
+ * to run for a user who has no fleet at all: it is what makes an invite
+ * discoverable to someone who was invited before they had an account and never
+ * received the link.
+ *
+ * `staleTime: 0` — the invitee may be looking at this page precisely because
+ * someone just invited them, and a cached "nothing waiting" is the failure this
+ * hook exists to prevent.
+ */
+export function usePendingInvites() {
+  return useQuery({
+    queryKey: inviteKeys.pending(),
+    queryFn: () => inviteService.listPending(),
+    staleTime: 0,
     select: (result) => result.data,
   });
 }
@@ -69,6 +93,26 @@ export function useCreateInvite(fleetId: string) {
 }
 
 /**
+ * Maps invite API failures to copy a person can act on (FR-UI-4).
+ *
+ * Kept here rather than in a shared error module: this is invite-specific copy,
+ * and the two 429s need different sentences, which a generic status-to-string
+ * map could not express.
+ */
+export function inviteErrorMessage(err: unknown, action: 'create' | 'resend'): string {
+  const apiError = createErrorFromUnknown(err);
+  if (apiError.status === 429) {
+    return action === 'create'
+      ? "You've sent too many invites today. Try again tomorrow."
+      : 'You just resent this invite. Wait a few minutes before trying again.';
+  }
+  if (apiError.status === 409 && action === 'resend') {
+    return 'That invite has already been accepted.';
+  }
+  return apiError.message || `Could not ${action} invite`;
+}
+
+/**
  * DELETE /api/fleet/invites/{id} — revoke invite (owner-only).
  * Invalidates inviteKeys.lists() on settle.
  */
@@ -89,11 +133,33 @@ export function useRevokeInvite() {
 /**
  * POST /api/fleet/invites/{token}/accept — accept an invite.
  * Invalidates memberKeys and fleetKeys so the new membership is reflected.
+ *
+ * Acceptance creates the membership server-side, but `active_fleet_id` and
+ * `role` are JWT claims resolved at mint time — the token in hand still says
+ * the caller has no fleet. onSuccess therefore mints a fresh token BEFORE
+ * refetching identity, so `/auth/me` reports the new fleet and RequireAuth
+ * stops bouncing the brand-new member to onboarding. Both awaits matter: the
+ * mutation must not settle until the session reflects the membership, because
+ * the accept page navigates as soon as it does.
  */
 export function useAcceptInvite() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (token: string) => inviteService.acceptInvite(token),
+    onSuccess: async () => {
+      // mintAccessToken, NOT refreshAccessToken: the invite is already accepted
+      // server-side and the current token is still valid, so a transient mint
+      // failure must not clear it — that would log the user out on the very
+      // path that just succeeded, with the invite spent.
+      const token = await mintAccessToken();
+      if (!token) {
+        toast.error(
+          'You joined the fleet, but your session could not be updated. Sign out and back in to see it.',
+        );
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: authKeys.all });
+    },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: memberKeys.all });
       void queryClient.invalidateQueries({ queryKey: fleetKeys.all });
@@ -108,6 +174,28 @@ export function useAcceptInvite() {
       // own handler on the very same request — so both must prefer it or the
       // user reads "conflict" next to the real reason.
       toast.error(apiError.detail || apiError.message || 'Could not accept invite');
+    },
+  });
+}
+
+/**
+ * POST /api/fleet/fleets/{fleetId}/invites/{inviteId}/resend — owner-only.
+ *
+ * Invalidating the list is REQUIRED, not cosmetic: resend rotates the token, so
+ * a stale cache would hand the copy-link button a dead token.
+ */
+export function useResendInvite(fleetId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) => inviteService.resendInvite(fleetId, inviteId),
+    onSuccess: () => {
+      toast.success('Invite resent');
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: inviteKeys.lists() });
+    },
+    onError: (err) => {
+      toast.error(inviteErrorMessage(err, 'resend'));
     },
   });
 }

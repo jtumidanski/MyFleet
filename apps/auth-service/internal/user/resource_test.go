@@ -1,6 +1,7 @@
 package user
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,7 +39,8 @@ func newAuthRouter(t *testing.T) (chi.Router, *gorm.DB) {
 	log.SetOutput(io.Discard)
 
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db))
+	// nil gatherer: these tests drive /auth/me only, which never consults it.
+	r.Group(InitializeRoutes(log, db, nil))
 	return r, db
 }
 
@@ -238,6 +240,66 @@ func TestPatchMe_doesNotZeroCreatedAt(t *testing.T) {
 	if !e.CreatedAt.Equal(want) {
 		t.Fatalf("PATCH /auth/me changed created_at: got %v, want %v — Administrator.Update must not touch created_at",
 			e.CreatedAt, want)
+	}
+}
+
+// A user with no fleet must read as JSON `null`, not `""`.
+//
+// Identity.ActiveFleetID is a Go string, so an absent `active_fleet_id` claim
+// arrives as the empty string and marshals to `""`. The SPA's guard tests
+// `activeFleetId === null` while its pages test `!activeFleetId`, so `""` put
+// the two into disagreement: the guard saw a fleet and let the user through,
+// every page then saw none and rendered "No fleet selected". Onboarding became
+// unreachable for exactly the users who need it. Same for role.
+func TestAuthMe_reportsAFleetlessUserAsNullNotEmptyString(t *testing.T) {
+	r, _ := newAuthRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	req = req.WithContext(auth.WithIdentity(req.Context(), auth.Identity{
+		UserID:        testUserID,
+		Email:         "a@b.com",
+		ActiveFleetID: "",
+		Role:          "",
+	}))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /auth/me = %d, want 200. Body: %s", rec.Code, strings.TrimSpace(rec.Body.String()))
+	}
+
+	var doc struct {
+		Meta map[string]any `json:"meta"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode body: %v (%s)", err, rec.Body.String())
+	}
+	for _, key := range []string{"activeFleetId", "role"} {
+		v, present := doc.Meta[key]
+		if !present {
+			t.Fatalf("meta.%s is missing entirely; it must be present and null: %s", key, rec.Body.String())
+		}
+		if v != nil {
+			t.Fatalf("meta.%s = %#v, want null. An empty string reads as "+
+				"\"has a fleet\" to any truthiness check and as \"has none\" to a "+
+				"null check, which is what stranded fleetless users on "+
+				"\"No fleet selected\". Body: %s", key, v, rec.Body.String())
+		}
+	}
+}
+
+// The counterpart: a real fleet id must still survive as its own value.
+func TestAuthMe_reportsTheActiveFleetWhenThereIsOne(t *testing.T) {
+	rec := serveMe(t, testUserID) // serve() carries fleet-1 / owner
+
+	var doc struct {
+		Meta map[string]any `json:"meta"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode body: %v (%s)", err, rec.Body.String())
+	}
+	if doc.Meta["activeFleetId"] != "fleet-1" || doc.Meta["role"] != "owner" {
+		t.Fatalf("meta = %#v, want activeFleetId=fleet-1 role=owner", doc.Meta)
 	}
 }
 

@@ -1,6 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { ApiClient } from './apiClient';
 import { ApiError } from './errors';
+
+/**
+ * Headers the nth fetch call was made with. Indexing `mock.calls` widens to
+ * `undefined` under noUncheckedIndexedAccess, and a call that never happened is
+ * worth failing on by name rather than through a header assertion on nothing.
+ */
+function headersOfCall(fetchMock: Mock, index: number): Record<string, string> {
+  const call = fetchMock.mock.calls[index];
+  if (!call) {
+    throw new Error(
+      `expected a fetch call at index ${index}; found ${fetchMock.mock.calls.length}`,
+    );
+  }
+  return (call[1] as RequestInit).headers as Record<string, string>;
+}
 
 describe('ApiClient.request', () => {
   beforeEach(() => {
@@ -30,7 +45,7 @@ describe('ApiClient.request', () => {
 
     await makeClient().request('/api/media/m1');
 
-    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    const headers = headersOfCall(fetchMock, 0);
     expect(headers['Content-Type']).toBe('application/vnd.api+json');
   });
 
@@ -48,7 +63,7 @@ describe('ApiClient.request', () => {
       headers: { 'Content-Type': 'image/jpeg' },
     });
 
-    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    const headers = headersOfCall(fetchMock, 0);
     expect(headers['Content-Type']).toBe('image/jpeg');
     // The override must not cost the bearer token.
     expect(headers.Authorization).toBe('Bearer tok-123');
@@ -78,7 +93,7 @@ describe('ApiClient.requestBlob', () => {
     const out = await client.requestBlob('/api/media/m1/content');
 
     expect(out).toBe(blob);
-    const headers = fetchMock.mock.calls[0][1].headers as Record<string, string>;
+    const headers = headersOfCall(fetchMock, 0);
     expect(headers.Authorization).toBe('Bearer tok-123');
     // A binary GET must not claim a JSON:API content type.
     expect(headers['Content-Type']).toBeUndefined();
@@ -111,8 +126,8 @@ describe('ApiClient.requestBlob', () => {
     expect(onRefresh).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    const firstHeaders = fetchMock.mock.calls[0][1].headers as Record<string, string>;
-    const secondHeaders = fetchMock.mock.calls[1][1].headers as Record<string, string>;
+    const firstHeaders = headersOfCall(fetchMock, 0);
+    const secondHeaders = headersOfCall(fetchMock, 1);
     expect(firstHeaders.Authorization).toBe('Bearer tok-old');
     // This is the assertion that catches a retry which reuses the stale token.
     expect(secondHeaders.Authorization).toBe('Bearer tok-new');

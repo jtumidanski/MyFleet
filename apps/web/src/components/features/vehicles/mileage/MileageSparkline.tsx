@@ -28,7 +28,8 @@ export function MileageSparkline({
     );
   }
 
-  // Sort chronologically (backend returns chronological order, but sort defensively)
+  // Sort chronologically ascending: the backend returns newest first (like its
+  // fuel/maintenance siblings), so this sort is load-bearing, not defensive.
   const sorted = [...records].sort(
     (a, b) =>
       new Date(a.attributes.recordedAt).getTime() - new Date(b.attributes.recordedAt).getTime(),

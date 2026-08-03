@@ -99,6 +99,10 @@ func main() {
 		return fleetevents.EmitMemberInvited(tx, fleetID, actorID, traceID,
 			dtoevents.MemberInvitedData{InviteID: inviteID, Email: email, Role: role})
 	}
+	emitInviteCreated := func(tx *gorm.DB, fleetID, actorID, traceID, inviteID, email, role string) error {
+		return fleetevents.EmitInviteCreated(tx, fleetID, actorID, traceID,
+			dtoevents.InviteCreatedData{InviteID: inviteID, Email: email, Role: role})
+	}
 	emitMaintenanceCompleted := func(tx *gorm.DB, fleetID, actorID, traceID, scheduleID, vehicleID, recordID, categoryID string) error {
 		return fleetevents.EmitMaintenanceCompleted(tx, fleetID, actorID, traceID,
 			dtoevents.MaintenanceCompletedData{ScheduleID: scheduleID, VehicleID: vehicleID, MaintenanceRecord: recordID, CategoryID: categoryID})
@@ -119,11 +123,12 @@ func main() {
 		WithActivityRecorder(activity.Record).
 		WithEmitter(emitMaintenanceCompleted)
 
-	// Read-only accessors for deriving vehicle status on read (design §10.2).
-	// Schedule states come from the schedule processor (live DueState); last
-	// activity comes from the activity domain (falls back to vehicle created_at).
+	// Read-only accessors for deriving a vehicle's status, last activity, and
+	// governing due detail on read (design §10.2). Schedule detail comes from the
+	// schedule processor through an adapter; last activity comes from the
+	// activity domain (falls back to vehicle created_at).
 	vehicleStatusDeps := vehicle.StatusDeps{
-		Schedules: scheduleProc,
+		Schedules: scheduleDueAdapter{p: scheduleProc},
 		Activity:  activityProc,
 	}
 
@@ -196,7 +201,7 @@ func main() {
 	// Category accessor for the record list's ?kind= filter. The processor is
 	// stateless, so constructing a second one here rather than reshaping
 	// maintenancecategory.InitializeRoutes costs nothing.
-	categoryProc := maintenancecategory.NewProcessor(log, maintenancecategory.NewProvider(db))
+	categoryProc := maintenancecategory.NewProcessor(log, maintenancecategory.NewProvider(db), maintenancecategory.NewAdministrator(db))
 
 	// Attachment ownership validation (PRD FR-DOC-6). Cluster-internal; the
 	// endpoint it calls is kept off the public internet by the priority-200
@@ -247,19 +252,30 @@ func main() {
 		}
 		return err
 	})
+	// Abuse control (FR-RATE-1…4). Twenty invites per fleet per day is roughly
+	// 3x the largest plausible household fleet, so it never obstructs real use
+	// while capping a compromised account's burn on the domain's sending
+	// reputation. Five minutes is longer than any mail delay a user would wait
+	// through before hitting resend again.
+	inviteLimits := invite.Limits{
+		CreatePerWindow: config.GetInt("INVITE_RATE_LIMIT_PER_DAY", 20),
+		CreateWindow:    24 * time.Hour,
+		ResendCooldown:  time.Duration(config.GetInt("INVITE_RESEND_COOLDOWN_SECONDS", 300)) * time.Second,
+	}
 
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
 		// Internal routes: no JWT, network-restricted (consumed by other services).
 		AddRouteInitializer(membership.InitializeInternalRoutes(log, db)).
 		AddRouteInitializer(maintenanceschedule.InitializeInternalRoutes(log, db)).
+		AddRouteInitializer(invite.InitializeInternalRoutes(log, db, fleet.NewProvider(db))).
 		// Protected routes: JWT required.
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
 				fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
-				membership.InitializeRoutes(log, db)(pr)
-				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited)(pr)
+				membership.InitializeRoutes(log, db, activity.Record)(pr)
+				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited, emitInviteCreated, inviteLimits)(pr)
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
@@ -332,5 +348,48 @@ func (a adminVehicleStatus) DeriveStatusByID(vehicleID string, now time.Time) st
 	if err != nil {
 		return ""
 	}
-	return a.deps.DeriveStatus(m, now)
+	// main renamed DeriveStatus to Derive and widened it to a struct carrying
+	// last-activity and next-due alongside the status. The console's fleet
+	// inspector wants only the status string; a gather failure already yields a
+	// zero Derived, so the empty status falls out naturally.
+	return a.deps.Derive(m, now).Status
+}
+
+// scheduleDueAdapter maps maintenanceschedule's due detail onto the vehicle
+// domain's port type, field for field. The mapping lives here, in the
+// composition root, so neither domain imports the other. A field renamed or
+// removed on either side is a compile error here; a field added is not — the
+// keyed literal below leaves it silently zero-valued, so adding a field means
+// touching this adapter deliberately, not relying on the compiler to notice.
+//
+// The previous binding worked by structural typing because the gatherer returned
+// a []string. With named struct types on both sides it cannot, which is the
+// point: the boundary is now explicit.
+type scheduleDueAdapter struct {
+	p *maintenanceschedule.Processor
+}
+
+func (a scheduleDueAdapter) ScheduleDueByVehicle(vehicleID string) ([]vehicle.ScheduleDue, error) {
+	dues, err := a.p.ScheduleDueByVehicle(vehicleID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]vehicle.ScheduleDue, 0, len(dues))
+	for _, d := range dues {
+		breaches := make([]vehicle.Breach, 0, len(d.Breaches))
+		for _, b := range d.Breaches {
+			breaches = append(breaches, vehicle.Breach{
+				Axis:    b.Axis,
+				Days:    b.Days,
+				Miles:   b.Miles,
+				Urgency: b.Urgency,
+			})
+		}
+		out = append(out, vehicle.ScheduleDue{
+			ScheduleID: d.ScheduleID,
+			State:      d.State,
+			Breaches:   breaches,
+		})
+	}
+	return out, nil
 }
