@@ -22,9 +22,10 @@ type Entity struct {
 	// only while Model happens to carry createdAt — and two db.Save call sites
 	// (Update and UpdateInTx) depend on it. `<-:create` makes it structural
 	// (task-006 design §5.3).
-	CreatedAt  time.Time  `gorm:"<-:create"`
-	DeletedAt  *time.Time `gorm:"index"`
-	PurgeAfter *time.Time
+	CreatedAt        time.Time  `gorm:"<-:create"`
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeAfter       *time.Time
+	PurgeOperationID *string `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "media.media_objects" }
@@ -46,6 +47,7 @@ func Make(e Entity) Model {
 		createdAt:        e.CreatedAt,
 		deletedAt:        e.DeletedAt,
 		purgeAfter:       e.PurgeAfter,
+		purgeOperationID: e.PurgeOperationID,
 	}
 }
 
@@ -64,5 +66,6 @@ func (m Model) ToEntity() Entity {
 		CreatedAt:        m.createdAt,
 		DeletedAt:        m.deletedAt,
 		PurgeAfter:       m.purgeAfter,
+		PurgeOperationID: m.purgeOperationID,
 	}
 }

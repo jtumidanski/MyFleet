@@ -47,6 +47,7 @@ func JWT(keyfn jwt.Keyfunc, opts ...Option) func(http.Handler) http.Handler {
 				Email:         str(claims["email"]),
 				ActiveFleetID: str(claims["active_fleet_id"]),
 				Role:          str(claims["role"]),
+				PlatformAdmin: boolean(claims["platform_admin"]),
 			}
 			// A token that validates but carries no email is the signature of a
 			// minting path that built a partial principal — the defect this task
@@ -86,4 +87,12 @@ func str(v any) string {
 		return s
 	}
 	return ""
+}
+
+// boolean mirrors str: anything that is not a JSON boolean — absent, a string,
+// a number — reads as false. Failing closed here means a hand-rolled or
+// half-migrated token can never grant the platform tier (FR-ADMIN-AUTH-5).
+func boolean(v any) bool {
+	b, ok := v.(bool)
+	return ok && b
 }

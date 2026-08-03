@@ -112,6 +112,49 @@ func TestJWT_warnsOnEmptyEmailClaimAndStillCallsNext(t *testing.T) {
 	}
 }
 
+// FR-ADMIN-AUTH-5: a missing or non-boolean platform_admin claim parses to
+// false. "true" as a STRING is the realistic failure — a hand-rolled token, or a
+// mint path that stringified the value — and it must not grant anything.
+func TestJWT_parsesPlatformAdminClaim(t *testing.T) {
+	cases := []struct {
+		name  string
+		claim any
+		want  bool
+	}{
+		{"true", true, true},
+		{"false", false, false},
+		{"absent", nil, false},
+		{"string true", "true", false},
+		{"number one", float64(1), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key, _ := rsa.GenerateKey(rand.Reader, 2048)
+			claims := jwt.MapClaims{
+				"sub": "user-1",
+				"exp": time.Now().Add(time.Hour).Unix(),
+			}
+			if tc.claim != nil {
+				claims["platform_admin"] = tc.claim
+			}
+			tokenStr := signTestToken(t, key, claims)
+
+			var got Identity
+			mw := JWT(func(*jwt.Token) (any, error) { return &key.PublicKey, nil })
+			h := mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				got = IdentityFromContext(r.Context())
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Authorization", "Bearer "+tokenStr)
+			h.ServeHTTP(httptest.NewRecorder(), req)
+
+			if got.PlatformAdmin != tc.want {
+				t.Errorf("PlatformAdmin = %v, want %v", got.PlatformAdmin, tc.want)
+			}
+		})
+	}
+}
+
 func TestJWT_doesNotWarnWhenEmailIsPresent(t *testing.T) {
 	key, _ := rsa.GenerateKey(rand.Reader, 2048)
 	tokenStr := signTestToken(t, key, jwt.MapClaims{

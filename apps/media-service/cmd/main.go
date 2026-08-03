@@ -20,6 +20,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/admin"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/mediaobject"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/mediavariant"
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/processedevents"
@@ -119,10 +120,12 @@ func main() {
 		go worker.Run(ctx, brokers, "media-variant-workers")
 	}
 
-	// Daily media purge: hard-delete soft-deleted objects past purge_after,
-	// removing both the rows and the MinIO objects. Under advisory lock so only
-	// one replica runs per tick (design §10.6 / A9).
-	go jobs.Every(ctx, 24*time.Hour, func(ctx context.Context) error {
+	// Media purge: hard-delete soft-deleted objects past purge_after, removing
+	// both the rows and the MinIO objects. Under advisory lock so only one
+	// replica runs per tick (design §10.6 / A9). Hourly, not daily: jobs.Every's
+	// first tick is at T+interval, so a 24-hour sweep in a service that
+	// redeploys more often than daily never runs (design OQ-5).
+	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
 		_, err := database.WithLeaderLock(db, "media-purge", func() error {
 			return purgeExpired(ctx, log, db, store)
 		})
@@ -144,10 +147,12 @@ func main() {
 
 	if err := server.New(log).
 		Use(telemetry.CorrelationID).
-		// Internal route: no JWT, network-restricted (consumed by fleet-service
-		// to validate documentMediaIds). Kept off the public internet by the
-		// priority-200 internal-deny rule in the main overlay's ingressroute.
+		// Internal routes: no JWT, network-restricted. mediaobject's is consumed
+		// by fleet-service to validate documentMediaIds; admin's is its slice of
+		// the platform purge protocol. Both are kept off the public internet by
+		// the priority-200 internal-deny rule in the main overlay's ingressroute.
 		AddRouteInitializer(mediaobject.InitializeInternalRoutes(log, db)).
+		AddRouteInitializer(admin.InitializeInternalRoutes(log, db, store)).
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
 				pr.Use(authmw.JWT(keyfn))

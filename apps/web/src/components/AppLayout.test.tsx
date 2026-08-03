@@ -25,6 +25,7 @@ function baseAuth(overrides: Partial<AuthContextValue>): AuthContextValue {
     user: null,
     activeFleetId: null,
     role: null,
+    platformAdmin: false,
     isAuthenticated: true,
     isLoading: false,
     login: vi.fn(),
@@ -84,5 +85,19 @@ describe('AppLayout', () => {
     renderLayout(baseAuth({}));
 
     expect(screen.getByText('page content')).toBeInTheDocument();
+  });
+});
+
+// FR-ADMIN-UI-5: the nav entry is a convenience, not a control — its absence
+// hides the door, the server refuses entry.
+describe('AppLayout admin entry point', () => {
+  it('hides the Admin nav entry from non-admins', () => {
+    renderLayout(baseAuth({ platformAdmin: false }));
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+  });
+
+  it('shows the Admin nav entry to admins', () => {
+    renderLayout(baseAuth({ platformAdmin: true }));
+    expect(screen.getByRole('link', { name: 'Admin' })).toBeInTheDocument();
   });
 });

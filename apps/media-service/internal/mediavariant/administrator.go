@@ -55,6 +55,14 @@ func (a *dbAdministrator) Upsert(m Model) error {
 	// TestUpsert_preservesCreatedAt.
 	return a.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "media_object_id"}, {Name: "variant"}},
+		// The arbiter index is PARTIAL (see ApplyPartialIndexes): without a
+		// matching predicate Postgres cannot infer it and the upsert errors.
+		// This also means a soft-deleted variant is NOT a conflict target — a
+		// regeneration inserts a fresh live row instead of quietly resurrecting
+		// one that a purge owns.
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "deleted_at IS NULL"},
+		}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"object_key", "width", "height", "content_type",
 		}),

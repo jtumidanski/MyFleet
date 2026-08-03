@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -45,6 +46,22 @@ func usersWith(id, email string) *fakeUsers {
 	}}
 }
 
+// fakeAdmins is a platformadmin.Provider stand-in so the resolver's third
+// source of identity can be driven without a database.
+type fakeAdmins struct {
+	isAdmin bool
+	err     error
+}
+
+func (f *fakeAdmins) IsAdmin(string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.isAdmin, nil
+}
+
+func (f *fakeAdmins) IsRevoked(string) (bool, error) { return false, nil }
+
 // fleetServing stands up a fake fleet-service and returns a membership.Client
 // pointed at it, so the real HTTP client — including its 404 handling — is
 // under test rather than a stand-in for it.
@@ -61,27 +78,47 @@ func fleetServing(t *testing.T, status int, body string) *membership.Client {
 // TestNewPrincipalResolver_fillsEveryField is the core guarantee: this closure
 // is the only place a session.Principal is built, so if it fills every field,
 // every token this service mints on either path carries a complete claim set.
+//
+// Table-driven over both true AND false admin answers (not just true): a
+// version of this test that only ever fed the provider `true` would stay green
+// even if newPrincipalResolver dropped the `isAdmin` variable entirely and
+// hardcoded `PlatformAdmin: true` — minting the platform tier for every user
+// on the system. This is the only place that decides the value, so it is the
+// only place that can catch that regression; the mint layer
+// (session.TestMintAccess_setsPlatformAdminClaimAsBoolean) and the middleware
+// (TestJWT_parsesPlatformAdminClaim) both already cover true and false, but
+// neither of them can see whether the VALUE fed into them was ever computed
+// correctly in the first place.
 func TestNewPrincipalResolver_fillsEveryField(t *testing.T) {
-	resolve := newPrincipalResolver(
-		usersWith("user-1", "a@b.com"),
-		fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
-	)
+	for _, isAdmin := range []bool{true, false} {
+		t.Run(fmt.Sprintf("isAdmin=%v", isAdmin), func(t *testing.T) {
+			resolve := newPrincipalResolver(
+				usersWith("user-1", "a@b.com"),
+				fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
+				&fakeAdmins{isAdmin: isAdmin},
+			)
 
-	p, err := resolve(context.Background(), "user-1")
-	if err != nil {
-		t.Fatalf("resolve: %v", err)
-	}
-	if p.UserID != "user-1" {
-		t.Fatalf("UserID = %q, want user-1", p.UserID)
-	}
-	if p.Email != "a@b.com" {
-		t.Fatalf("Email = %q, want a@b.com — this is the field the refresh path used to drop", p.Email)
-	}
-	if p.ActiveFleetID != "fleet-9" {
-		t.Fatalf("ActiveFleetID = %q, want fleet-9", p.ActiveFleetID)
-	}
-	if p.Role != "owner" {
-		t.Fatalf("Role = %q, want owner", p.Role)
+			p, err := resolve(context.Background(), "user-1")
+			if err != nil {
+				t.Fatalf("resolve: %v", err)
+			}
+			if p.UserID != "user-1" {
+				t.Fatalf("UserID = %q, want user-1", p.UserID)
+			}
+			if p.Email != "a@b.com" {
+				t.Fatalf("Email = %q, want a@b.com — this is the field the refresh path used to drop", p.Email)
+			}
+			if p.ActiveFleetID != "fleet-9" {
+				t.Fatalf("ActiveFleetID = %q, want fleet-9", p.ActiveFleetID)
+			}
+			if p.Role != "owner" {
+				t.Fatalf("Role = %q, want owner", p.Role)
+			}
+			if p.PlatformAdmin != isAdmin {
+				t.Fatalf("PlatformAdmin = %v, want %v — the resolver must carry the provider's "+
+					"exact answer, not a hardcoded value", p.PlatformAdmin, isAdmin)
+			}
+		})
 	}
 }
 
@@ -109,6 +146,7 @@ func TestNewPrincipalResolver_leavesNoPrincipalFieldEmpty(t *testing.T) {
 	resolve := newPrincipalResolver(
 		usersWith("user-1", "a@b.com"),
 		fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
+		&fakeAdmins{isAdmin: true},
 	)
 
 	p, err := resolve(context.Background(), "user-1")
@@ -117,21 +155,40 @@ func TestNewPrincipalResolver_leavesNoPrincipalFieldEmpty(t *testing.T) {
 	}
 
 	v := reflect.ValueOf(p)
+	var boolFields int
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Type().Field(i)
-		if f.Type.Kind() != reflect.String {
-			// Not a skip: a non-string field means the "zero value means
-			// dropped" scheme no longer holds, and this test must say so rather
-			// than quietly cover less than it appears to.
-			t.Fatalf("session.Principal.%s is a %s, not a string — this test infers "+
-				"'dropped' from the empty string, so extend its scheme before adding "+
-				"a field of another kind", f.Name, f.Type.Kind())
+		switch f.Type.Kind() {
+		case reflect.String:
+			if v.Field(i).String() == "" {
+				t.Errorf("session.Principal.%s is empty after resolution — newPrincipalResolver's "+
+					"literal does not set it, so every token this service mints will carry an "+
+					"empty claim for it.", f.Name)
+			}
+		case reflect.Bool:
+			// A bool has no "empty" value to infer dropped-ness from, so this
+			// test only asserts it was actually threaded through: the fake
+			// admin provider above reports true, and the resolved principal
+			// must agree.
+			boolFields++
+			if !v.Field(i).Bool() {
+				t.Errorf("session.Principal.%s is false after resolution even though the "+
+					"admin lookup reported true — newPrincipalResolver's literal does not set it.",
+					f.Name)
+			}
+		default:
+			// Not a skip: an unhandled field kind means this test's scheme no
+			// longer holds, and it must say so rather than quietly cover less
+			// than it appears to.
+			t.Fatalf("session.Principal.%s is a %s — this test infers 'dropped' from the "+
+				"zero value, so extend its scheme before adding a field of another kind",
+				f.Name, f.Type.Kind())
 		}
-		if v.Field(i).String() == "" {
-			t.Errorf("session.Principal.%s is empty after resolution — newPrincipalResolver's "+
-				"literal does not set it, so every token this service mints will carry an "+
-				"empty claim for it.", f.Name)
-		}
+	}
+	if boolFields != 1 {
+		t.Fatalf("session.Principal now has %d bool fields, want exactly 1 — extend this "+
+			"test's scheme, which can only attribute a single bool to the fake admin provider",
+			boolFields)
 	}
 }
 
@@ -142,6 +199,7 @@ func TestNewPrincipalResolver_failsClosedWhenTheUserIsGone(t *testing.T) {
 	resolve := newPrincipalResolver(
 		&fakeUsers{byID: map[string]user.Model{}},
 		fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
+		&fakeAdmins{},
 	)
 
 	if _, err := resolve(context.Background(), "ghost"); !errors.Is(err, user.ErrNotFound) {
@@ -153,6 +211,7 @@ func TestNewPrincipalResolver_failsClosedWhenTheMembershipCallFails(t *testing.T
 	resolve := newPrincipalResolver(
 		usersWith("user-1", "a@b.com"),
 		fleetServing(t, http.StatusOK, `not json`),
+		&fakeAdmins{},
 	)
 
 	if _, err := resolve(context.Background(), "user-1"); err == nil {
@@ -179,6 +238,7 @@ func TestNewPrincipalResolver_failsClosedWhenFleetServiceErrors(t *testing.T) {
 		// failed the decode. This is the body that used to slip through.
 		fleetServing(t, http.StatusInternalServerError,
 			`{"errors":[{"status":"500","code":"internal","title":"internal server error"}]}`),
+		&fakeAdmins{},
 	)
 
 	p, err := resolve(context.Background(), "user-1")
@@ -196,6 +256,7 @@ func TestNewPrincipalResolver_treatsNoMembershipAsEmptyNotError(t *testing.T) {
 	resolve := newPrincipalResolver(
 		usersWith("user-1", "a@b.com"),
 		fleetServing(t, http.StatusNotFound, ``),
+		&fakeAdmins{isAdmin: true},
 	)
 
 	p, err := resolve(context.Background(), "user-1")
@@ -207,5 +268,26 @@ func TestNewPrincipalResolver_treatsNoMembershipAsEmptyNotError(t *testing.T) {
 	}
 	if p.Email != "a@b.com" {
 		t.Fatalf("Email = %q, want a@b.com even with no membership", p.Email)
+	}
+	// FR-ADMIN-AUTH-9: an admin with no fleet is a normal state, so the
+	// platform tier must survive resolution even when ActiveFleetID is empty.
+	if !p.PlatformAdmin {
+		t.Fatalf("PlatformAdmin = %v, want true — an admin with no fleet is still an admin", p.PlatformAdmin)
+	}
+}
+
+// TestNewPrincipalResolver_failsClosedWhenTheAdminLookupFails covers the third
+// source of identity added for FR-ADMIN-AUTH-4: a lookup error must not mint a
+// token that silently claims false, because the console's absence would then
+// read as "you are not an admin" rather than "we could not tell".
+func TestNewPrincipalResolver_failsClosedWhenTheAdminLookupFails(t *testing.T) {
+	resolve := newPrincipalResolver(
+		usersWith("user-1", "a@b.com"),
+		fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
+		&fakeAdmins{err: errors.New("db unavailable")},
+	)
+
+	if _, err := resolve(context.Background(), "user-1"); err == nil {
+		t.Fatal("an admin lookup failure must fail closed, not mint a principal with PlatformAdmin=false")
 	}
 }

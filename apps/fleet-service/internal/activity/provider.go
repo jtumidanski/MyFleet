@@ -26,11 +26,11 @@ type dbProvider struct{ db *gorm.DB }
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 func (p *dbProvider) ListByFleet(fleetID string, page server.Page) ([]Model, int, error) {
-	return p.list(p.db.Where("fleet_id = ?", fleetID), page)
+	return p.list(p.db.Where("fleet_id = ? AND deleted_at IS NULL", fleetID), page)
 }
 
 func (p *dbProvider) ListByVehicle(vehicleID string, page server.Page) ([]Model, int, error) {
-	return p.list(p.db.Where("vehicle_id = ?", vehicleID), page)
+	return p.list(p.db.Where("vehicle_id = ? AND deleted_at IS NULL", vehicleID), page)
 }
 
 func (p *dbProvider) list(scope *gorm.DB, page server.Page) ([]Model, int, error) {
@@ -50,10 +50,12 @@ func (p *dbProvider) list(scope *gorm.DB, page server.Page) ([]Model, int, error
 	return out, int(total), nil
 }
 
+// LastActivityByVehicle feeds status.Derive's inactivity check, so a purged
+// event that still counted here would make a dormant vehicle look healthy.
 func (p *dbProvider) LastActivityByVehicle(vehicleID string) (time.Time, error) {
 	var e Entity
 	err := p.db.Model(&Entity{}).
-		Where("vehicle_id = ?", vehicleID).
+		Where("vehicle_id = ? AND deleted_at IS NULL", vehicleID).
 		Order("created_at desc").
 		Limit(1).
 		First(&e).Error

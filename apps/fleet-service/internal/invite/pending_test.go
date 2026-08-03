@@ -54,7 +54,8 @@ func seedFleets(t *testing.T, db *gorm.DB, fleets map[string]string) {
 	t.Helper()
 	ddl := `CREATE TABLE fleet.fleets (
 		id TEXT PRIMARY KEY, name TEXT, created_by_user_id TEXT,
-		created_at DATETIME, updated_at DATETIME, deleted_at DATETIME)`
+		created_at DATETIME, updated_at DATETIME, deleted_at DATETIME,
+		purge_operation_id TEXT)`
 	if err := db.Exec(ddl).Error; err != nil {
 		t.Fatalf("fleets ddl: %v", err)
 	}

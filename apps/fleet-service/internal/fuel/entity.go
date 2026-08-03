@@ -8,17 +8,18 @@ import (
 
 // Entity maps to fleet.fuel_logs (PRD §6).
 type Entity struct {
-	ID              string    `gorm:"type:uuid;primaryKey"`
-	VehicleID       string    `gorm:"type:uuid;not null;index"`
-	Date            time.Time `gorm:"not null"`
-	Mileage         int       `gorm:"not null"`
-	Gallons         float64   `gorm:"not null"`
-	TotalCost       float64   `gorm:"not null"`
-	PricePerGallon  float64   `gorm:"not null"`
-	CreatedByUserID string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	DeletedAt       *time.Time `gorm:"index"`
+	ID               string    `gorm:"type:uuid;primaryKey"`
+	VehicleID        string    `gorm:"type:uuid;not null;index"`
+	Date             time.Time `gorm:"not null"`
+	Mileage          int       `gorm:"not null"`
+	Gallons          float64   `gorm:"not null"`
+	TotalCost        float64   `gorm:"not null"`
+	PricePerGallon   float64   `gorm:"not null"`
+	CreatedByUserID  string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeOperationID *string    `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.fuel_logs" }

@@ -38,6 +38,7 @@ function setRole(role: AuthContextValue['role']): void {
     user: null,
     activeFleetId: 'f1',
     role,
+    platformAdmin: false,
     isAuthenticated: true,
     isLoading: false,
     login: vi.fn(),

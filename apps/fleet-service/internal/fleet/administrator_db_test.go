@@ -26,7 +26,8 @@ func newFleetDB(t *testing.T) *gorm.DB {
 	// KEEP IN SYNC WITH entity.go.
 	if err := db.Exec(`CREATE TABLE fleet.fleets (
 		id TEXT PRIMARY KEY, name TEXT, created_by_user_id TEXT,
-		created_at DATETIME, updated_at DATETIME, deleted_at DATETIME)`).Error; err != nil {
+		created_at DATETIME, updated_at DATETIME, deleted_at DATETIME,
+		purge_operation_id TEXT)`).Error; err != nil {
 		t.Fatalf("create fleet.fleets: %v", err)
 	}
 	return db

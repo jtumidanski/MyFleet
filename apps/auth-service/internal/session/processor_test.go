@@ -254,17 +254,30 @@ func TestMintAccess_mapsEveryPrincipalField(t *testing.T) {
 	p := NewProcessor(logrus.New(), ks, "myfleet-auth", "myfleet")
 
 	v := reflect.New(reflect.TypeOf(Principal{})).Elem()
-	want := map[string]string{}
+	wantStrings := map[string]string{}
+	var boolFields []string
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Type().Field(i)
-		if f.Type.Kind() != reflect.String {
-			// Not a skip: a non-string field means this test's sentinel scheme
-			// no longer holds, and it must say so rather than quietly cover less.
-			t.Fatalf("Principal.%s is a %s, not a string — extend this test's sentinel scheme", f.Name, f.Type.Kind())
+		switch f.Type.Kind() {
+		case reflect.String:
+			sentinel := "sentinel-" + f.Name
+			v.Field(i).SetString(sentinel)
+			wantStrings[f.Name] = sentinel
+		case reflect.Bool:
+			// A bool carries only two values, so it cannot hold a per-field
+			// sentinel. Exactly ONE bool field is still attributable — set it
+			// true and require a true-valued claim. A second would be
+			// ambiguous, so fail loudly and make whoever adds it extend this.
+			boolFields = append(boolFields, f.Name)
+			if len(boolFields) > 1 {
+				t.Fatalf("Principal now has %d bool fields (%v) — a true-valued claim can no "+
+					"longer be attributed to one of them; extend this test's sentinel scheme",
+					len(boolFields), boolFields)
+			}
+			v.Field(i).SetBool(true)
+		default:
+			t.Fatalf("Principal.%s is a %s — extend this test's sentinel scheme", f.Name, f.Type.Kind())
 		}
-		sentinel := "sentinel-" + f.Name
-		v.Field(i).SetString(sentinel)
-		want[f.Name] = sentinel
 	}
 
 	tokenStr, err := p.MintAccess(v.Interface().(Principal))
@@ -278,16 +291,56 @@ func TestMintAccess_mapsEveryPrincipalField(t *testing.T) {
 		t.Fatal(perr)
 	}
 
-	got := map[string]bool{}
+	gotStrings := map[string]bool{}
+	gotTrue := 0
 	for _, cv := range claims {
-		if s, ok := cv.(string); ok {
-			got[s] = true
+		switch typed := cv.(type) {
+		case string:
+			gotStrings[typed] = true
+		case bool:
+			if typed {
+				gotTrue++
+			}
 		}
 	}
-	for field, sentinel := range want {
-		if !got[sentinel] {
+	for field, sentinel := range wantStrings {
+		if !gotStrings[sentinel] {
 			t.Errorf("Principal.%s never reaches a claim — MintAccess drops it. "+
 				"Every Principal field must appear in MintAccess's claim map.", field)
+		}
+	}
+	if len(boolFields) == 1 && gotTrue == 0 {
+		t.Errorf("Principal.%s never reaches a claim — MintAccess drops it. "+
+			"Every Principal field must appear in MintAccess's claim map.", boolFields[0])
+	}
+}
+
+// FR-ADMIN-AUTH-4: the claim is emitted on every mint, and it is a JSON boolean
+// rather than a string — the shared middleware parses it with a boolean
+// accessor and would read "true" as false.
+func TestMintAccess_setsPlatformAdminClaimAsBoolean(t *testing.T) {
+	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
+	ks := jwks.NewKeySet(priv, "kid-1")
+	p := NewProcessor(logrus.New(), ks, "myfleet-auth", "myfleet")
+
+	for _, want := range []bool{true, false} {
+		tokenStr, err := p.MintAccess(Principal{UserID: "u1", Email: "e@x", PlatformAdmin: want})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims := jwt.MapClaims{}
+		if _, perr := jwt.ParseWithClaims(tokenStr, claims, func(*jwt.Token) (any, error) {
+			return &priv.PublicKey, nil
+		}); perr != nil {
+			t.Fatal(perr)
+		}
+		got, ok := claims["platform_admin"].(bool)
+		if !ok {
+			t.Fatalf("platform_admin must be a JSON boolean, got %T (%v)",
+				claims["platform_admin"], claims["platform_admin"])
+		}
+		if got != want {
+			t.Errorf("platform_admin = %v, want %v", got, want)
 		}
 	}
 }

@@ -91,16 +91,19 @@ func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 func (p *dbProvider) GetDashboard(fleetID, userID string) (Dashboard, error) {
 	var e DashboardEntity
-	err := p.db.Where("fleet_id = ? AND user_id = ?", fleetID, userID).First(&e).Error
+	err := p.db.Where("fleet_id = ? AND user_id = ? AND deleted_at IS NULL", fleetID, userID).First(&e).Error
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			// No layout saved yet — return an empty dashboard (not an error).
+			// A soft-deleted layout takes this branch too, which is right: to an
+			// ordinary user a purged dashboard is indistinguishable from one
+			// they never saved.
 			return Dashboard{fleetID: fleetID, userID: userID}, nil
 		}
 		return Dashboard{}, err
 	}
 	var ws []WidgetEntity
-	if err := p.db.Where("dashboard_id = ?", e.ID).Find(&ws).Error; err != nil {
+	if err := p.db.Where("dashboard_id = ? AND deleted_at IS NULL", e.ID).Find(&ws).Error; err != nil {
 		return Dashboard{}, err
 	}
 	return MakeDashboard(e, ws), nil
@@ -114,38 +117,45 @@ func NewAdministrator(db *gorm.DB) Administrator { return &dbAdministrator{db: d
 
 // Replace upserts the dashboard row by (fleet_id, user_id), then deletes and
 // re-inserts the widget set inside ONE db.Transaction.
+//
+// The lookup deliberately INCLUDES soft-deleted rows. A fleet purge stamps the
+// dashboard; if the user then saves a layout, inserting a second row would leave
+// two live rows for one (fleet, user) once the purge is cancelled, and the read
+// above — First with no ordering — would pick between them non-deterministically.
+// Reviving instead is also the better outcome: the user re-created their layout,
+// which is exactly what a later cancel would have produced (design §6.4).
 func (a *dbAdministrator) Replace(fleetID, userID string, widgets []WidgetInput) (Dashboard, error) {
 	var result Dashboard
 	err := a.db.Transaction(func(tx *gorm.DB) error {
-		// Upsert dashboard row.
 		var e DashboardEntity
 		dbErr := tx.Where("fleet_id = ? AND user_id = ?", fleetID, userID).First(&e).Error
 		if dbErr != nil {
 			if dbErr != gorm.ErrRecordNotFound {
 				return dbErr
 			}
-			// Create new dashboard row.
-			e = DashboardEntity{
-				ID:      uuid.NewString(),
-				FleetID: fleetID,
-				UserID:  userID,
-			}
+			e = DashboardEntity{ID: uuid.NewString(), FleetID: fleetID, UserID: userID}
 			if err := tx.Create(&e).Error; err != nil {
 				return err
 			}
 		} else {
-			// Touch updated_at.
-			if err := tx.Model(&e).Updates(map[string]any{"updated_at": gorm.Expr("CURRENT_TIMESTAMP")}).Error; err != nil {
+			// Touch updated_at and revive: clearing both columns together is the
+			// same shape the manifest's Restore uses, so a revived row is
+			// indistinguishable from a restored one.
+			if err := tx.Model(&DashboardEntity{}).Where("id = ?", e.ID).Updates(map[string]any{
+				"updated_at":         gorm.Expr("CURRENT_TIMESTAMP"),
+				"deleted_at":         nil,
+				"purge_operation_id": nil,
+			}).Error; err != nil {
 				return err
 			}
 		}
 
-		// Delete existing widgets for this dashboard.
+		// Widgets are hard-deleted and recreated on every save, so their
+		// deleted_at only ever matters between a stamp and its cancel.
 		if err := tx.Where("dashboard_id = ?", e.ID).Delete(&WidgetEntity{}).Error; err != nil {
 			return err
 		}
 
-		// Insert new widget set.
 		wes := make([]WidgetEntity, 0, len(widgets))
 		for _, w := range widgets {
 			wes = append(wes, WidgetEntity{
@@ -165,12 +175,12 @@ func (a *dbAdministrator) Replace(fleetID, userID string, widgets []WidgetInput)
 			}
 		}
 
-		// Reload final state.
-		if err := tx.Where("fleet_id = ? AND user_id = ?", fleetID, userID).First(&e).Error; err != nil {
+		if err := tx.Where("fleet_id = ? AND user_id = ? AND deleted_at IS NULL", fleetID, userID).
+			First(&e).Error; err != nil {
 			return err
 		}
 		var finalWs []WidgetEntity
-		if err := tx.Where("dashboard_id = ?", e.ID).Find(&finalWs).Error; err != nil {
+		if err := tx.Where("dashboard_id = ? AND deleted_at IS NULL", e.ID).Find(&finalWs).Error; err != nil {
 			return err
 		}
 		result = MakeDashboard(e, finalWs)

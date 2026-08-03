@@ -40,7 +40,7 @@ func (p *dbProvider) GetByID(id string) (Model, error) {
 		return Model{}, err
 	}
 	var docs []DocumentEntity
-	if err := p.db.Where("maintenance_record_id = ?", e.ID).Find(&docs).Error; err != nil {
+	if err := p.db.Where("maintenance_record_id = ? AND deleted_at IS NULL", e.ID).Find(&docs).Error; err != nil {
 		return Model{}, err
 	}
 	return Make(e, docs), nil
@@ -80,7 +80,7 @@ func (p *dbProvider) ListByVehicle(vehicleID string, categoryIDs []string, page 
 	byRecord := make(map[string][]DocumentEntity, len(ids))
 	if len(ids) > 0 {
 		var docs []DocumentEntity
-		if err := p.db.Where("maintenance_record_id IN ?", ids).Find(&docs).Error; err != nil {
+		if err := p.db.Where("maintenance_record_id IN ? AND deleted_at IS NULL", ids).Find(&docs).Error; err != nil {
 			return nil, 0, err
 		}
 		for _, d := range docs {

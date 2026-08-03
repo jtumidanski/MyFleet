@@ -35,7 +35,7 @@ func TestUpdate_preservesCreatedAt(t *testing.T) {
 	}
 
 	// The re-login write.
-	if _, err := a.Update(m.WithLogin("A2", "https://example.test/a.png", time.Now().UTC())); err != nil {
+	if _, err := a.Update(m.WithLogin("A2", "https://example.test/a.png", time.Now().UTC(), true)); err != nil {
 		t.Fatalf("update user: %v", err)
 	}
 

@@ -24,7 +24,7 @@ func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 func (p *dbProvider) GetByUserAndType(userID, typ string) (Model, error) {
 	var e Entity
-	if err := p.db.Where("user_id = ? AND type = ?", userID, typ).First(&e).Error; err != nil {
+	if err := p.db.Where("user_id = ? AND type = ? AND deleted_at IS NULL", userID, typ).First(&e).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Model{}, ErrNotFound
 		}
@@ -35,7 +35,7 @@ func (p *dbProvider) GetByUserAndType(userID, typ string) (Model, error) {
 
 func (p *dbProvider) ListByUser(userID string) ([]Model, error) {
 	var es []Entity
-	if err := p.db.Where("user_id = ?", userID).Order("type asc").Find(&es).Error; err != nil {
+	if err := p.db.Where("user_id = ? AND deleted_at IS NULL", userID).Order("type asc").Find(&es).Error; err != nil {
 		return nil, err
 	}
 	out := make([]Model, 0, len(es))

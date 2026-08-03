@@ -111,9 +111,16 @@ func newCardTestDB(t *testing.T) *gorm.DB {
 		height          INTEGER,
 		content_type    TEXT,
 		created_at      DATETIME,
-		UNIQUE (media_object_id, variant)
+		deleted_at      DATETIME,
+		purge_operation_id TEXT
 	)`).Error; err != nil {
 		t.Fatalf("create media_variants: %v", err)
+	}
+	// Uniqueness as the PARTIAL index Migration creates, not an inline UNIQUE:
+	// a soft-deleted variant must not hold the slot, and Upsert's ON CONFLICT
+	// names the matching predicate.
+	if err := mediavariant.ApplyPartialIndexes(db); err != nil {
+		t.Fatalf("partial indexes: %v", err)
 	}
 	if err := variantfailures.Migration(db); err != nil {
 		t.Fatalf("migrate variantfailures: %v", err)

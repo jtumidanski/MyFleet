@@ -111,3 +111,79 @@ func TestUpdateTheme_unknownUserIsNotFound(t *testing.T) {
 		t.Fatalf("UpdateTheme for an unknown user = %v, want ErrNotFound", err)
 	}
 }
+
+// FR-ADMIN-AUTH-2: a bootstrap admin who does not exist at first migration gets
+// the grant when they first sign in.
+func TestProvisionFromGoogle_grantsBootstrapAdmin(t *testing.T) {
+	var granted []string
+	proc := NewProcessor(logrus.New(), &fakeProvider{}, &fakeAdmin{}).
+		WithBootstrapAdmins(
+			map[string]bool{"jtumidanski@gmail.com": true},
+			func(userID string) error { granted = append(granted, userID); return nil },
+		)
+
+	if _, err := proc.ProvisionFromGoogle(GoogleProfile{
+		Sub: "sub-1", Email: "JTumidanski@Gmail.com", Name: "J", EmailVerified: true,
+	}); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if len(granted) != 1 {
+		t.Fatalf("want one grant, got %v", granted)
+	}
+}
+
+// Google emits email_verified: false for accounts where the address is not
+// proven (notably Cloud Identity / Workspace accounts on unverified domains).
+// A bootstrap ConfigMap can hold a corporate-domain address, so this is a live
+// escalation path if unchecked: the grant path must require the verified
+// claim, even though ordinary login does not.
+func TestProvisionFromGoogle_refusesGrantForUnverifiedEmail(t *testing.T) {
+	var granted []string
+	proc := NewProcessor(logrus.New(), &fakeProvider{}, &fakeAdmin{}).
+		WithBootstrapAdmins(
+			map[string]bool{"jtumidanski@gmail.com": true},
+			func(userID string) error { granted = append(granted, userID); return nil },
+		)
+
+	if _, err := proc.ProvisionFromGoogle(GoogleProfile{
+		Sub: "sub-1", Email: "jtumidanski@gmail.com", Name: "J", EmailVerified: false,
+	}); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if len(granted) != 0 {
+		t.Errorf("an unverified email must not be granted admin, even from the bootstrap list: %v", granted)
+	}
+}
+
+func TestProvisionFromGoogle_doesNotGrantOtherUsers(t *testing.T) {
+	var granted []string
+	proc := NewProcessor(logrus.New(), &fakeProvider{}, &fakeAdmin{}).
+		WithBootstrapAdmins(
+			map[string]bool{"jtumidanski@gmail.com": true},
+			func(userID string) error { granted = append(granted, userID); return nil },
+		)
+	if _, err := proc.ProvisionFromGoogle(GoogleProfile{
+		Sub: "sub-2", Email: "someone@example.com", Name: "Someone",
+	}); err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if len(granted) != 0 {
+		t.Errorf("a non-bootstrap email must not be granted admin: %v", granted)
+	}
+}
+
+// A failing grant must not fail the login. The startup seed re-runs on every
+// boot and will catch it; refusing to log the user in would be a worse outcome
+// than a delayed grant.
+func TestProvisionFromGoogle_survivesAFailingGrant(t *testing.T) {
+	proc := NewProcessor(logrus.New(), &fakeProvider{}, &fakeAdmin{}).
+		WithBootstrapAdmins(
+			map[string]bool{"jtumidanski@gmail.com": true},
+			func(string) error { return errors.New("database down") },
+		)
+	if _, err := proc.ProvisionFromGoogle(GoogleProfile{
+		Sub: "sub-1", Email: "jtumidanski@gmail.com", Name: "J", EmailVerified: true,
+	}); err != nil {
+		t.Fatalf("a failing admin grant must not fail login, got %v", err)
+	}
+}

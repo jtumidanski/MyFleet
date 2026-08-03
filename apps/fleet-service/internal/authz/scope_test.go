@@ -56,3 +56,23 @@ func TestRequireOwner_ownerAllowed(t *testing.T) {
 		t.Fatalf("owner must pass, got %v", err)
 	}
 }
+
+// FR-ADMIN-AUTH-6: 403, not 404. This is the deliberate INVERSE of
+// RequireSameFleet's non-disclosure rule — the existence of an admin API is not
+// a secret, only the authority to use it.
+func TestRequirePlatformAdmin(t *testing.T) {
+	if err := RequirePlatformAdmin(auth.Identity{PlatformAdmin: true}); err != nil {
+		t.Errorf("an admin must be allowed, got %v", err)
+	}
+	if err := RequirePlatformAdmin(auth.Identity{}); !errors.Is(err, server.ErrForbidden) {
+		t.Errorf("a non-admin must get 403, got %v", err)
+	}
+	// A fleet role is not a substitute: owner of a fleet is not owner of the
+	// platform (FR-ADMIN-AUTH-9's converse).
+	if err := RequirePlatformAdmin(auth.Identity{Role: "owner", ActiveFleetID: "f1"}); !errors.Is(err, server.ErrForbidden) {
+		t.Errorf("a fleet owner must not be a platform admin, got %v", err)
+	}
+	if errors.Is(RequirePlatformAdmin(auth.Identity{}), server.ErrNotFound) {
+		t.Error("RequirePlatformAdmin must not hide behind a 404 the way RequireSameFleet does")
+	}
+}

@@ -36,7 +36,7 @@ func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 func (p *dbProvider) ListByMediaObject(mediaObjectID string) ([]Model, error) {
 	return database.SliceQuery(func() ([]Model, error) {
 		var es []Entity
-		if err := p.db.Where("media_object_id = ?", mediaObjectID).Find(&es).Error; err != nil {
+		if err := p.db.Where("media_object_id = ? AND deleted_at IS NULL", mediaObjectID).Find(&es).Error; err != nil {
 			return nil, err
 		}
 		out := make([]Model, 0, len(es))
@@ -51,7 +51,7 @@ func (p *dbProvider) GetByMediaObjectAndVariant(ctx context.Context, mediaObject
 	return database.Query(func() (Model, error) {
 		var e Entity
 		err := p.db.WithContext(ctx).
-			Where("media_object_id = ? AND variant = ?", mediaObjectID, string(v)).
+			Where("media_object_id = ? AND variant = ? AND deleted_at IS NULL", mediaObjectID, string(v)).
 			First(&e).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Model{}, ErrNotFound

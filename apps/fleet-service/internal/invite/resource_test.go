@@ -201,7 +201,8 @@ func newInviteTestDB(t *testing.T) *gorm.DB {
 	ddl := `CREATE TABLE fleet.fleet_invites (
 		id TEXT PRIMARY KEY, fleet_id TEXT, email TEXT, role TEXT, token TEXT,
 		expires_at DATETIME, accepted_at DATETIME, invited_by_user_id TEXT,
-		created_at DATETIME, updated_at DATETIME)`
+		created_at DATETIME, updated_at DATETIME,
+		deleted_at DATETIME, purge_operation_id TEXT)`
 	if err := db.Exec(ddl).Error; err != nil {
 		t.Fatalf("ddl: %v", err)
 	}

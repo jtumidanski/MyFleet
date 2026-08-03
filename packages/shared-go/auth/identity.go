@@ -7,6 +7,10 @@ type Identity struct {
 	Email         string
 	ActiveFleetID string
 	Role          string // owner | member | viewer
+	// PlatformAdmin is orthogonal to Role and to ActiveFleetID: an admin with no
+	// fleet is a normal state, including immediately after a system purge
+	// (FR-ADMIN-AUTH-9).
+	PlatformAdmin bool
 }
 
 type idCtxKey int

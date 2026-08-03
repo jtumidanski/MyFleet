@@ -22,6 +22,8 @@ import (
 	dtoevents "github.com/jtumidanski/myfleet/packages/dto-go/events"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/activity"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/admin"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/adminclient"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/dashboard"
 	fleetevents "github.com/jtumidanski/myfleet/apps/fleet-service/internal/events"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/fleet"
@@ -55,6 +57,7 @@ func main() {
 		activity.Migration,
 		events.MigrateOutbox,
 		dashboard.Migration,
+		admin.Migration,
 	))
 	if err != nil {
 		log.WithError(err).Fatal("db connect")
@@ -129,12 +132,40 @@ func main() {
 		Activity:  activityProc,
 	}
 
-	// Background sweep: hard-delete soft-deleted vehicles past their purge window.
-	// Runs under advisory lock so only one replica executes per tick (design A9).
+	// Startup cleanup of rows the pre-cascade vehicle sweep already orphaned
+	// (PRD §11b). Under the leader lock so only one replica runs it, and a no-op
+	// on a healthy database. It matters most for /admin/stats: until it has run
+	// at least once, the console reports numbers no fleet can reconcile
+	// (risks.md R10). It runs on every boot, not just the first, so it stays a
+	// no-op guard rather than a migration — a transient failure here (lock
+	// contention, a statement timeout) must not take the whole service down, so
+	// it logs and keeps booting rather than Fatal-ing, matching every other
+	// sweep in this file.
+	if _, err := database.WithLeaderLock(db, "admin-orphan-cleanup", func() error {
+		removed, cerr := admin.DeleteOrphans(db)
+		if cerr != nil {
+			return cerr
+		}
+		total := 0
+		for _, n := range removed {
+			total += n
+		}
+		if total > 0 {
+			log.WithField("removed", removed).Warn("deleted orphaned rows left by the pre-cascade vehicle sweep")
+		}
+		return nil
+	}); err != nil {
+		log.WithError(err).Warn("orphan cleanup")
+	}
+
+	// Background sweep: hard-delete soft-deleted vehicles past their purge
+	// window, cascading to their children. Hourly, not daily: jobs.Every fires
+	// its FIRST tick at T+interval, so a 24-hour job in a service that redeploys
+	// more often than daily never runs at all (design OQ-5).
 	ctx := context.Background()
-	go jobs.Every(ctx, 24*time.Hour, func(ctx context.Context) error {
+	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
 		_, err := database.WithLeaderLock(db, "vehicle-purge", func() error {
-			return vehicle.PurgeExpired(db)
+			return vehicle.PurgeExpired(db, admin.DeleteVehicleChildren)
 		})
 		if err != nil {
 			log.WithError(err).Warn("vehicle purge sweep failed")
@@ -177,6 +208,50 @@ func main() {
 	// internal-deny rule in the main overlay's ingressroute.
 	mediaClient := mediaclient.NewClient(config.Get("MEDIA_INTERNAL_URL", "http://media-service:8080"))
 
+	// ---- Platform admin console ------------------------------------------
+	//
+	// Registered as its OWN chi group below, a sibling of the authenticated
+	// group. Nothing is shared but the JWT middleware: the separation from the
+	// ordinary tree is the entire safety argument for a cross-fleet API, and
+	// internal/admin/arch_test.go enforces it in both directions (risks.md R7).
+	authAdmin := adminclient.NewAuthClient(config.Get("AUTH_INTERNAL_URL", "http://auth-service:8080"))
+	mediaAdmin := adminclient.NewMediaClient(config.Get("MEDIA_INTERNAL_URL", "http://media-service:8080"))
+	notifAdmin := adminclient.NewNotificationClient(
+		config.Get("NOTIFICATION_INTERNAL_URL", "http://notification-service:8080"))
+
+	adminProc := admin.NewProcessor(log, admin.Deps{
+		DB:            db,
+		Provider:      admin.NewProvider(db),
+		Administrator: admin.NewAdministrator(db),
+		Auth:          authAdmin,
+		AuthUsers:     authAdmin,
+		Downstream: []admin.Downstream{
+			admin.NamedDownstream{Label: "media", Client: mediaAdmin},
+			admin.NamedDownstream{Label: "notification", Client: notifAdmin},
+		},
+		StatsSources: []admin.StatsSource{
+			admin.NamedStatsSource{AttrKey: "users", Service: "auth-service", Fn: authAdmin.Stats},
+			admin.NamedStatsSource{AttrKey: "media_objects", Service: "media-service", Fn: mediaAdmin.Stats},
+			admin.NamedStatsSource{AttrKey: "notifications", Service: "notification-service", Fn: notifAdmin.Stats},
+		},
+		VehicleStatus: adminVehicleStatus{vehicles: vehicleProc, deps: vehicleStatusDeps},
+		Window:        admin.RecoveryWindow(config.Get("ADMIN_PURGE_RECOVERY_WINDOW", "120h")),
+	}, admin.NewTargetResolver(db))
+
+	// Admin purge reaper: hard-delete operations past their recovery window.
+	// Hourly for the same reason as the vehicle sweep — jobs.Every's first tick
+	// is at T+interval — and additionally because the console shows a countdown
+	// to permanence, which a daily cadence would make wrong by up to a day
+	// (design OQ-5).
+	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
+		_, err := database.WithLeaderLock(db, "admin-purge-reap", func() error {
+			return adminProc.ReapDue(ctx)
+		})
+		if err != nil {
+			log.WithError(err).Warn("admin purge reaper failed")
+		}
+		return err
+	})
 	// Abuse control (FR-RATE-1…4). Twenty invites per fleet per day is roughly
 	// 3x the largest plausible household fleet, so it never obstructs real use
 	// while capping a compromised account's burn on the domain's sending
@@ -212,6 +287,17 @@ func main() {
 				dashboard.InitializeRoutes(log, db, scheduleProc, activityProc, vehicleProc)(pr)
 			})
 		}).
+		// The admin tree: its own group, JWT and nothing else shared. Every
+		// handler calls authz.RequirePlatformAdmin; none calls RequireSameFleet.
+		// Public paths are gateway-prefixed /api/fleet/admin/…, which match the
+		// existing priority-100 /api/fleet router and are NOT matched by the
+		// priority-200 internal-deny regex.
+		AddRouteInitializer(func(r chi.Router) {
+			r.Group(func(ar chi.Router) {
+				ar.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
+				admin.InitializeRoutes(log, adminProc)(ar)
+			})
+		}).
 		AddRouteInitializer(func(r chi.Router) {
 			r.Get("/healthz", health.Liveness())
 			r.Get("/readyz", health.Readiness(func() error { d, _ := db.DB(); return d.Ping() }))
@@ -242,6 +328,31 @@ func mustJWKSKeyfunc(log *logrus.Logger, jwksURL string, maxAttempts int, delay 
 	}
 	log.WithError(err).Fatal("JWKS keyfunc init failed after all attempts")
 	return nil // unreachable
+}
+
+// adminVehicleStatus adapts the vehicle domain's status machinery to the admin
+// console's port. The adapter lives here, in the composition root, because it is
+// the only place that knows both sides — internal/admin must not import the
+// vehicle domain and call its internals directly.
+//
+// A vehicle that cannot be loaded yields no status rather than an error: the
+// fleet inspector should still render the row, which is the same call
+// StatusDeps.DeriveStatus already makes on a gather failure.
+type adminVehicleStatus struct {
+	vehicles *vehicle.Processor
+	deps     vehicle.StatusDeps
+}
+
+func (a adminVehicleStatus) DeriveStatusByID(vehicleID string, now time.Time) string {
+	m, err := a.vehicles.GetByID(vehicleID)
+	if err != nil {
+		return ""
+	}
+	// main renamed DeriveStatus to Derive and widened it to a struct carrying
+	// last-activity and next-due alongside the status. The console's fleet
+	// inspector wants only the status string; a gather failure already yields a
+	// zero Derived, so the empty status falls out naturally.
+	return a.deps.Derive(m, now).Status
 }
 
 // scheduleDueAdapter maps maintenanceschedule's due detail onto the vehicle

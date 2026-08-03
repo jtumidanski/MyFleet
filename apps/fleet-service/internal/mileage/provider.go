@@ -21,7 +21,7 @@ type dbProvider struct{ db *gorm.DB }
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 func (p *dbProvider) ListByVehicle(vehicleID string, from, to *time.Time, page server.Page) ([]Model, int, error) {
-	q := p.db.Model(&Entity{}).Where("vehicle_id = ?", vehicleID)
+	q := p.db.Model(&Entity{}).Where("vehicle_id = ? AND deleted_at IS NULL", vehicleID)
 	if from != nil {
 		q = q.Where("recorded_at >= ?", *from)
 	}

@@ -50,6 +50,7 @@ function authAs(role: FleetRole | null, activeFleetId: string | null = 'f1'): Au
     user: null,
     activeFleetId,
     role,
+    platformAdmin: false,
     isAuthenticated: true,
     isLoading: false,
     login: vi.fn(),

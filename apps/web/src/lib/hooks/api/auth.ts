@@ -13,6 +13,7 @@ export interface MeResult {
   user: User;
   activeFleetId: string | null;
   role: AuthMeta['role'];
+  platformAdmin: boolean;
 }
 
 /**
@@ -37,6 +38,10 @@ async function fetchMe(): Promise<MeResult> {
     user: doc.data,
     activeFleetId: absentAsNull(doc.meta?.activeFleetId),
     role: absentAsNull(doc.meta?.role),
+    // Defaults to false rather than going through absentAsNull: false is a
+    // meaningful value, and an older server that omits the field must not
+    // accidentally reveal the console's entry point.
+    platformAdmin: doc.meta?.platformAdmin ?? false,
   };
 }
 

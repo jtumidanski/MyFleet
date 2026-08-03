@@ -11,6 +11,15 @@ data:
   # maintenance record's documentMediaIds belong to the caller's fleet
   # (PRD FR-DOC-6). Cluster-internal ClusterVIP; never traverses the edge.
   MEDIA_INTERNAL_URL: "http://media-service:8080"
+  # Platform admin console. The recovery window is how long a purge stays
+  # cancellable; 120h is the 5 days the PRD specifies and matches the vehicle
+  # sweep's own window, so both recovery stories tell users the same thing.
+  # An unparseable value falls back to 120h rather than failing the boot.
+  ADMIN_PURGE_RECOVERY_WINDOW: "120h"
+  # Cluster-internal ClusterVIPs for the admin fan-out. Never traverse the edge;
+  # the priority-200 internal-deny rules keep the far ends off the internet.
+  AUTH_INTERNAL_URL: "http://auth-service:8080"
+  NOTIFICATION_INTERNAL_URL: "http://notification-service:8080"
 
   # Invite abuse control (task-009, FR-RATE-1/2). Both are enforced in the
   # domain layer against persisted state, so they hold across replicas.

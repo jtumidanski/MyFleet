@@ -9,13 +9,15 @@ import (
 // Entity maps to fleet.activity_events (PRD §6). Append-only: rows are inserted
 // once and never updated or deleted. payload is JSONB on Postgres.
 type Entity struct {
-	ID          string  `gorm:"type:uuid;primaryKey"`
-	FleetID     string  `gorm:"type:uuid;not null;index"`
-	VehicleID   *string `gorm:"type:uuid;index"`
-	ActorUserID string  `gorm:"type:uuid;not null"`
-	Type        string  `gorm:"not null"`
-	Payload     []byte  `gorm:"type:jsonb"`
-	CreatedAt   time.Time
+	ID               string  `gorm:"type:uuid;primaryKey"`
+	FleetID          string  `gorm:"type:uuid;not null;index"`
+	VehicleID        *string `gorm:"type:uuid;index"`
+	ActorUserID      string  `gorm:"type:uuid;not null"`
+	Type             string  `gorm:"not null"`
+	Payload          []byte  `gorm:"type:jsonb"`
+	CreatedAt        time.Time
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeOperationID *string    `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.activity_events" }

@@ -24,21 +24,25 @@ func newAggDB(t *testing.T) *gorm.DB {
 			id TEXT PRIMARY KEY, fleet_id TEXT, nickname TEXT, make TEXT, model TEXT,
 			trim TEXT, year INTEGER, vin TEXT, current_mileage INTEGER,
 			primary_image_media_id TEXT, notes TEXT, created_at DATETIME,
-			updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME)`,
+			updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME,
+		purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.maintenance_records (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, category_id TEXT, description TEXT,
 			performed_at DATETIME, mileage INTEGER, cost REAL, vendor TEXT,
 			notes TEXT, created_by_user_id TEXT, created_at DATETIME,
-			updated_at DATETIME, deleted_at DATETIME)`,
+			updated_at DATETIME, deleted_at DATETIME,
+		purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.fuel_logs (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, date DATETIME, mileage INTEGER,
 			gallons REAL, total_cost REAL, price_per_gallon REAL,
 			created_by_user_id TEXT, created_at DATETIME, updated_at DATETIME,
-			deleted_at DATETIME)`,
+			deleted_at DATETIME,
+		purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.mileage_records (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, mileage INTEGER,
 			recorded_at DATETIME, source TEXT, source_ref_id TEXT,
-			created_by_user_id TEXT, created_at DATETIME)`,
+			created_by_user_id TEXT, created_at DATETIME,
+		deleted_at DATETIME, purge_operation_id TEXT)`,
 	}
 	for _, stmt := range ddl {
 		if err := db.Exec(stmt).Error; err != nil {

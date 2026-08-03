@@ -19,9 +19,16 @@ func IsPurgeable(purgeAfter *time.Time) bool {
 
 // ListPurgeable returns soft-deleted objects whose purge window has elapsed.
 // The purge job uses these to remove both the rows and the MinIO objects.
+//
+// purge_operation_id IS NULL keeps this sweep off rows an admin purge stamped.
+// An admin stamp never writes purge_after, so such rows could not match anyway
+// — this is the explicit belt to that structural brace (FR-ADMIN-RESTORE-7),
+// and it is what makes the guarantee survive someone later "helpfully" setting
+// purge_after in the admin path.
 func ListPurgeable(db *gorm.DB) ([]Model, error) {
 	var es []Entity
-	if err := db.Where("purge_after IS NOT NULL AND purge_after < now()").Find(&es).Error; err != nil {
+	if err := db.Where("purge_after IS NOT NULL AND purge_after < CURRENT_TIMESTAMP AND purge_operation_id IS NULL").
+		Find(&es).Error; err != nil {
 		return nil, err
 	}
 	out := make([]Model, 0, len(es))

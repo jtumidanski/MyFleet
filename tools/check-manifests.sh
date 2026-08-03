@@ -109,7 +109,16 @@ else:
 # once (a realistic failure mode, since kustomize `replacements` keeps :80
 # and :443 in lockstep) — it would just see "1 deny rule, present on both
 # sides" and call that fine. Naming the required set closes that hole.
-REQUIRED_DENY_SERVICES = {"fleet-service", "media-service"}
+#
+# auth-service and notification-service joined the set with the platform admin
+# console. notification-service's entry is the load-bearing one: its
+# stripprefix removes the FULL /api/notifications prefix, so without the rule a
+# public request to /api/notifications/internal/admin/purge arrives at the
+# service as /internal/admin/purge — an unauthenticated "delete everything for
+# this fleet" endpoint. auth-service is safe by accident today (every public
+# route lives under /auth/…), and is listed anyway because "safe by accident" is
+# one prefix change away from "not safe".
+REQUIRED_DENY_SERVICES = {"fleet-service", "media-service", "auth-service", "notification-service"}
 
 for label, routes in (("web", wr), ("tls", tr)):
     deny = [r for r in routes if "internal" in r.get("match", "")]

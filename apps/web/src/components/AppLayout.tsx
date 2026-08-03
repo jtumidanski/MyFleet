@@ -14,7 +14,10 @@ const NAV = [
 ];
 
 export function AppLayout() {
-  const { user, logout } = useAuth();
+  const { user, logout, platformAdmin } = useAuth();
+  // The entry point is a convenience, not a control: its absence hides the
+  // door, and the server refuses entry regardless (FR-ADMIN-UI-5).
+  const nav = platformAdmin ? [...NAV, { to: '/admin', label: 'Admin' }] : NAV;
 
   return (
     <div className="flex min-h-screen">
@@ -29,7 +32,7 @@ export function AppLayout() {
           MyFleet
         </div>
         <nav className="flex flex-col gap-1">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

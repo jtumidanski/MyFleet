@@ -22,7 +22,8 @@ func newActivityDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.Exec(`CREATE TABLE fleet.activity_events (
 		id TEXT PRIMARY KEY, fleet_id TEXT, vehicle_id TEXT, actor_user_id TEXT,
-		type TEXT, payload BLOB, created_at DATETIME)`).Error; err != nil {
+		type TEXT, payload BLOB, created_at DATETIME,
+		deleted_at DATETIME, purge_operation_id TEXT)`).Error; err != nil {
 		t.Fatalf("ddl: %v", err)
 	}
 	return db

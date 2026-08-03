@@ -18,6 +18,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/jwks"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/membership"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/oidc"
+	"github.com/jtumidanski/myfleet/apps/auth-service/internal/platformadmin"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/session"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/user"
 )
@@ -26,9 +27,37 @@ func main() {
 	log := telemetry.NewLogger()
 	telemetry.InitTracer("auth-service")
 
-	db, err := database.Connect(log, database.SetMigrations(user.Migration, session.Migration))
+	db, err := database.Connect(log, database.SetMigrations(
+		user.Migration, session.Migration, platformadmin.Migration))
 	if err != nil {
 		log.WithError(err).Fatal("db connect")
+	}
+
+	// PLATFORM_ADMIN_BOOTSTRAP_EMAILS seeds auth.platform_admins and is never
+	// consulted per request (FR-ADMIN-AUTH-3): the TABLE is the runtime source
+	// of truth, so an admin can be revoked with a revoked_at tombstone and no
+	// redeploy. No default: an operator who forgets to set this must get zero
+	// seeded admins, not a specific address holding purge-every-fleet
+	// authority. Boot continues regardless — an empty bootstrap list is a
+	// valid, if unusual, deployment.
+	//
+	// The warning is keyed off the PARSED set, not the raw string: a value like
+	// " , " is non-empty but parses to zero emails (ParseBootstrapEmails drops
+	// empty segments), and that operator mistake deserves the same loud warning
+	// as leaving the variable unset entirely.
+	bootstrapAdmins := platformadmin.ParseBootstrapEmails(config.Get("PLATFORM_ADMIN_BOOTSTRAP_EMAILS", ""))
+	if len(bootstrapAdmins) == 0 {
+		log.Warn("no PLATFORM_ADMIN_BOOTSTRAP_EMAILS set; no platform admin will be seeded")
+	}
+	adminProv := platformadmin.NewProvider(db)
+	adminAdm := platformadmin.NewAdministrator(db)
+
+	// Hook 1 of 2: grant to bootstrap users that already exist. Idempotent
+	// across restarts (FR-ADMIN-AUTH-1).
+	if granted, serr := platformadmin.SeedFromEmails(db, bootstrapAdmins); serr != nil {
+		log.WithError(serr).Fatal("seed platform admins")
+	} else if granted > 0 {
+		log.WithField("granted", granted).Info("seeded platform admins")
 	}
 
 	// In-memory signing key. auth-service validates its OWN tokens against this
@@ -48,7 +77,7 @@ func main() {
 	// import cycle).
 	fleetClient := membership.NewClient(config.Get("FLEET_SERVICE_URL", "http://fleet-service:8080"))
 	userProv := user.NewProvider(db)
-	resolve := newPrincipalResolver(userProv, fleetClient)
+	resolve := newPrincipalResolver(userProv, fleetClient, adminProv)
 
 	// COOKIE_SECURE controls the Secure flag on every cookie this service sets.
 	// Local dev runs over plaintext HTTP (Traefik :80) where Secure cookies are
@@ -58,7 +87,20 @@ func main() {
 		cookieSecure = true
 	}
 
-	users := user.NewProcessor(log, userProv, user.NewAdministrator(db))
+	// Hook 2 of 2: grant at provisioning time, for a bootstrap user who did not
+	// exist when the seed ran (FR-ADMIN-AUTH-2). Checked against IsRevoked
+	// first: without this, a user an operator just revoked would be re-granted
+	// on their very next login, reopening the same hole the revoked_at
+	// tombstone closes for the startup seed.
+	users := user.NewProcessor(log, userProv, user.NewAdministrator(db)).
+		WithBootstrapAdmins(bootstrapAdmins, func(userID string) error {
+			if revoked, rerr := adminProv.IsRevoked(userID); rerr != nil {
+				return rerr
+			} else if revoked {
+				return nil
+			}
+			return adminAdm.Grant(userID, platformadmin.BootstrapGrantedBy)
+		})
 
 	oidcProc := oidc.NewProcessor(
 		config.MustGet("GOOGLE_CLIENT_ID"),
@@ -84,6 +126,10 @@ func main() {
 		AddRouteInitializer(jwks.InitializeRoutes(ks)).
 		AddRouteInitializer(oidc.InitializeRoutes(log, oidcDeps)).
 		AddRouteInitializer(session.InitializePublicRoutes(log, sess, resolve, cookieSecure)).
+		// Internal routes: no JWT, network-restricted (consumed by
+		// fleet-service's admin console). Kept off the public internet by the
+		// priority-200 internal-deny rule in the main overlay's ingressroute.
+		AddRouteInitializer(platformadmin.InitializeInternalRoutes(log, db)).
 		// protected routes (JWT validated against the in-memory key): /auth/me
 		AddRouteInitializer(func(r chi.Router) {
 			r.Group(func(pr chi.Router) {
@@ -105,10 +151,11 @@ func main() {
 	}
 }
 
-// newPrincipalResolver composes the two sources of identity — the local users
-// table for email, fleet-service for the active membership — into the single
-// construction site for session.Principal. Every access token this service
-// mints, on either path, is built here (FR-1, FR-2).
+// newPrincipalResolver composes the three sources of identity — the local users
+// table for email, fleet-service for the active membership, auth.platform_admins
+// for the platform tier — into the single construction site for
+// session.Principal. Every access token this service mints, on either path, is
+// built here (FR-1, FR-2, FR-ADMIN-AUTH-4).
 //
 // It is a package-level function rather than an inline closure in main() so it
 // can be unit-tested: it is now the sole guarantor that a minted token carries
@@ -122,7 +169,7 @@ func main() {
 // internal user id, while Google's subject is a different identifier. Confusing
 // the two is the mistake this service has already made once — see the doc
 // comment on user.Provider.
-func newPrincipalResolver(users user.Provider, fleet *membership.Client) session.PrincipalResolver {
+func newPrincipalResolver(users user.Provider, fleet *membership.Client, admins platformadmin.Provider) session.PrincipalResolver {
 	return func(ctx context.Context, userID string) (session.Principal, error) {
 		u, err := users.GetByID(userID)
 		if err != nil {
@@ -136,11 +183,19 @@ func newPrincipalResolver(users user.Provider, fleet *membership.Client) session
 		if err != nil {
 			return session.Principal{}, err
 		}
+		// Fail closed: a lookup error must not mint a token that silently
+		// claims false, because the console's absence would then read as
+		// "you are not an admin" rather than "we could not tell".
+		isAdmin, err := admins.IsAdmin(userID)
+		if err != nil {
+			return session.Principal{}, err
+		}
 		return session.Principal{
 			UserID:        userID,
 			Email:         u.Email(),
 			ActiveFleetID: m.FleetID,
 			Role:          m.Role,
+			PlatformAdmin: isAdmin,
 		}, nil
 	}
 }

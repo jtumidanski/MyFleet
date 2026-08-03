@@ -141,9 +141,18 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, members FleetMemberGa
 			}
 			server.WriteJSON(w, http.StatusOK, server.Document{
 				Data: Transform(m),
+				// platformAdmin comes from the validated token's Identity, not
+				// a second database read: the claim IS the authority the request
+				// carried, so reporting anything else would tell the client it
+				// has a capability its own token does not grant.
+				//
+				// It is NOT run through nullIfEmpty: false is a meaningful value
+				// here, and collapsing it to null would make "not an admin"
+				// indistinguishable from "this build does not report the field".
 				Meta: map[string]any{
 					"activeFleetId": nullIfEmpty(id.ActiveFleetID),
 					"role":          nullIfEmpty(id.Role),
+					"platformAdmin": id.PlatformAdmin,
 				},
 			})
 		})

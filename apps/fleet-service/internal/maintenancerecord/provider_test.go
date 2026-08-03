@@ -32,9 +32,11 @@ func newTestDB(t *testing.T) *gorm.DB {
 		`CREATE TABLE fleet.maintenance_records (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, category_id TEXT, description TEXT,
 			performed_at DATETIME, mileage INTEGER, cost REAL, vendor TEXT, notes TEXT,
-			created_by_user_id TEXT, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME)`,
+			created_by_user_id TEXT, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME,
+			purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.maintenance_record_documents (
-			id TEXT PRIMARY KEY, maintenance_record_id TEXT, media_id TEXT)`,
+			id TEXT PRIMARY KEY, maintenance_record_id TEXT, media_id TEXT,
+			deleted_at DATETIME, purge_operation_id TEXT)`,
 	}
 	for _, stmt := range ddl {
 		if err := db.Exec(stmt).Error; err != nil {

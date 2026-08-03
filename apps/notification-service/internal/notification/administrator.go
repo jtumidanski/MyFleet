@@ -23,9 +23,14 @@ type dbAdministrator struct{ db *gorm.DB }
 // NewAdministrator returns an Administrator backed by the given database.
 func NewAdministrator(db *gorm.DB) Administrator { return &dbAdministrator{db: db} }
 
+// ExistsByDedupeKey ignores soft-deleted rows. The partial unique index frees a
+// purged notification's key so it CAN be regenerated (design F1); this query has
+// to agree, or the reminder safety-net and event redelivery would keep vetoing
+// the replacement forever.
 func (a *dbAdministrator) ExistsByDedupeKey(k string) (bool, error) {
 	var count int64
-	if err := a.db.Model(&Entity{}).Where("dedupe_key = ?", k).Count(&count).Error; err != nil {
+	if err := a.db.Model(&Entity{}).
+		Where("dedupe_key = ? AND deleted_at IS NULL", k).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil
@@ -34,9 +39,18 @@ func (a *dbAdministrator) ExistsByDedupeKey(k string) (bool, error) {
 // Insert persists a new notification. A unique-constraint violation on
 // dedupe_key (a concurrent generator) is surfaced as ErrDuplicate so the caller
 // can treat it as a successful dedupe.
+//
+// The conflict target names the PARTIAL unique index (dedupe_key WHERE
+// deleted_at IS NULL) — an unqualified ON CONFLICT (dedupe_key) no longer
+// infers an index now that the constraint is partial, and Postgres would
+// reject the statement outright.
 func (a *dbAdministrator) Insert(m Model) error {
 	e := m.ToEntity()
-	err := a.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "dedupe_key"}}, DoNothing: true}).Create(&e)
+	err := a.db.Clauses(clause.OnConflict{
+		Columns:     []clause.Column{{Name: "dedupe_key"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "deleted_at IS NULL"}}},
+		DoNothing:   true,
+	}).Create(&e)
 	if err.Error != nil {
 		if errors.Is(err.Error, gorm.ErrDuplicatedKey) {
 			return ErrDuplicate
@@ -54,7 +68,7 @@ func (a *dbAdministrator) Insert(m Model) error {
 func (a *dbAdministrator) MarkRead(userID, id string) error {
 	now := time.Now().UTC()
 	res := a.db.Model(&Entity{}).
-		Where("id = ? AND user_id = ? AND read_at IS NULL", id, userID).
+		Where("id = ? AND user_id = ? AND read_at IS NULL AND deleted_at IS NULL", id, userID).
 		Update("read_at", now)
 	if res.Error != nil {
 		return res.Error
@@ -63,7 +77,9 @@ func (a *dbAdministrator) MarkRead(userID, id string) error {
 		// Either it does not exist / is not owned by the user, or it is already
 		// read. Distinguish: a row that exists-but-already-read is a no-op success.
 		var count int64
-		if err := a.db.Model(&Entity{}).Where("id = ? AND user_id = ?", id, userID).Count(&count).Error; err != nil {
+		if err := a.db.Model(&Entity{}).
+			Where("id = ? AND user_id = ? AND deleted_at IS NULL", id, userID).
+			Count(&count).Error; err != nil {
 			return err
 		}
 		if count == 0 {
@@ -77,6 +93,6 @@ func (a *dbAdministrator) MarkRead(userID, id string) error {
 func (a *dbAdministrator) MarkAllRead(userID string) error {
 	now := time.Now().UTC()
 	return a.db.Model(&Entity{}).
-		Where("user_id = ? AND read_at IS NULL", userID).
+		Where("user_id = ? AND read_at IS NULL AND deleted_at IS NULL", userID).
 		Update("read_at", now).Error
 }

@@ -28,7 +28,8 @@ func newVehicleDB(t *testing.T) *gorm.DB {
 		id TEXT PRIMARY KEY, fleet_id TEXT, nickname TEXT, make TEXT, model TEXT,
 		trim TEXT, year INTEGER, vin TEXT, current_mileage INTEGER,
 		primary_image_media_id TEXT, notes TEXT, created_at DATETIME,
-		updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME)`).Error; err != nil {
+		updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME,
+		purge_operation_id TEXT)`).Error; err != nil {
 		t.Fatalf("create fleet.vehicles: %v", err)
 	}
 	return db

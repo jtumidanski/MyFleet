@@ -30,7 +30,7 @@ func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
 func (p *dbProvider) GetActiveByUserID(userID string) (Model, error) {
 	var e Entity
-	if err := p.db.Where("user_id = ? AND status = ?", userID, "active").First(&e).Error; err != nil {
+	if err := p.db.Where("user_id = ? AND status = ? AND deleted_at IS NULL", userID, "active").First(&e).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Model{}, ErrNotFound
 		}
@@ -41,7 +41,7 @@ func (p *dbProvider) GetActiveByUserID(userID string) (Model, error) {
 
 func (p *dbProvider) ListByFleetID(fleetID string) ([]Model, error) {
 	var es []Entity
-	if err := p.db.Where("fleet_id = ?", fleetID).Find(&es).Error; err != nil {
+	if err := p.db.Where("fleet_id = ? AND deleted_at IS NULL", fleetID).Find(&es).Error; err != nil {
 		return nil, err
 	}
 	out := make([]Model, 0, len(es))
@@ -53,7 +53,7 @@ func (p *dbProvider) ListByFleetID(fleetID string) ([]Model, error) {
 
 func (p *dbProvider) ListActiveByFleetID(fleetID string) ([]Model, error) {
 	var es []Entity
-	if err := p.db.Where("fleet_id = ? AND status = ?", fleetID, "active").Find(&es).Error; err != nil {
+	if err := p.db.Where("fleet_id = ? AND status = ? AND deleted_at IS NULL", fleetID, "active").Find(&es).Error; err != nil {
 		return nil, err
 	}
 	out := make([]Model, 0, len(es))
@@ -65,7 +65,7 @@ func (p *dbProvider) ListActiveByFleetID(fleetID string) ([]Model, error) {
 
 func (p *dbProvider) GetByFleetAndUser(fleetID, userID string) (Model, error) {
 	var e Entity
-	if err := p.db.Where("fleet_id = ? AND user_id = ?", fleetID, userID).First(&e).Error; err != nil {
+	if err := p.db.Where("fleet_id = ? AND user_id = ? AND deleted_at IS NULL", fleetID, userID).First(&e).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return Model{}, ErrNotFound
 		}
@@ -74,18 +74,23 @@ func (p *dbProvider) GetByFleetAndUser(fleetID, userID string) (Model, error) {
 	return Make(e), nil
 }
 
-// CountOwners counts the ACTIVE owners of a fleet.
+// CountOwners counts the ACTIVE, live owners of a fleet.
 //
-// The status predicate is what makes this count usable as the zero-owner guard.
-// ValidateRoleChange refuses to act on a non-active target, so without it a
-// fleet holding one active owner and one revoked owner would count 2 and the
-// last real owner would become demotable. Status is vestigial today — every row
-// is written "active" and never changed — so this asserts intent rather than
-// filtering anything, and it matches ListActiveByFleetID above.
+// Both predicates are load-bearing and they guard different holes.
+//
+// status = 'active': ValidateRoleChange refuses to act on a non-active target,
+// so without it a fleet holding one active owner and one revoked owner would
+// count 2 and the last real owner would become demotable. Vestigial today —
+// every row is written "active" and never changed — so it asserts intent.
+//
+// deleted_at IS NULL: an owner soft-deleted by an admin purge must not count
+// either, or the last LIVE owner could remove themselves while the purge is
+// still inside its recovery window and a cancel would restore a fleet with no
+// owner at all.
 func (p *dbProvider) CountOwners(fleetID string) (int, error) {
 	var count int64
 	if err := p.db.Model(&Entity{}).
-		Where("fleet_id = ? AND role = ? AND status = ?", fleetID, "owner", "active").
+		Where("fleet_id = ? AND role = ? AND status = ? AND deleted_at IS NULL", fleetID, "owner", "active").
 		Count(&count).Error; err != nil {
 		return 0, err
 	}
