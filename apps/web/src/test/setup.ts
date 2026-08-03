@@ -98,3 +98,16 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
   writable: true,
   configurable: true,
 });
+
+// Radix's dropdown/select menus call DOM APIs jsdom does not implement: they
+// scroll the highlighted item into view, and they use pointer capture so a
+// press-and-drag off the trigger still selects an item. Without these stubs
+// every test that opens a DropdownMenu (e.g. ProfileMenu) throws before any
+// assertion runs. Same shape as the ResizeObserver stub above: the smallest
+// no-op that lets the library's own code path complete.
+Element.prototype.scrollIntoView = function scrollIntoView(): void {};
+Element.prototype.hasPointerCapture = function hasPointerCapture(): boolean {
+  return false;
+};
+Element.prototype.setPointerCapture = function setPointerCapture(): void {};
+Element.prototype.releasePointerCapture = function releasePointerCapture(): void {};
