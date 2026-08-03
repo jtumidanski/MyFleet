@@ -15,9 +15,25 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
-// errInternal is what a failed lookup renders. It carries no detail on purpose:
-// server.WriteError copies err.Error() into the response title, so returning the
-// underlying error would publish database internals to any authenticated caller.
+// errInternal is what a failed lookup renders.
+//
+// What it protects is the STATUS, not the title. server.WriteError already
+// redacts every 5xx title to server.InternalErrorTitle unconditionally
+// (jsonapi.go:97-108), so on a plain failure WriteError(w, err) would leak
+// nothing — an earlier version of this comment claimed otherwise and it was
+// wrong.
+//
+// The hazard is server.StatusFor walking the error chain: a downstream failure
+// that happens to wrap a 4xx sentinel renders as that 4xx, and titles below 500
+// are NOT redacted, so the raw text would reach the caller. errInternal wraps
+// nothing, so it always maps to 500 and therefore always redacts.
+// TestAuthUsers_pinsA500EvenWhenTheDownstreamErrorWrapsA4xx holds this;
+// TestAuthUsers_returns500WhenTheFleetLookupFails does not — it passes either
+// way, which is why the false rationale survived.
+//
+// Diagnosability comes from the explicit log.WithError(err) at each call site.
+// WriteError's own 5xx log line receives this placeholder instead of the fault,
+// so dropping that explicit log would lose the error text entirely.
 var errInternal = errors.New("internal server error")
 
 // errThemeValidation names the offending field and the accepted values without
@@ -133,9 +149,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, members FleetMemberGa
 					return
 				}
 				log.WithError(err).WithField("user_id", id.UserID).Error("auth/me lookup failed")
-				// Deliberately not WriteError(w, err): the envelope puts
-				// err.Error() in the title, which would leak database internals
-				// to the client. errInternal renders a bare 500.
+				// Deliberately not WriteError(w, err): errInternal pins the
+				// status to 500 so the response cannot borrow a 4xx from a
+				// wrapped sentinel and skip title redaction. See errInternal.
 				server.WriteError(w, errInternal)
 				return
 			}
@@ -181,9 +197,9 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, members FleetMemberGa
 					return
 				}
 				log.WithError(err).WithField("user_id", id.UserID).Error("auth/me theme update failed")
-				// Deliberately not WriteError(w, err): the envelope puts
-				// err.Error() in the title, which would leak database internals
-				// (FR-SEC-3).
+				// Deliberately not WriteError(w, err): errInternal pins the
+				// status to 500, so a wrapped 4xx sentinel cannot downgrade this
+				// into an unredacted response (FR-SEC-3). See errInternal.
 				server.WriteError(w, errInternal)
 				return
 			}
@@ -232,8 +248,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, members FleetMemberGa
 			ms, err := proc.ListByIDs(allowed)
 			if err != nil {
 				log.WithError(err).Error("auth/users lookup failed")
-				// Deliberately not WriteError(w, err): the envelope puts
-				// err.Error() in the title, which would leak database internals.
+				// Deliberately not WriteError(w, err): errInternal pins the
+				// status to 500. See errInternal.
 				server.WriteError(w, errInternal)
 				return
 			}

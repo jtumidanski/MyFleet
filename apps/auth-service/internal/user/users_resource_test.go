@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // newUsersRouter builds the real router with a STUB gatherer, so the scoping
@@ -237,5 +239,36 @@ func TestAuthUsers_returns500WhenTheFleetLookupFails(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "fleet-service is down") {
 		t.Fatal("the downstream error text reached the client; errInternal must render a bare 500")
+	}
+}
+
+// What errInternal actually protects, as opposed to what its comment used to
+// claim. server.WriteError redacts EVERY 5xx title unconditionally
+// (jsonapi.go:97-108), so passing the raw error would not leak anything on a
+// plain failure — TestAuthUsers_returns500WhenTheFleetLookupFails above passes
+// either way and so cannot tell the two apart.
+//
+// The real guarantee is the STATUS. server.StatusFor walks the error chain, so
+// a downstream failure that happens to wrap a 4xx sentinel would render as that
+// 4xx — and titles below 500 are NOT redacted, so the raw text would reach the
+// client. errInternal wraps nothing, so it always maps to 500 and always
+// redacts. This test fails if the handler is ever "simplified" to
+// WriteError(w, err).
+func TestAuthUsers_pinsA500EvenWhenTheDownstreamErrorWrapsA4xx(t *testing.T) {
+	leaky := fmt.Errorf("%w: connection string user=admin password=hunter2", server.ErrValidation)
+
+	r, db := newUsersRouter(t, func(context.Context, string) ([]string, error) {
+		return nil, leaky
+	})
+	seedUserWith(t, db, "u1", "sub-1", "one@example.com", "One")
+
+	rec := getUsers(r, "?ids=u1", "f1")
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("code = %d, want 500: a downstream error wrapping a 4xx sentinel must not "+
+			"borrow that status — sub-500 titles are not redacted", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "hunter2") {
+		t.Fatal("the downstream error text reached the client")
 	}
 }
