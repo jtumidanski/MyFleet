@@ -16,13 +16,22 @@ import (
 // The tag here is a plain composite index under a DIFFERENT name so AutoMigrate
 // and the hand-written DDL never fight over the same object.
 type Entity struct {
-	ID               string `gorm:"type:uuid;primaryKey"`
-	FleetID          string `gorm:"type:uuid;not null;index:idx_membership_fleet_user"`
-	UserID           string `gorm:"not null;index:idx_membership_fleet_user"`
-	Role             string `gorm:"not null"` // owner | member | viewer
-	Status           string `gorm:"not null"` // active
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID      string `gorm:"type:uuid;primaryKey"`
+	FleetID string `gorm:"type:uuid;not null;index:idx_membership_fleet_user"`
+	UserID  string `gorm:"not null;index:idx_membership_fleet_user"`
+	Role    string `gorm:"not null"` // owner | member | viewer
+	Status  string `gorm:"not null"` // active
+	// ToEntity() never populates CreatedAt (Model carries no such field), so a
+	// full-column db.Save built from it would reset this to the zero value.
+	// UpdateRole uses Update("role", …) and never takes that path, but `<-:create`
+	// makes the protection structural rather than a property of that one call
+	// site: the column is written on INSERT and excluded from every UPDATE.
+	CreatedAt time.Time `gorm:"<-:create"`
+	UpdatedAt time.Time
+	// DeletedAt and PurgeOperationID are deliberately NOT tagged `<-:create`:
+	// the purge and restore paths must write them, and fleet/model.go:27-31
+	// records that tagging a soft-delete column makes a restore via Updates(map)
+	// report success while the row stays deleted.
 	DeletedAt        *time.Time `gorm:"index"`
 	PurgeOperationID *string    `gorm:"type:uuid;index"`
 }

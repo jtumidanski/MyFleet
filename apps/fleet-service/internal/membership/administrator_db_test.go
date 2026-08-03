@@ -330,3 +330,47 @@ func TestCountOwners_isScopedToTheFleet(t *testing.T) {
 		t.Fatalf("CountOwners = %d, want 1 — another fleet's owner must not count", n)
 	}
 }
+
+// ToEntity() carries only the five columns Model knows about, so a full-column
+// db.Save built from it writes zeroes over created_at, deleted_at and
+// purge_operation_id. Today NewAdministrator.UpdateRole uses Update("role", …)
+// and never takes that path, which is also why the entityguard sweep in
+// cmd/entityguard_test.go stays silent for this package — it only reports a
+// package that ALREADY combines a Save with an unprotected column.
+//
+// That makes the safety a property of one call site rather than of the schema.
+// `gorm:"<-:create"` on CreatedAt makes it structural: the column is written on
+// INSERT and excluded from every UPDATE, so the day someone adds a Save here
+// they do not silently reset every membership's creation date.
+//
+// DeletedAt and PurgeOperationID are deliberately NOT tagged — fleet/model.go:27-31
+// records that tagging a soft-delete column makes a restore via Updates(map)
+// report success while the row stays deleted.
+func TestSaveFromToEntity_doesNotClobberCreatedAt(t *testing.T) {
+	db := newMembershipDB(t)
+	m := seedMembership(t, db, "u1", "owner")
+
+	var before Entity
+	if err := db.First(&before, "id = ?", m.ID()).Error; err != nil {
+		t.Fatalf("read back seeded row: %v", err)
+	}
+	if before.CreatedAt.IsZero() {
+		t.Fatal("precondition: insert left created_at zero")
+	}
+
+	// The write path this guards against: a full-column save built from ToEntity().
+	if err := db.Save(m.ToEntity()).Error; err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	var after Entity
+	if err := db.First(&after, "id = ?", m.ID()).Error; err != nil {
+		t.Fatalf("read back after save: %v", err)
+	}
+	if after.CreatedAt.IsZero() {
+		t.Fatal("db.Save zeroed created_at; Entity.CreatedAt must stay `gorm:\"<-:create\"`")
+	}
+	if !after.CreatedAt.Equal(before.CreatedAt) {
+		t.Fatalf("db.Save rewrote created_at: %v -> %v", before.CreatedAt, after.CreatedAt)
+	}
+}
