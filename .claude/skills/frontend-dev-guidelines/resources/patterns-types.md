@@ -2,232 +2,219 @@
 
 ## Overview
 
-TypeScript strict mode is enabled with enhanced checks. All types live in `types/` — domain models in `types/models/` and API types in `types/api/`.
+TypeScript strict mode is enabled with enhanced checks. All domain types live in `types/models/`. There is no separate `types/api/` directory — the JSON:API envelope and error types come from the shared `@myfleet/shared-ts` package, not from a local folder.
 
 ## JSON:API Model Structure
 
-**All domain models follow the JSON:API format:**
+**All domain models are a `JsonApiResource<A>` from `@myfleet/shared-ts`, not a hand-written interface:**
 
 ```typescript
-// types/models/bucket.ts
-export interface Bucket {
-  id: string;
-  attributes: BucketAttributes;
+// types/models/vehicle.ts
+import type { JsonApiResource } from '@myfleet/shared-ts';
+
+export interface VehicleAttributes {
+  fleetId: string;
+  nickname?: string;
+  make: string;
+  model: string;
+  trim?: string;
+  year: number;
+  vin?: string;
+  currentMileage?: number;
+  primaryImageMediaId?: string;
+  notes?: string;
+  status?: string;
+  lastActivityAt?: string;
+  nextDue?: VehicleNextDue;
 }
 
-export interface BucketAttributes {
-  name: string;
-  region: string;
-  createdAt: string;
-  updatedAt: string;
-  objectCount: number;
-  sizeBytes: number;
-  versioning: boolean;
-  policyId?: string;
-  // ...
+export type Vehicle = JsonApiResource<VehicleAttributes>;
+```
+
+`JsonApiResource` itself (`packages/shared-ts/src/jsonapi.ts:1-6`, whole file reproduced):
+
+```typescript
+export interface JsonApiResource<A, R = Record<string, unknown>> {
+  type: string;
+  id: string;
+  attributes: A;
+  relationships?: R;
 }
 ```
 
 **Pattern:**
-- `id` is always `string`
+- `id` is always `string`, and `type` carries the JSON:API resource type — the model interface itself never declares `id`/`type` by hand, they come from `JsonApiResource`
 - `attributes` contains all data fields
 - Nested types for complex attributes
-- Optional `relationships` for related resources (e.g., Bucket → Policies)
+- Optional `relationships` for related resources, typed via the generic `R` parameter
 
-## Enum + Label Map Pattern
+## Doc-Comment Convention on Model Files
 
-For numeric enums that need display labels:
+Attribute files name the backend struct they mirror and mark which fields the server derives (so a client can never legally write them). From `apps/web/src/types/models/vehicle.ts:14-15`:
 
 ```typescript
-// types/models/ban.ts
-export enum BanType {
-  IP = 0,
-  HWID = 1,
-  Account = 2,
-}
-
-export const BanTypeLabels: Record<BanType, string> = {
-  [BanType.IP]: 'IP Address',
-  [BanType.HWID]: 'Hardware ID',
-  [BanType.Account]: 'Account',
-};
-
-export enum BanReasonCode {
-  Unspecified = 0,
-  Spamming = 1,
-  Hacking = 2,
-  TermsViolation = 3,
-  Harassment = 4,
-  Other = 5,
-}
-
-export const BanReasonCodeLabels: Record<BanReasonCode, string> = {
-  [BanReasonCode.Unspecified]: 'Unspecified',
-  [BanReasonCode.Spamming]: 'Spamming',
-  // ...
-};
+// Mirrors fleet-service vehicle resource (apps/fleet-service/internal/vehicle/rest.go).
+// `status`, `lastActivityAt`, and `nextDue` are derived read-only on the server and never written by the client.
+export interface VehicleAttributes {
 ```
+
+This comment is the anti-drift mechanism for the type layer: when the backend struct changes, the comment is the pointer back to the file that has to move first. Every model file should carry one.
+
+## Attribute Enums: String Unions, Not Numeric Enums
+
+This codebase has no numeric `enum` + label-map convention (`grep -rn "^export enum" apps/web/src/types/models/` returns nothing, and there is no `Labels: Record<...>` anywhere in `apps/web/src`). Discriminant-like attributes are plain string unions, narrowed inline where they're declared. From `apps/web/src/types/models/vehicle.ts:7-12`:
+
+```typescript
+export interface VehicleNextDue {
+  state: 'upcoming' | 'overdue';
+  axis: 'time' | 'mileage';
+  miles?: number; // present iff axis === 'mileage'
+  days?: number; // present iff axis === 'time'
+}
+```
+
+Nested rather than four flat fields: `axis` determines which magnitude is present, so flattening would make illegal combinations (`axis: 'time'` with a `miles` value) representable.
 
 ## Helper Functions on Models
 
-Attach domain logic as standalone functions alongside the model:
+Attach domain logic as standalone functions in `lib/`, alongside the model rather than on it — not in `types/models/` itself. Each has a sibling `.test.ts` (except `utils.ts`):
+
+- `apps/web/src/lib/vehicleStats.ts`, `vehicleStats.test.ts`
+- `apps/web/src/lib/vehicleRecords.ts`, `vehicleRecords.test.ts`
+- `apps/web/src/lib/carfax.ts`, `carfax.test.ts`
+- `apps/web/src/lib/theme.ts`, `theme.test.ts`
+- `apps/web/src/lib/utils.ts`
+
+## JSON:API Envelope and Pagination
+
+`JsonApiDocument<T>` and `PageMeta` (`packages/shared-ts/src/jsonapi.ts:8-19`):
 
 ```typescript
-// types/models/ban.ts
-export function isBanExpired(ban: Ban): boolean {
-  if (ban.attributes.permanent) return false;
-  return new Date(ban.attributes.expiresAt) <= new Date();
+export interface PageMeta {
+  total: number;
+  totalPages: number;
+  number: number;
+  size: number;
 }
 
-export function isBanActive(ban: Ban): boolean {
-  return !isBanExpired(ban);
-}
-
-export function formatBanExpiration(ban: Ban): string {
-  if (ban.attributes.permanent) return "Permanent";
-  return new Date(ban.attributes.expiresAt).toLocaleString();
+export interface JsonApiDocument<T> {
+  data: T;
+  meta?: PageMeta;
+  links?: Record<string, string>;
 }
 ```
 
-## API Response Types
+Service layer calls unwrap `JsonApiDocument` into `ListResult<A>` (`apps/web/src/services/api/BaseService.ts:4-7`, documented in full in `patterns-service-layer.md`):
 
 ```typescript
-// types/api/responses.ts
-export interface ApiResponse<T = unknown> {
-  data: T;
-}
-
-export interface ApiListResponse<T = unknown> extends ApiResponse<T[]> {
-  data: T[];
-}
-
-export interface ApiSingleResponse<T = unknown> extends ApiResponse<T> {
-  data: T;
-}
-
-export interface ApiErrorResponse {
-  error: {
-    detail: string;
-    status?: number;
-    code?: string;
-  };
-}
-
-// Type guards
-export function isApiErrorResponse(response: unknown): response is ApiErrorResponse {
-  return typeof response === 'object' && response !== null && 'error' in response;
+export interface ListResult<A> {
+  data: Array<JsonApiResource<A>>;
+  meta?: PageMeta;
 }
 ```
 
-## Error Type Hierarchy
+`meta` is how pagination reaches the calling hook; it stays optional because `JsonApiDocument.meta` itself is optional (`jsonapi.ts:17`).
+
+## Error Type
+
+`ApiError` is a **class** extending `Error`, not an interface, and there is no `NetworkError`/`ValidationError`/`AuthenticationError`/`NotFoundError`/`ServerError` hierarchy or `isNetworkError`/`isNotFoundError` guards. The backend emits `{ errors: [APIError] }` (`packages/shared-go/server/jsonapi.go:113-115`), and the frontend converts that into an `ApiError` with a single constructor function. From `packages/shared-ts/src/errors.ts:3-16,23-37`, whole file reproduced:
 
 ```typescript
-// types/api/errors.ts
-export interface ApiError {
-  message: string;
-  statusCode: number;
+export class ApiError extends Error {
+  status: number;
   code: string;
-  details?: Record<string, unknown>;
+  detail?: string;
+  pointer?: string;
+  constructor(status: number, code: string, message: string, detail?: string, pointer?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+    this.pointer = pointer;
+  }
 }
 
-export interface NetworkError extends ApiError { code: 'NETWORK_ERROR'; }
-export interface ValidationError extends ApiError { code: 'VALIDATION_ERROR'; statusCode: 400 | 422; }
-export interface AuthenticationError extends ApiError { code: 'AUTHENTICATION_ERROR'; statusCode: 401; }
-export interface NotFoundError extends ApiError { code: 'NOT_FOUND'; statusCode: 404; }
-export interface ServerError extends ApiError { code: 'SERVER_ERROR'; statusCode: 500 | 502 | 503 | 504; }
-
-export type ApiErrorType =
-  | NetworkError
-  | ValidationError
-  | AuthenticationError
-  | NotFoundError
-  | ServerError;
-
-// Type guards
-export function isNetworkError(error: unknown): error is NetworkError { /* ... */ }
-export function isNotFoundError(error: unknown): error is NotFoundError { /* ... */ }
-// etc.
-```
-
-## Result Pattern
-
-```typescript
-export type Result<T, E = ApiErrorType> =
-  | { success: true; data: T }
-  | { success: false; error: E };
-
-export function createSuccessResult<T>(data: T): Result<T> {
-  return { success: true, data };
+interface EnvelopeShape {
+  status?: number;
+  body?: { errors?: JsonApiError[] };
 }
 
-export function createErrorResult<E>(error: E): Result<never, E> {
-  return { success: false, error };
+export function createErrorFromUnknown(e: unknown): ApiError {
+  const env = e as EnvelopeShape;
+  const first = env?.body?.errors?.[0];
+  if (first) {
+    return new ApiError(
+      env.status ?? Number(first.status) ?? 0,
+      first.code,
+      first.title,
+      first.detail,
+      first.source?.pointer,
+    );
+  }
+  if (e instanceof Error) return new ApiError(0, 'unknown', e.message);
+  return new ApiError(0, 'unknown', 'Unknown error');
 }
 ```
 
-## Type Guard Pattern (Service Layer)
-
-Services use private type guards for runtime checking:
+`JsonApiError` (`packages/shared-ts/src/jsonapi.ts:21-27`):
 
 ```typescript
-private isBan(data: unknown): data is Ban {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    'id' in data &&
-    'attributes' in data &&
-    typeof (data as Ban).attributes === 'object' &&
-    'banType' in (data as Ban).attributes
-  );
+export interface JsonApiError {
+  status: string;
+  code: string;
+  title: string;
+  detail?: string;
+  source?: { pointer?: string };
 }
 ```
 
-## Update Data Types
+## Create/Update Data Types
 
-Separate types for update payloads (partial attributes):
+Separate types for create and update payloads — the frontend mirror of the backend's narrow `createAttributes` struct, so a create or patch call cannot carry a derived read-only field. From `apps/web/src/types/models/vehicle.ts:36-53`:
 
 ```typescript
-export interface UpdateBucketData {
-  versioning?: boolean;
+// Create payload — fields accepted by POST /fleets/{id}/vehicles.
+export interface CreateVehicleAttributes {
+  nickname?: string;
+  make: string;
+  model: string;
+  trim?: string;
+  year: number;
+  vin?: string;
+  currentMileage?: number;
+  notes?: string;
 }
 
-export interface CreateBanRequest {
-  banType: BanType;
-  value: string;
-  reason: string;
-  reasonCode: BanReasonCode;
-  permanent: boolean;
-  expiresAt: string;
-  issuedBy: string;
+// Patch payload — only these are mutable via PATCH /vehicles/{id}.
+export interface UpdateVehicleAttributes {
+  nickname?: string;
+  currentMileage?: number;
+  notes?: string;
 }
 ```
 
-## Type Re-exports
+Neither carries `status`, `lastActivityAt`, or `nextDue` — those are exactly the fields the doc comment on `VehicleAttributes` marks as server-derived.
 
-Types are re-exported from `services/api/index.ts` for convenient imports:
+## Importing Types
+
+No path alias exists for `src` — import types with a relative path:
 
 ```typescript
-// In consuming code, import from services:
-import { type Ban, type CreateBanRequest } from "@/services/api";
-
-// Or from types directly:
-import { type Ban } from "@/types/models/ban";
+import type { Vehicle } from '../../types/models/vehicle';
 ```
 
 ## TypeScript Strict Mode Features
 
-The project uses enhanced TypeScript checks:
+The project's enhanced checks (`apps/web/tsconfig.app.json:11-12`):
 
 ```json
 {
   "strict": true,
-  "noUncheckedIndexedAccess": true,       // arr[0] is T | undefined
-  "exactOptionalPropertyTypes": true,     // { x?: string } means string, not string | undefined
-  "noImplicitOverride": true              // Must use override keyword
+  "noUncheckedIndexedAccess": true
 }
 ```
 
 **Implications:**
 - Always check array index access results for `undefined`
 - Use `!` assertion only when you've already validated
-- Use `override` keyword when overriding base class methods
