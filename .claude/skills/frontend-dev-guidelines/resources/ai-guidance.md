@@ -73,7 +73,7 @@ types/models/<resource>.ts
 - Separate `Create<Resource>Attributes` / `Update<Resource>Attributes` for the write payloads — the create shape is not the read shape, because server-derived fields are read-only
 - String unions for discriminants, not enums
 
-There is no `types/api/`. Envelope types (`JsonApiDocument`, `PageMeta`, `ApiError`) come from `@myfleet/shared-ts`.
+There is no `types/api/`. <!-- ALLOW-VOCAB:G-21 --> Envelope types (`JsonApiDocument`, `PageMeta`, `ApiError`) come from `@myfleet/shared-ts`.
 
 ### Step 2: Service
 ```
@@ -84,7 +84,7 @@ services/api/<Resource>Service.ts     ← PascalCase, matches the class
 - Add resource-specific methods on top of the inherited `list`/`get`/`create`/`patch`/`remove`, using the protected `listAt`/`createAt` for nested routes
 - `export const <resource>Service = new <Resource>Service();` — a singleton, imported directly
 
-**There is no `services/api/index.ts` barrel.** Import the singleton from its own module: `import { vehicleService } from '../../../services/api/VehicleService';`
+**There is no `services/api/index.ts` barrel.** <!-- ALLOW-VOCAB:G-21 --> Import the singleton from its own module: `import { vehicleService } from '../../../services/api/VehicleService';`
 
 ### Step 3: React Query hooks
 ```
@@ -132,7 +132,7 @@ pages/<Resource>DetailPage.tsx   detail
 - Add an entry to `NAV` in `AppLayout.tsx` (or `ADMIN_NAV` in `AdminLayout.tsx`) if it is a top-level destination
 - Add a trail row to `components/frame/breadcrumbTrails.ts`, keyed by route pattern
 
-There is no `components/app-sidebar.tsx` and no `lib/breadcrumbs/`.
+There is no `components/app-sidebar.tsx` and no `lib/breadcrumbs/`. <!-- ALLOW-VOCAB:G-21 -->
 
 ### Step 8: Tests
 - Sibling `*.test.ts` / `*.test.tsx` next to the file under test — there is no separate tests directory, and no directory of ambient module mocks: every stub is a `vi.mock` in the test file that needs it

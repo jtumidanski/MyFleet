@@ -60,7 +60,12 @@ check G-17 "fake handler deps"       "$(grep -rnE 'HandlerDependency|HandlerCont
 check G-18 "testify in Go examples"  "$(grep -rnE 'require\.(NoError|Error|Equal)|assert\.' "$BE" "$BEAGENT")"
 check G-19 "mock-struct convention"  "$(grep -rnE 'Mock struct|\{package\}/mock/|mock/processor\.go|mock/provider\.go' "${SCOPE[@]}")"
 check G-20 "frontend/ root path"     "$(grep -rnE '(^|[^a-z/])frontend/' "$FE" "$FEAGENT")"
-check G-21 "dead FE paths"           "$(grep -rnE 'components/common/|types/api/|lib/breadcrumbs/|lib/query-client|React Table|DataTable|data-table|\.service\.ts|services/api/index\.ts' "$FE" "$FEAGENT")"
+# A guideline that says "there is no types/api/" is the opposite of drift: it
+# stops the next reader re-deriving a path the old docs taught. But the check
+# cannot tell that sentence from "put your types in types/api/", so those lines
+# opt out with ALLOW-VOCAB:G-21, per-check like the other markers. Use it ONLY
+# on a line that denies the path exists -- never to keep an instruction.
+check G-21 "dead FE paths"           "$(grep -rnE 'components/common/|types/api/|lib/breadcrumbs/|lib/query-client|React Table|DataTable|data-table|\.service\.ts|services/api/index\.ts' "$FE" "$FEAGENT" | grep -v 'ALLOW-VOCAB:G-21')"
 check G-22 "unset tsconfig flags"    "$(grep -rnE 'exactOptionalPropertyTypes|noImplicitOverride' "$FE")"
 # Deliberately no ALLOW-VOCAB:G-23 escape, unlike G-10/G-14/G-15. Those
 # checks exempt lines because their terms have legitimate uses in a backend
