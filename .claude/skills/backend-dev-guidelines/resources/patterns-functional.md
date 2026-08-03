@@ -11,8 +11,17 @@ description: Immutable models, builders, and processor constructors for services
 - Domain models have private fields.
 - Public getters expose read-only state.
 - Instances are built via builders (see Builder Pattern below), and modified
-  via `With*` methods that return a copy with one field changed — never via
-  in-place mutation. Example (`apps/fleet-service/internal/vehicle/model.go:49-53`):
+  via `With*` methods that return a copy with the changed field(s) set —
+  never via in-place mutation of the receiver. Most `With*` methods change a
+  single field, but several change more than one together where the fields
+  are related: `vehicle.Model.WithSoftDelete` sets `deletedAt` and
+  `purgeAfter` together (`model.go:74-79`), `user.Model.WithLogin` sets four
+  fields together (`apps/auth-service/internal/user/model.go:45-48`), and
+  `maintenanceschedule.Model.WithRecurrence` (`model.go:52-57`),
+  `WithLastCompleted` (`:63-67`), `WithNextDue` (`:70-73`), and `WithStatus`
+  (`:77-80`) each set two or three fields together
+  (`apps/fleet-service/internal/maintenanceschedule/model.go`). Example
+  (`apps/fleet-service/internal/vehicle/model.go:49-53`):
 
 ```go
 // WithNickname returns a copy with the nickname changed.
@@ -44,8 +53,9 @@ m, err := NewBuilder().
 
 ## Processor Constructor Pattern
 
-A processor takes its collaborators as constructor parameters and holds no
-`context.Context`. The common shape — 8 of the 19 `NewProcessor` functions in
+A processor takes its *required* collaborators as constructor parameters and
+holds no `context.Context`. (Optional collaborators are supplied later —
+see Optional dependencies, below.) The common shape — 8 of the 19 `NewProcessor` functions in
 this tree (`vehicle`, `user`, `fleet`, `maintenancerecord`,
 `maintenancecategory`, `maintenanceschedule`, `vehiclemedia`, `preferences`) —
 is `NewProcessor(log, Provider, Administrator)`:
