@@ -2,7 +2,7 @@
 
 ## Overview
 
-TypeScript strict mode is enabled with enhanced checks. All domain types live in `types/models/`. There is no separate `types/api/` directory — the JSON:API envelope and error types come from the shared `@myfleet/shared-ts` package, not from a local folder.
+TypeScript strict mode is enabled with enhanced checks. All domain types live in `types/models/`. There is no separate local directory for API envelope/error types — those come from the shared `@myfleet/shared-ts` package.
 
 ## JSON:API Model Structure
 
