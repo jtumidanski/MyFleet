@@ -915,7 +915,7 @@ Use `superpowers:receiving-code-review` — verify each finding against the sour
 - "Use the house `toast.error(apiError.message || 'fallback')` pattern" — no; see Task 4's rationale. `apiError.message` is the constant `"internal server error"` on this path.
 - "The failure is logged twice (handler + `WriteError`)" — accepted deliberately (design §3.4): the handler's line names the operation, `WriteError`'s only knows the status.
 
-- [ ] **Step 3: Re-run the gate and commit**
+- [x] **Step 3: Re-run the gate and commit**
 
 ```sh
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
