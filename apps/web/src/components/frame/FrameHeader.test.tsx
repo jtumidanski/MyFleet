@@ -65,6 +65,21 @@ describe('FrameHeader', () => {
     expect(theme).toBeGreaterThan(trigger);
     // FR-PROFILE-1: immediately right of the theme toggle.
     expect(profile).toBe(theme + 1);
+
+    // FR-CRUMB-1: the breadcrumb nav sits strictly between the trigger and
+    // the theme toggle in DOM order. None of the assertions above can see
+    // this — AppBreadcrumb has no button-role descendants, so it never
+    // appears in `names` — this is a genuine positional check, not presence.
+    const triggerButton = screen.getByRole('button', { name: 'Toggle Sidebar' });
+    const themeButton = screen.getByRole('button', { name: /^Theme:/ });
+    const breadcrumbNav = screen.getByRole('navigation', { name: 'Breadcrumb' });
+
+    expect(
+      triggerButton.compareDocumentPosition(breadcrumbNav) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      breadcrumbNav.compareDocumentPosition(themeButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it('renders the breadcrumb for the current route', () => {
