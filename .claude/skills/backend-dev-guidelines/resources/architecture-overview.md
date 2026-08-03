@@ -72,10 +72,15 @@ vehicle also records an activity entry and emits a `vehicle.created` event,
 ## Startup Example
 
 Every service's `cmd/main.go` builds the database connection, wires
-processors, and boots the server through the same `server` chain, terminating
-in `Run()` (`packages/shared-go/server/server.go:39-44`). Abbreviated from
-`apps/fleet-service/cmd/main.go:46-64,266-308` (route-initializer bodies
-elided for length; migration list truncated):
+processors, and boots the server through the same `server` chain: `New` →
+`Use` → `AddRouteInitializer` (called once per route group — internal routes
+come as plain `func(chi.Router)` values, JWT-protected routes wrap a
+`r.Group` with JWT middleware) → `Run()`, guarded by an
+`if err := ...; err != nil` check. Reproduced from
+`apps/fleet-service/cmd/main.go:46-64,266-308`, with the repetitive per-domain
+lines inside the protected group elided (the migration list and the full
+12-domain `InitializeRoutes` list are in the source; nothing here is
+composed):
 
 ```go
 db, err := database.Connect(log, database.SetMigrations(
@@ -89,24 +94,49 @@ if err != nil {
 
 if err := server.New(log).
     Use(telemetry.CorrelationID).
+    // Internal routes: no JWT, network-restricted (consumed by other services).
+    AddRouteInitializer(membership.InitializeInternalRoutes(log, db)).
+    AddRouteInitializer(maintenanceschedule.InitializeInternalRoutes(log, db)).
+    AddRouteInitializer(invite.InitializeInternalRoutes(log, db, fleet.NewProvider(db))).
+    // Protected routes: JWT required.
     AddRouteInitializer(func(r chi.Router) {
         r.Group(func(pr chi.Router) {
             pr.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
+            fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
             vehicle.InitializeRoutes(log, db, membershipAdmin, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
-            // ...remaining domains' InitializeRoutes(pr), same group, same middleware
+            // ...ten more domains' InitializeRoutes(pr), same group, same middleware
+            dashboard.InitializeRoutes(log, db, scheduleProc, activityProc, vehicleProc)(pr)
         })
+    }).
+    // The admin tree: its own group, JWT and nothing else shared with the
+    // tree above.
+    AddRouteInitializer(func(r chi.Router) {
+        r.Group(func(ar chi.Router) {
+            ar.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
+            admin.InitializeRoutes(log, adminProc)(ar)
+        })
+    }).
+    AddRouteInitializer(func(r chi.Router) {
+        r.Get("/healthz", health.Liveness())
+        r.Get("/readyz", health.Readiness(func() error { d, _ := db.DB(); return d.Ping() }))
+        r.Handle("/metrics", health.Metrics())
     }).
     Run(); err != nil {
     log.WithError(err).Fatal("server stopped")
 }
 ```
 
-`server.New(log)` returns `*Server`; `Use` returns `*Server` too, so the calls
-chain (`packages/shared-go/server/handler.go:21-36`). The real `main.go`
-repeats the route-registration call once per initializer function — internal
-routes, the protected group above, the admin group, and health/metrics each
-get their own — but a single call is enough to show the shape here; it takes
-a `func(chi.Router)`, the same shape `InitializeRoutes(...)` returns
+`server.New(log)` returns `*Server`; `Use` and `AddRouteInitializer` each
+return `*Server` too, so the calls chain
+(`packages/shared-go/server/handler.go:21-36`). `AddRouteInitializer` is
+called six times above, and that is the real count in `main.go` — three
+internal-route registrations, one JWT-protected group, one admin group, and
+one health/metrics registration. Besides the truncated migration list and a
+shortened admin-tree comment (the full version explains the authorization
+boundary — see `main.go:290-294`), the only other elision is the per-domain
+`InitializeRoutes(pr)` lines inside the protected group, down from twelve
+domains to three representative ones. Each call takes a `func(chi.Router)`,
+the same shape `InitializeRoutes(...)` returns
 (`patterns-rest-jsonapi.md`). `Run()` calls `Router()`, which runs every
 queued initializer against the chi router (`handler.go:38-44`), then serves
 on `PORT` (default `8080`) via `http.ListenAndServe`
