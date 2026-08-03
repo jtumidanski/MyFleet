@@ -11,6 +11,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { Button } from '../components/ui/button';
+import { SignedInFooter } from '../components/auth/SignedInFooter';
 import { useAcceptInvite } from '../lib/hooks/api/invites';
 
 export function InviteAcceptPage() {
@@ -69,6 +70,12 @@ export function InviteAcceptPage() {
       <Button variant="outline" onClick={() => navigate('/')}>
         Go to Dashboard
       </Button>
+      {/* Error state only (FR-INVITE-1/2). "Go to Dashboard" re-enters
+          RequireAuth, which sends a fleetless user straight back to
+          /onboarding — so on a wrong-account failure the existing button is the
+          one that loops and this footer is the one that resolves it. The
+          pending and success states are transient and trap nobody. */}
+      <SignedInFooter />
     </div>
   );
 }
