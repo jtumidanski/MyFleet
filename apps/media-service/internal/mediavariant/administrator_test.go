@@ -209,3 +209,39 @@ func TestUpsert_scopesConflictToTheVariant(t *testing.T) {
 		t.Fatalf("got %d rows, want 2 — thumbnail and card must not collide", len(rows))
 	}
 }
+
+func TestDeleteForMediaObject_removesEveryRowForThatObjectOnly(t *testing.T) {
+	db := newPurgeVariantDB(t)
+	past := time.Now().UTC().Add(-time.Hour)
+	insertVariantRow(t, db, "mv-c", "mo-1", "card", "k/mo-1-card", nil)
+	insertVariantRow(t, db, "mv-old", "mo-1", "display", "k/mo-1-old", &past)
+	insertVariantRow(t, db, "mv-other", "mo-2", "card", "k/mo-2-card", nil)
+
+	if err := DeleteForMediaObject(db, "mo-1"); err != nil {
+		t.Fatalf("DeleteForMediaObject: %v", err)
+	}
+	var mine, others int64
+	db.Raw(`SELECT count(*) FROM media.media_variants WHERE media_object_id = 'mo-1'`).Scan(&mine)
+	db.Raw(`SELECT count(*) FROM media.media_variants WHERE media_object_id = 'mo-2'`).Scan(&others)
+	if mine != 0 {
+		t.Errorf("left %d rows for the purged media object", mine)
+	}
+	if others != 1 {
+		t.Errorf("deleted another media object's variants: %d of 1 left", others)
+	}
+}
+
+func TestDeleteByID_removesExactlyOneRow(t *testing.T) {
+	db := newPurgeVariantDB(t)
+	insertVariantRow(t, db, "mv-1", "mo-gone", "card", "k/1", nil)
+	insertVariantRow(t, db, "mv-2", "mo-gone", "display", "k/2", nil)
+
+	if err := DeleteByID(db, "mv-1"); err != nil {
+		t.Fatalf("DeleteByID: %v", err)
+	}
+	var left int64
+	db.Raw(`SELECT count(*) FROM media.media_variants`).Scan(&left)
+	if left != 1 {
+		t.Errorf("DeleteByID left %d rows, want exactly the untouched one", left)
+	}
+}
