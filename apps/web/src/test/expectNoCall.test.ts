@@ -15,6 +15,15 @@ describe('flushPending', () => {
 
     expect(order).toEqual(['microtask', 'macrotask']);
   });
+
+  it('rejects immediately, naming fake timers, when vi.useFakeTimers() is active', async () => {
+    vi.useFakeTimers();
+    try {
+      await expect(flushPending()).rejects.toThrow(/useFakeTimers/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('expectNoCall', () => {
@@ -68,5 +77,10 @@ describe('expectNoCallWith', () => {
     void Promise.resolve().then(() => spy('allowed'));
 
     await expectNoCallWith(spy, ['banned'], 'onChange');
+  });
+
+  it('works with no label', async () => {
+    const spy = vi.fn();
+    await expectNoCallWith(spy, ['banned']);
   });
 });

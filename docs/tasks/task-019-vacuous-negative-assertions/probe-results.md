@@ -27,7 +27,9 @@ All 40 inventoried sites have a recorded verdict for both stages.
   were green at *both* stages before migration: nothing between the trigger
   and the assertion ever yields, and the real production guard-defeat trips
   an earlier, unrelated assertion first rather than the target one
-  (footnote¹⁵). Migrated to `expectNoCall` and re-probed **red/red**.
+  (footnote¹⁵). Migrated to `expectNoCall` and re-probed **red/red**, the
+  Stage-2 red confirmed only in an isolated copy — the preceding `widgets`
+  assertion still trips first in the committed file (footnote¹⁵).
 - **1 unprobeable.** Site 30 — see below; this is the single most important
   finding in the whole record.
 - **2 exempted** (a subset of the 37 falsifiable sites, not a fourth
@@ -80,17 +82,55 @@ recorded Stage-2 result.
 
 **Wall time.** `make fe-test` measured **9.343s**, against the Task 1
 baseline of **11.25s** — nominally 17% faster. The NFR's 10% ceiling caps
-regression only, so this passes regardless of direction; but a 2-file,
-12-line test-only diff (the `expectNoCall`/`expectNoCallWith` migrations plus
-two exemption comments) has no mechanism to make a 745-test suite run
-faster. The swing is most plausibly machine variance or a warm filesystem
-cache between the two measurement runs, not an effect of this branch, and
-should be read with that caveat rather than as a genuine speedup.
+regression only, so this passes regardless of direction; but a 20-file,
+roughly-130-line test-only diff (the `expectNoCall`/`expectNoCallWith`
+migrations plus two exemption comments) has no mechanism to make a 745-test
+suite run faster. The swing is most plausibly machine variance or a warm
+filesystem cache between the two measurement runs, not an effect of this
+branch, and should be read with that caveat rather than as a genuine
+speedup.
 
 | # | File | Test title | Spy | Guard defeated (stage 2) | S1 | S2 | Verdict | Fix | Re-probe |
 |---|---|---|---|---|---|---|---|---|---|
 | 39 | `apps/web/src/pages/LoginPage.test.tsx` | cycles the theme without issuing a request | `fetchSpy` | (a) no-token early return in `updateThemePreference`; (b) signed-out page pointed at the mutation-bearing `ThemeToggle` (both required — FR-FIX-2) | red¹ (1 call) | red (3 calls to `/api/auth/me`) | falsifiable | migrated to `expectNoCall` | red |
 | 40 | `apps/web/src/lib/hooks/api/auth.test.ts` | makes no request and resolves when there is no token | `fetchMock` | (a) no-token early return in `updateThemePreference` | red¹ (1 call) | red (request lands; downstream `TypeError` on the mock's undefined response) | falsifiable | migrated to `expectNoCall` (uniformity, FR-HELPER-3 — was already falsifiable) | red |
+
+¹ *(Anchors the `red¹` S1 cells on sites 39 and 40 — the first two rows of
+the table above, migrated in Task 3, before this footnote's correction was
+made.)* Stage 1 for both sites was re-run under the **human ruling recorded
+in migration-context.md ("Stage-1 probe placement — HUMAN RULING")**, which
+supersedes the plan's original "insert immediately before the assertion"
+wording. That literal wording is degenerate — a microtask queued immediately
+before a synchronous `expect()` can never run before it, so it returns green
+for every site regardless of what precedes it, and the first pass through
+this task recorded exactly that false green for both rows above. The ruling
+instead places the probe **at the dispatch point**: immediately after the
+statement that triggers the call under test, and before any intervening
+`await`/flush. Re-run against each site's pre-migration source (`git show
+bd5c43c:<path>`) under that placement:
+
+- Site 39: probe inserted after the third `act(() => toggle().click())` and
+  before the pre-existing hand-rolled
+  `await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); })`
+  flush. Command: `npx vitest run src/pages/LoginPage.test.tsx`. Result: RED —
+  `expected "fetch" to not be called at all, but actually been called 1
+  times`, the one call being `["__probe__"]`. The pre-existing flush is real
+  and catches a probe queued at the real dispatch point, which is what this
+  site's #20 fix is supposed to do.
+- Site 40: probe inserted immediately before
+  `await expect(updateThemePreference('dark')).resolves.toBeNull();` (the
+  trigger — `updateThemePreference` is invoked directly, not through a
+  mutation). Command: `npx vitest run src/lib/hooks/api/auth.test.ts`. Result:
+  RED — same failure shape, one `__probe__` call observed; the `await` on the
+  subject call itself drains the queued microtask.
+
+Both rows are corrected from green to red accordingly, and the verdict
+changes from "falsifiable, fragile" (row 2 of the design's combining table)
+to plain **falsifiable** (row 1: red/red). Stage 2, the migration, and the
+post-migration re-probes are unaffected by this correction — they were
+already run with the probe immediately before `await expectNoCall(...)`,
+which happens to coincide with the ruled placement once the helper's internal
+flush sits between the probe and its own assertion.
 
 | 1 | `apps/web/src/components/features/vehicles/VehicleCard.test.tsx` | renders the placeholder at identical dimensions when no photo is set | `mediaService.getContentBlob` | `if (!mediaId)` early return in `VehiclePhotoThumbnail.tsx` (deleted) **and** `enabled: !!id` → `enabled: true` in `useMediaContentUrl` (`src/lib/hooks/api/media.ts`) — both required, same pair as site 2 | green (dispatch point coincides with the assertion — no yielding statement sits between `render()` and it) | red² (call recorded as `[undefined, "card"]`) | falsifiable | migrated to `expectNoCall`, `it` made `async` | red / red |
 | 2 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | shows the "No photo" placeholder when there is no media id, and fetches nothing | `mediaService.getContentBlob` | same pair as site 1 | green (same reasoning — no yield between `render()` and the assertion) | red² (call recorded as `[undefined, "card"]`) | falsifiable | migrated to `expectNoCall`, `it` made `async` | red / red |
@@ -625,43 +665,6 @@ never fires while `vi.useFakeTimers()` is active for the suite, so the
 `await` never resolves. The migrated form was reverted with `git checkout --`
 immediately after capturing this output; it is not part of the committed
 diff.
-
-¹ *(Anchors the `red¹` S1 cells on sites 39 and 40 — the first two rows of
-the table above, migrated in Task 3, before this footnote's correction was
-made.)* Stage 1 for both sites was re-run under the **human ruling recorded
-in migration-context.md ("Stage-1 probe placement — HUMAN RULING")**, which
-supersedes the plan's original "insert immediately before the assertion"
-wording. That literal wording is degenerate — a microtask queued immediately
-before a synchronous `expect()` can never run before it, so it returns green
-for every site regardless of what precedes it, and the first pass through
-this task recorded exactly that false green for both rows above. The ruling
-instead places the probe **at the dispatch point**: immediately after the
-statement that triggers the call under test, and before any intervening
-`await`/flush. Re-run against each site's pre-migration source (`git show
-bd5c43c:<path>`) under that placement:
-
-- Site 39: probe inserted after the third `act(() => toggle().click())` and
-  before the pre-existing hand-rolled
-  `await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); })`
-  flush. Command: `npx vitest run src/pages/LoginPage.test.tsx`. Result: RED —
-  `expected "fetch" to not be called at all, but actually been called 1
-  times`, the one call being `["__probe__"]`. The pre-existing flush is real
-  and catches a probe queued at the real dispatch point, which is what this
-  site's #20 fix is supposed to do.
-- Site 40: probe inserted immediately before
-  `await expect(updateThemePreference('dark')).resolves.toBeNull();` (the
-  trigger — `updateThemePreference` is invoked directly, not through a
-  mutation). Command: `npx vitest run src/lib/hooks/api/auth.test.ts`. Result:
-  RED — same failure shape, one `__probe__` call observed; the `await` on the
-  subject call itself drains the queued microtask.
-
-Both rows are corrected from green to red accordingly, and the verdict
-changes from "falsifiable, fragile" (row 2 of the design's combining table)
-to plain **falsifiable** (row 1: red/red). Stage 2, the migration, and the
-post-migration re-probes are unaffected by this correction — they were
-already run with the probe immediately before `await expectNoCall(...)`,
-which happens to coincide with the ruled placement once the helper's internal
-flush sits between the probe and its own assertion.
 
 ## FR-TRIAGE-4 sites (unprobeable)
 

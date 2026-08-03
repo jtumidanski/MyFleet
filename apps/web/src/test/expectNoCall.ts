@@ -1,10 +1,15 @@
-// `act` MUST come from @testing-library/react, not from react. RTL sets
-// IS_REACT_ACT_ENVIRONMENT = true at import time (not at first render), which
-// is what lets this helper run inside pure-logic test files with no React root
-// without emitting an act-scope warning. React's own `act` does not set the
-// flag and would warn. See task-019 design F-1.
+// `act` MUST come from @testing-library/react, not from react. Importing
+// @testing-library/react registers a `beforeAll` that sets
+// IS_REACT_ACT_ENVIRONMENT = true (active here because vitest.config.ts sets
+// `globals: true`, so `beforeAll`/`afterAll` are ambient), and RTL's `act`
+// wrapper additionally sets the flag for the duration of each call it makes.
+// Either mechanism alone would be enough to let this helper run inside
+// pure-logic test files with no React root without emitting an act-scope
+// warning; together they make it robust to environments where one of the two
+// doesn't apply. React's own `act` does not set the flag and would warn. See
+// task-019 design F-1.
 import { act } from '@testing-library/react';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 
 /**
@@ -16,9 +21,20 @@ import type { MockInstance } from 'vitest';
  * exists to prove actually works. See issue #22.
  *
  * NOT compatible with vi.useFakeTimers(): the setTimeout below never fires
- * under fake timers and the await would hang until the test times out.
+ * under fake timers and the await would hang until the test times out. Rather
+ * than let that surface as a bare test-runner timeout with no indication of
+ * the cause, this throws immediately when fake timers are active — assert
+ * synchronously with an inline eslint-disable carrying probe evidence
+ * instead, as download.test.ts does.
  */
 export async function flushPending(): Promise<void> {
+  if (vi.isFakeTimers()) {
+    throw new Error(
+      'expectNoCall/flushPending cannot run under vi.useFakeTimers(): its ' +
+        'setTimeout(0) never fires. Assert synchronously with an inline ' +
+        'eslint-disable carrying probe evidence, as download.test.ts does.',
+    );
+  }
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -30,6 +46,11 @@ export async function flushPending(): Promise<void> {
  * `label` names the spy in the failure message — Vitest reports an unnamed
  * vi.fn() as the literal string "spy", which tells a reader nothing about
  * which of four toast variants fired.
+ *
+ * `mockName(label)` renames the spy itself, not just this assertion's output:
+ * the name persists on the spy across `vi.clearAllMocks()`/`mockReset()` and
+ * shows up in any later failure for the same instance. Give a single spy only
+ * one label per test.
  */
 export async function expectNoCall(spy: MockInstance, label?: string): Promise<void> {
   await flushPending();

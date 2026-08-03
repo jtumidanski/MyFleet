@@ -47,16 +47,25 @@ export default tseslint.config(
       // A bare negative call assertion runs BEFORE any promise-continuation
       // dispatch, so it passes whether or not the guard it covers works.
       // See docs/tasks/task-019-vacuous-negative-assertions/ and issue #22.
+      //
+      // NOTE: flat-config `rules` blocks replace rather than merge — a
+      // project-wide `no-restricted-syntax` block added elsewhere would
+      // silently drop these selectors rather than combine with them. Extend
+      // this array in place; don't add a second `no-restricted-syntax` block.
       'no-restricted-syntax': [
         'error',
         {
           selector:
             "CallExpression[callee.object.property.name='not']" +
-            '[callee.property.name=/^toHaveBeenCalled/]',
+            '[callee.property.name=/^toHaveBeenCalled(With)?$/]',
           message:
             'Use expectNoCall(spy) from src/test/expectNoCall — a bare ' +
-            'not.toHaveBeenCalled() runs before promise-continuation dispatch ' +
-            'and can pass vacuously. See issue #22.',
+            'not.toHaveBeenCalled()/not.toHaveBeenCalledWith() runs before ' +
+            'promise-continuation dispatch and can pass vacuously. See issue ' +
+            "#22. Inside vi.useFakeTimers(), expectNoCall can't be used " +
+            '(its flush never fires) — assert synchronously instead, with an ' +
+            'inline eslint-disable carrying probe evidence, as ' +
+            'download.test.ts does.',
         },
         {
           selector:
