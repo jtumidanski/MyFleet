@@ -60,14 +60,28 @@ export function useMe() {
   });
 }
 
-// `POST /api/auth/logout` — clears the HttpOnly refresh cookie server-side.
-// credentials:'include' so the browser sends the cookie to be invalidated.
+/**
+ * `POST /api/auth/logout` — revokes the refresh-token family server-side and
+ * clears the HttpOnly refresh cookie. `credentials: 'include'` so the browser
+ * sends the cookie to be invalidated; it reaches fetch through apiClient's
+ * `init` spread.
+ *
+ * REJECTS on a non-2xx and on a transport failure. It used to swallow both — a
+ * bare fetch terminated by `.catch(() => undefined)`, never reading `ok` or
+ * `status` — which made every sign-out indistinguishable from a successful one.
+ *
+ * Going through apiClient means logout inherits the one-shot 401
+ * refresh-and-retry. That is unreachable in practice: /api/auth/logout is a
+ * public route with no JWT middleware and emits only 204 or 500. If it ever did
+ * fire, the outcome is still correct — the retry re-sends the ORIGINAL raw
+ * token, and the server revokes its whole family, including the token the
+ * refresh just minted, since rotation keeps the family id.
+ */
 export async function logoutRequest(): Promise<void> {
-  await fetch('/api/auth/logout', {
+  await apiClient.request<void>('/api/auth/logout', {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/vnd.api+json' },
-  }).catch(() => undefined);
+  });
 }
 
 /**
