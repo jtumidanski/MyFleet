@@ -388,48 +388,48 @@ refresh is no worse than today's `401`.
 
 Behavioural — these restate the issue's acceptance list and are the bar:
 
-- [ ] With `fleet-service` returning `500`, `POST /auth/refresh` responds `503`
+- [x] With `fleet-service` returning `500`, `POST /auth/refresh` responds `503`
       with `Retry-After: 5`, does not clear the refresh cookie, and does not log
       the user out.
-- [ ] With `fleet-service` unreachable (connection refused), the same holds.
-- [ ] With `fleet-service` hanging past the timeout, the same holds — the
+- [x] With `fleet-service` unreachable (connection refused), the same holds.
+- [x] With `fleet-service` hanging past the timeout, the same holds — the
       request completes in ~5s rather than pinning the handler (FR-TIMEOUT-1/2).
-- [ ] After a `503`, a subsequent refresh once `fleet-service` recovers succeeds
+- [x] After a `503`, a subsequent refresh once `fleet-service` recovers succeeds
       and does **not** trip reuse detection or revoke the token family
       (FR-REFRESH-5).
-- [ ] A missing user row still returns `401` and still clears the cookie.
-- [ ] A membership `404` still resolves to an empty `ActiveFleetID`; a brand-new
+- [x] A missing user row still returns `401` and still clears the cookie.
+- [x] A membership `404` still resolves to an empty `ActiveFleetID`; a brand-new
       user's first login still lands on `/onboarding`.
-- [ ] `fleet-service` returning `403` still reaches the `401` + clear path.
-- [ ] An OIDC callback during a `fleet-service` outage redirects with
+- [x] `fleet-service` returning `403` still reaches the `401` + clear path.
+- [x] An OIDC callback during a `fleet-service` outage redirects with
       `#error=service_unavailable` and the login page shows the try-again-shortly
       message, not the generic failure.
-- [ ] The SPA does not redirect to `/login` when a refresh answers `503`; the
+- [x] The SPA does not redirect to `/login` when a refresh answers `503`; the
       stored access token survives and the failed request surfaces a `503`
       `ApiError`, not a `401`.
 
 Code and verification:
 
-- [ ] `TestNewPrincipalResolver_treatsNoMembershipAsEmptyNotError` passes
+- [x] `TestNewPrincipalResolver_treatsNoMembershipAsEmptyNotError` passes
       unmodified.
-- [ ] `shared-go/server` sentinel-status and code-mapping table tests cover
+- [x] `shared-go/server` sentinel-status and code-mapping table tests cover
       `503` / `service_unavailable`; no existing mapping changed.
-- [ ] `membership.Client.Active` has table-driven tests over transport error,
+- [x] `membership.Client.Active` has table-driven tests over transport error,
       timeout, `500`, `429`, `403`, `404`, malformed 2xx body, and success —
       each asserting the classification, not just that an error occurred.
-- [ ] `refreshHandler` tests assert **status, `Retry-After`, and the presence or
+- [x] `refreshHandler` tests assert **status, `Retry-After`, and the presence or
       absence of a cookie-clearing `Set-Cookie`** for both the transient and the
       permanent path. Asserting status alone would pass while still logging the
       user out.
-- [ ] Each new test is proven able to fail: revert the fix, watch it go red,
+- [x] Each new test is proven able to fail: revert the fix, watch it go red,
       restore. Assert on stored/observable state, not merely on a response code
       that happens to match.
-- [ ] `make ci` passes (lint-check, vet, test, build, fe-test, fe-build).
-- [ ] Both overlays render, and both server dry-runs pass:
+- [x] `make ci` passes (lint-check, vet, test, build, fe-test, fe-build).
+- [x] Both overlays render, and both server dry-runs pass:
       `kustomize build deploy/k8s/overlays/main | kubectl apply --dry-run=server -f -`
       and the same for `overlays/local`. (No manifest change is expected; this
       is the standing gate.)
-- [ ] Code review run before the PR — `plan-adherence-reviewer`,
+- [x] Code review run before the PR — `plan-adherence-reviewer`,
       `backend-guidelines-reviewer`, `frontend-guidelines-reviewer`.
 - [ ] Issue #15 closed by the PR.
 

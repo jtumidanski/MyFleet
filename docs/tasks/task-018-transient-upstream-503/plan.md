@@ -62,7 +62,7 @@ Every task's requirements implicitly include this section.
 - Consumes: nothing.
 - Produces: `server.ErrServiceUnavailable` (an `error`), mapped by `StatusFor` to `503` and by `codeFor` to `"service_unavailable"`. Every later Go task depends on this exact name.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `packages/shared-go/server/errors_test.go`, add `ErrServiceUnavailable: 503` to the `cases` map in `TestStatusFor_mapsDomainErrors` and `503: "service_unavailable"` to the `cases` map in `TestCodeFor_namesEveryMappedStatus`. Then append this new test at the end of the file:
 
@@ -100,7 +100,7 @@ func TestWriteError_503KeepsTheRedactedEnvelope(t *testing.T) {
 
 Note: `"500"` in that redaction list is deliberate — the upstream status must not appear anywhere in the body. `fmt` and `strings` are already imported by this file.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/packages/shared-go
@@ -109,7 +109,7 @@ go test ./server/ -run 'TestStatusFor_mapsDomainErrors|TestCodeFor_namesEveryMap
 
 Expected: FAIL — compile error `undefined: ErrServiceUnavailable`.
 
-- [ ] **Step 3: Add the sentinel and both mappings**
+- [x] **Step 3: Add the sentinel and both mappings**
 
 In `packages/shared-go/server/errors.go`, add the last line of the var block:
 
@@ -148,7 +148,7 @@ In `packages/shared-go/server/server.go`, add one case to `codeFor` immediately 
 		return "service_unavailable"
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass, and the whole package with them**
+- [x] **Step 4: Run the tests to verify they pass, and the whole package with them**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/packages/shared-go
@@ -157,11 +157,11 @@ go test ./... -race
 
 Expected: PASS. Every pre-existing test in `errors_test.go` must still pass — they are the regression net for the ~190 existing `WriteError` call sites.
 
-- [ ] **Step 5: Prove the new test can fail**
+- [x] **Step 5: Prove the new test can fail**
 
 Temporarily change `codeFor`'s new case to `return "internal_error"`, re-run `go test ./server/ -run TestWriteError_503KeepsTheRedactedEnvelope`, confirm it goes red on the code assertion, then restore it.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/shared-go/server/errors.go packages/shared-go/server/server.go packages/shared-go/server/errors_test.go
@@ -181,7 +181,7 @@ git commit -m "feat(shared-go): add the ErrServiceUnavailable sentinel and its 5
 - Consumes: `ErrServiceUnavailable` from Task 1.
 - Produces: `server.RetryAfter(base error, seconds int) error`. Task 5 calls it as `server.RetryAfter(err, refreshRetryAfterSeconds)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `packages/shared-go/server/errors_test.go`:
 
@@ -263,7 +263,7 @@ func TestWriteError_omitsRetryAfterWhenThereIsNothingToSay(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/packages/shared-go
@@ -272,7 +272,7 @@ go test ./server/ -run 'TestRetryAfter|TestWriteError_setsRetryAfter|TestWriteEr
 
 Expected: FAIL — compile error `undefined: RetryAfter`.
 
-- [ ] **Step 3: Add the wrapper**
+- [x] **Step 3: Add the wrapper**
 
 Append to `packages/shared-go/server/errors.go`, immediately after the `detailedError` methods:
 
@@ -304,7 +304,7 @@ func (e *retryAfterError) Unwrap() error   { return e.base }
 func (e *retryAfterError) RetryAfter() int { return e.seconds }
 ```
 
-- [ ] **Step 4: Emit the header in `WriteError`**
+- [x] **Step 4: Emit the header in `WriteError`**
 
 In `packages/shared-go/server/jsonapi.go`, insert the header block as the first thing after `status := StatusFor(err)`:
 
@@ -330,7 +330,7 @@ func WriteError(w http.ResponseWriter, err error) {
 
 `errors` is already imported by `jsonapi.go`. Nothing else in the function moves.
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/packages/shared-go
@@ -339,7 +339,7 @@ go test ./... -race
 
 Expected: PASS, including every pre-existing test.
 
-- [ ] **Step 6: Prove the ordering test can fail**
+- [x] **Step 6: Prove the ordering test can fail**
 
 Move the header block to *after* the `WriteJSON(...)` call at the end of `WriteError`. Re-run:
 
@@ -349,7 +349,7 @@ go test ./server/ -run TestWriteError_setsRetryAfterBeforeCommittingTheHeaderBlo
 
 Expected: FAIL with `Retry-After = "" on the committed response`. This is the assertion that the whole header ordering rests on. Restore the block to its correct position and re-run to green.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/shared-go/server/errors.go packages/shared-go/server/jsonapi.go packages/shared-go/server/errors_test.go
@@ -368,7 +368,7 @@ git commit -m "feat(shared-go): carry Retry-After on the error and emit it befor
 - Consumes: `server.ErrServiceUnavailable` from Task 1.
 - Produces: `Active` returns an error satisfying `errors.Is(err, server.ErrServiceUnavailable)` exactly for: transport failure, timeout, status `>= 500`, status `429`, and an unparseable 2xx body. `404` still returns `(Membership{}, nil)`. Every other non-2xx returns a bare (non-transient) error. Package-level `fleetLookupTimeout` replaces `fleetMemberLookupTimeout`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Replace nothing; append to `apps/auth-service/internal/membership/client_test.go`. Add `"errors"`, `"time"` and `"github.com/jtumidanski/myfleet/packages/shared-go/server"` to its imports.
 
@@ -487,7 +487,7 @@ func TestActive_boundsAHangAndClassifiesItTransient(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/apps/auth-service
@@ -496,7 +496,7 @@ go test ./internal/membership/ -v
 
 Expected: FAIL — compile error `undefined: fleetLookupTimeout`.
 
-- [ ] **Step 3: Rewrite `Active` and rename the timeout**
+- [x] **Step 3: Rewrite `Active` and rename the timeout**
 
 In `apps/auth-service/internal/membership/client.go`, add `"errors"` and `"github.com/jtumidanski/myfleet/packages/shared-go/server"` to the imports. Move the timeout declaration **above** `Active` (it now serves both calls) and change it from a `const` to a `var`:
 
@@ -592,7 +592,7 @@ func (c *Client) Active(ctx context.Context, userID string) (Membership, error) 
 
 Then update `FleetMemberIDs` to use the renamed value — change `context.WithTimeout(ctx, fleetMemberLookupTimeout)` to `context.WithTimeout(ctx, fleetLookupTimeout)`, and delete the old `fleetMemberLookupTimeout` declaration block (its doc comment has moved above `Active`). `FleetMemberIDs` gets no classification: its callers do not need the distinction.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/apps/auth-service
@@ -601,7 +601,7 @@ go test ./internal/membership/ -race -v
 
 Expected: PASS, including the four pre-existing `TestActive_*` tests and all four `TestFleetMemberIDs_*` tests. `TestActive_errorDisclosesNeitherBodyNorUser` in particular must still pass — the transient 500 wrap still carries the status and still carries neither body nor user id.
 
-- [ ] **Step 5: Prove the new tests can fail**
+- [x] **Step 5: Prove the new tests can fail**
 
 Three reverts, one at a time, re-running `go test ./internal/membership/` after each and restoring before the next:
 
@@ -609,7 +609,7 @@ Three reverts, one at a time, re-running `go test ./internal/membership/` after 
 2. Delete the `context.WithTimeout` lines from `Active` → `TestActive_boundsAHangAndClassifiesItTransient` hangs (kill it after ~10s; a hang here **is** the failure, and it is what the production bug looks like).
 3. Change the transport wrap to `fmt.Errorf("%w: %v", server.ErrServiceUnavailable, err)` (using the raw `url.Error`) → `TestActive_classifiesATransportFailureAsTransient` goes red on the `user_id` disclosure assertion.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/auth-service/internal/membership/client.go apps/auth-service/internal/membership/client_test.go
@@ -630,7 +630,7 @@ git commit -m "feat(auth): classify transient fleet lookup failures and bound Ac
 
 **Note on scope:** the local-infrastructure classification is design D9, an explicit extension beyond the PRD's literal text, flagged there as "recommended rather than assumed". It is two `if` blocks. Rows 2 and 4 of D9's table are the same defect one layer over — an auth Postgres blip lasting longer than one request logs out every active session through the same code path.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `apps/auth-service/cmd/main_test.go`. Add `"github.com/jtumidanski/myfleet/packages/shared-go/server"` and `"strings"` to its imports (`errors`, `fmt`, `context`, `net/http` are already there).
 
@@ -744,7 +744,7 @@ func TestNewPrincipalResolver_classifiesLocalInfrastructureFailuresAsTransient(t
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/apps/auth-service
@@ -753,7 +753,7 @@ go test ./cmd/ -run TestNewPrincipalResolver -v
 
 Expected: `carriesTheTransientClassificationThrough`, `keepsAMissingUserPermanent` and `keepsAPermanentUpstreamFaultPermanent` PASS already (they guard behaviour that exists); `classifiesLocalInfrastructureFailuresAsTransient` FAILS on `want a transient classification`. That split is the point — three of them are regression nets and one drives new code.
 
-- [ ] **Step 3: Classify the local reads**
+- [x] **Step 3: Classify the local reads**
 
 In `apps/auth-service/cmd/main.go`, add `"errors"` and `"fmt"` to the standard-library import group. Then change the two local-read error branches inside `newPrincipalResolver`:
 
@@ -794,7 +794,7 @@ In `apps/auth-service/cmd/main.go`, add `"errors"` and `"fmt"` to the standard-l
 
 The `session.Principal{...}` literal at the end of the closure is unchanged.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/apps/auth-service
@@ -803,11 +803,11 @@ go test ./cmd/ -race -v
 
 Expected: PASS. `TestNewPrincipalResolver_treatsNoMembershipAsEmptyNotError` must be green and **unmodified** — check with `git diff apps/auth-service/cmd/main_test.go` that no line inside it changed.
 
-- [ ] **Step 5: Prove the new test can fail**
+- [x] **Step 5: Prove the new test can fail**
 
 Replace the `users.GetByID` transient wrap with `return session.Principal{}, err`, re-run `go test ./cmd/ -run TestNewPrincipalResolver_classifiesLocal -v`, confirm the `users read fails` sub-test goes red, then restore.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/auth-service/cmd/main.go apps/auth-service/cmd/main_test.go
@@ -828,7 +828,7 @@ This is the task the whole PRD is about. FR-REFRESH-5 — the rotated cookie —
 - Consumes: `server.ErrServiceUnavailable` and `server.RetryAfter` (Tasks 1–2), the resolver's classification (Task 4).
 - Produces: `POST /auth/refresh` → `503` + `Retry-After: 5` + a `Set-Cookie` carrying the **rotated** refresh token on a transient resolver error; `401` + clearing `Set-Cookie` on a permanent one. Package constant `refreshRetryAfterSeconds = 5`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `apps/auth-service/internal/session/resource_test.go`, first widen the router helper so tests can read what was logged. Replace `newRefreshRouter` with:
 
@@ -1025,7 +1025,7 @@ func TestRefresh_transientFailureCannotReviveARevokedToken(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/apps/auth-service
@@ -1034,7 +1034,7 @@ go test ./internal/session/ -run TestRefresh -v
 
 Expected: FAIL — `status = 401, want 503`.
 
-- [ ] **Step 3: Split the resolver-error branch**
+- [x] **Step 3: Split the resolver-error branch**
 
 In `apps/auth-service/internal/session/resource.go`, add `"errors"` to the standard-library imports. Add this constant just below `RefreshCookieName`:
 
@@ -1081,7 +1081,7 @@ Replace the resolver-error block in `refreshHandler` with:
 
 No access token is minted and no token document is written on the transient branch — `WriteError` writes the whole response. Every other exit in the handler (missing token, `Rotate` failure, mint failure, success) is untouched.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/apps/auth-service
@@ -1090,7 +1090,7 @@ go test ./internal/session/ -race -v
 
 Expected: PASS, including `TestRefresh_mintsAccessTokenCarryingEmailClaim` and the (extended) `TestRefresh_failsClosedAndClearsCookieWhenTheResolverErrors`.
 
-- [ ] **Step 5: Prove the cookie assertion can fail**
+- [x] **Step 5: Prove the cookie assertion can fail**
 
 Delete the `SetRefreshCookie(w, newRaw, cookieSecure)` line — this is design D3's explicitly rejected variant, "clear nothing at all", which satisfies FR-REFRESH-2's letter while guaranteeing the family-revoking replay. Re-run:
 
@@ -1100,7 +1100,7 @@ go test ./internal/session/ -run TestRefresh_transientResolverFailureKeepsTheSes
 
 Expected: FAIL on `no refresh cookie was set`. Restore the line. Then separately change `Warn` to `Error` and confirm the log assertion goes red, and restore that too.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/auth-service/internal/session/resource.go apps/auth-service/internal/session/resource_test.go
@@ -1121,7 +1121,7 @@ git commit -m "feat(auth): answer refresh with 503 and the rotated cookie when a
 
 **Correction carried from the PRD:** issue #15 says the callback answers `500`. It does not — it `302`-redirects with an `#error=` fragment, so "distinguishing transient here" means a new `loginErrorCode`, not a status.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `apps/auth-service/internal/oidc/resource_test.go` (add `"fmt"` and `"github.com/jtumidanski/myfleet/packages/shared-go/server"` to its imports; `strings` and `session` are already there):
 
@@ -1173,7 +1173,7 @@ func TestCallback_transientResolverFailureRedirectsWithServiceUnavailable(t *tes
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/apps/auth-service
@@ -1182,7 +1182,7 @@ go test ./internal/oidc/ -run TestCallback_transientResolverFailure -v
 
 Expected: FAIL — `Location = "http://app.test/login#error=server_error", want ".../login#error=service_unavailable"`.
 
-- [ ] **Step 3: Add the code and split the branch**
+- [x] **Step 3: Add the code and split the branch**
 
 In `apps/auth-service/internal/oidc/resource.go`, add `"errors"` to the standard-library imports and `"github.com/jtumidanski/myfleet/packages/shared-go/server"` to the project import group. Add the fifth constant:
 
@@ -1220,7 +1220,7 @@ Replace the `d.Resolve` failure branch:
 
 Nothing else in the handler changes — in particular, do not touch `failLogin` or the single unconditional `clearStateCookie` call.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503/apps/auth-service
@@ -1229,11 +1229,11 @@ go test ./internal/oidc/ -race -v
 
 Expected: PASS, and specifically `TestCallback_failureRedirectsToLogin/principal_resolution_fails` must still assert `server_error` at `ErrorLevel`.
 
-- [ ] **Step 5: Prove the test can fail**
+- [x] **Step 5: Prove the test can fail**
 
 Change `failLogin(w, req, d, errServiceUnavailable)` to `errServerError`, re-run, confirm the `Location` assertion goes red, restore.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/auth-service/internal/oidc/resource.go apps/auth-service/internal/oidc/resource_test.go
@@ -1254,7 +1254,7 @@ FR-SPA-3 names the actual logout mechanism: `refresh.ts:26` returns `null` for e
 - Consumes: the `503` + `service_unavailable` response from Task 5; `ApiError` from `@myfleet/shared-ts`.
 - Produces: `mintAccessToken(): Promise<string | null>` — **signature and behaviour unchanged**, never clears, never throws. `refreshAccessToken(): Promise<string | null>` — resolves the token on success, resolves `null` **and clears** on a dead session, and **rejects** with `new ApiError(503, 'service_unavailable', ...)` **without clearing** on a `503`. `packages/shared-ts` source is not modified: the rejection travels out through the existing `onRefresh: () => Promise<string | null>` channel.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `apps/web/src/lib/api/refresh.test.ts`, add `ApiError` to the imports (`import { ApiError } from '@myfleet/shared-ts';`) and add this helper next to `jsonResponse`:
 
@@ -1390,7 +1390,7 @@ describe('ApiClient refresh failures', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503
@@ -1401,7 +1401,7 @@ npm run -w packages/shared-ts test
 
 Expected: `refresh.test.ts` FAILS (`refreshAccessToken` resolves `null` instead of rejecting, and the token is cleared). The `shared-ts` block PASSES already — it documents a property that holds by construction, and it is the guard against a future edit to `fetchAuthenticated` swallowing the rejection.
 
-- [ ] **Step 3: Rewrite `refresh.ts`**
+- [x] **Step 3: Rewrite `refresh.ts`**
 
 Replace the whole of `apps/web/src/lib/api/refresh.ts` with:
 
@@ -1516,7 +1516,7 @@ export async function refreshAccessToken(): Promise<string | null> {
 
 Note on `mintAccessToken`: it now `await`s rather than returning `inflight` directly, but `refreshOnce()` is still evaluated synchronously on entry, so the dedupe behaviour is identical — the existing `dedupes concurrent callers onto one request` test proves it.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503
@@ -1527,11 +1527,11 @@ npm run -w packages/shared-ts test
 
 Expected: PASS, including every pre-existing `refresh.test.ts` case. Those use `jsonResponse`, whose fake carries no `status` field, so `res.status === 503` is `undefined === 503` → `false` → `dead` — exactly what they already assert.
 
-- [ ] **Step 5: Prove the new tests can fail**
+- [x] **Step 5: Prove the new tests can fail**
 
 Change `if (res.status === 503) return { status: 'unavailable' };` to `if (res.status === 500) …`. Re-run `npm run -w apps/web test -- src/lib/api/refresh.test.ts` and confirm `keeps the stored token and rejects with a 503` goes red on `getAccessToken()` — the token assertion, not just the rejection. Restore.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/lib/api/refresh.ts apps/web/src/lib/api/refresh.test.ts packages/shared-ts/src/apiClient.test.ts
@@ -1552,7 +1552,7 @@ git commit -m "feat(web): keep the session on a 503 refresh and surface it as a 
 
 **On the tone (design D7):** `tone` is not purely cosmetic in `LoginPage.tsx:44` — `const failed = notice?.tone === 'danger'` drives `role="alert"`, the danger band, and the primary button's label (`'Try again'` vs `'Continue with Google'`). Two of those three are exactly right for an outage: the user should be told sign-in failed, and the button should say "Try again". `'neutral'` is reserved for `cancelled`, a deliberate choice with no retry implied. Accepted cost: the band is red for something that is not the user's fault; a third tone is a design-system change the PRD puts out of remit.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `apps/web/src/lib/auth/loginError.test.ts`, add `'service_unavailable'` to the `it.each<LoginErrorCode>([...])` list in the `parses the %s code` test. Then append to the `noticeFor` describe block:
 
@@ -1584,7 +1584,7 @@ In `apps/web/src/lib/auth/loginError.test.ts`, add `'service_unavailable'` to th
   });
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503
@@ -1594,7 +1594,7 @@ npm run -w apps/web test -- src/lib/auth/loginError.test.ts
 
 Expected: FAIL — a TypeScript error on `noticeFor('service_unavailable')` (not assignable to `LoginErrorCode`), and `expect(consumeLoginError()).toBe('service_unavailable')` receiving `'server_error'`.
 
-- [ ] **Step 3: Add the code, the allowlist entry, and the message**
+- [x] **Step 3: Add the code, the allowlist entry, and the message**
 
 In `apps/web/src/lib/auth/loginError.ts`:
 
@@ -1648,7 +1648,7 @@ const NOTICES: Record<LoginErrorCode, LoginErrorNotice> = {
 
 `NOTICES` is keyed on `LoginErrorCode`, so the compiler demands this entry the moment the union member is added — but `CODES` is hand-maintained and gets no such help, which is why the allowlist test above exists.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503
@@ -1659,11 +1659,11 @@ npm run -w apps/web build
 
 Expected: PASS, and a clean type-check.
 
-- [ ] **Step 5: Prove the allowlist test can fail**
+- [x] **Step 5: Prove the allowlist test can fail**
 
 Remove `'service_unavailable'` from `CODES` (leave the union member and the `NOTICES` entry). Re-run — `accepts service_unavailable through the CODES allowlist` goes red with `'server_error'`, and the parse test goes red too. This is exactly the silent degradation the risk table names. Restore.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/lib/auth/loginError.ts apps/web/src/lib/auth/loginError.test.ts
@@ -1679,7 +1679,7 @@ No code is written in this task unless something below fails.
 **Files:**
 - Modify: `docs/tasks/task-018-transient-upstream-503/plan.md` (check off completed steps), and `audit.md` is produced by the reviewer agents.
 
-- [ ] **Step 1: Run the full CI gate**
+- [x] **Step 1: Run the full CI gate**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-018-transient-upstream-503
@@ -1689,7 +1689,7 @@ make ci
 
 Expected: PASS on every target — `lint-check`, `vet`, `test`, `build`, `fe-test`, `fe-build`, `manifests`, `carfax-template`. Paste the failing output into the report if any target fails; do not proceed past a red gate.
 
-- [ ] **Step 2: Render both overlays and run both server dry-runs**
+- [x] **Step 2: Render both overlays and run both server dry-runs**
 
 No manifest change is expected in this task — this is the standing gate from `CLAUDE.md`, and the `local` overlay is not exempt.
 
@@ -1703,7 +1703,7 @@ kustomize build deploy/k8s/overlays/local | kubectl apply --dry-run=server -f -
 
 Expected: both renders succeed; `main` shows no PersistentVolumeClaim, no Secret, no ClusterRole and no placeholder values; both dry-runs report only `(server dry run)` lines and no errors.
 
-- [ ] **Step 3: Confirm the two user-visible behaviours in a real browser**
+- [x] **Step 3: Confirm the two user-visible behaviours in a real browser**
 
 `jsdom` cannot evaluate CSS, and both of these are things a unit test cannot see. Follow `docs/runbooks/local-debugging.md` to bring the stack up and drive real Chromium via the Playwright container.
 
@@ -1719,20 +1719,20 @@ kubectl -n myfleet scale deploy/fleet-service --replicas=0
 
 Record what was observed (including screenshots if the runbook's flow produces them) in the task folder.
 
-- [ ] **Step 4: Run the three reviewer agents**
+- [x] **Step 4: Run the three reviewer agents**
 
 Per `CLAUDE.md`, code review runs before the PR and is not skipped even when the plan looks complete. Invoke `superpowers:requesting-code-review`, which dispatches `plan-adherence-reviewer`, `backend-guidelines-reviewer` (Go changed) and `frontend-guidelines-reviewer` (TS changed) in parallel. Findings land in `docs/tasks/task-018-transient-upstream-503/audit.md`.
 
 Address every finding, or record an explicit adjudication for any that is declined.
 
-- [ ] **Step 5: Walk the acceptance criteria and check them off**
+- [x] **Step 5: Walk the acceptance criteria and check them off**
 
 Open `prd.md` §10 and confirm each box against real evidence — a test name, a command's output, or a browser observation. The two that are easiest to fool yourself about:
 
 - "does not clear the refresh cookie" — proven by `TestRefresh_transientResolverFailureKeepsTheSessionAlive`'s `refreshCookieSet` assertions, not by the status code.
 - "does not trip reuse detection" — proven by the `proc.Rotate(c.Value)` call at the end of that same test, which asserts the store's own state.
 
-- [ ] **Step 6: Commit the verification record**
+- [x] **Step 6: Commit the verification record**
 
 ```bash
 git add docs/tasks/task-018-transient-upstream-503/
