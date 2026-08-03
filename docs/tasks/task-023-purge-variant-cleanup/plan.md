@@ -2589,14 +2589,14 @@ Use `superpowers:requesting-code-review`, or dispatch `plan-adherence-reviewer` 
 
 Address any findings before opening the PR. Findings that are wrong should be argued with evidence, not implemented reflexively — use `superpowers:receiving-code-review`.
 
-- [ ] **Step 6: Tick the plan and commit the artifacts**
+- [x] **Step 6: Tick the plan and commit the artifacts**
 
 ```sh
 git add docs/tasks/task-023-purge-variant-cleanup/
 git commit -m "docs(task-023): record the code-review audit and completed plan"
 ```
 
-- [ ] **Step 7: Open the PR**
+- [x] **Step 7: Open the PR**
 
 The PR body must reference and close issue #28. Do not open it until Steps 1–6 have all passed.
 
