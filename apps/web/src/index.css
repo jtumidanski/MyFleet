@@ -49,6 +49,29 @@
     --info-subtle: 214.3 94.6% 92.7%;
     --info-subtle-foreground: 226 70.7% 40.2%;
     --info-border: 213.3 96.9% 87.3%;
+    /* Sidebar surface family (task-017 FR-TOKEN-1). The shadcn sidebar
+       primitive consumes these eight names; they are today's palette
+       re-expressed, not a new one — surface = card, active/hover = accent,
+       edge = border.
+
+       --sidebar mirrors --card, NOT --muted: --muted and --accent are the SAME
+       value in both themes, so a muted sidebar swallows both the active-link
+       and the hover state and flattens the nav into one colour. (This fact used
+       to be recorded in AppLayout.tsx; it lives here now, because this is where
+       the colour is chosen.)
+
+       Literal values, not var(--card): index.css contains no var() indirection
+       anywhere else, and one aliased family would be a second idiom a reviewer
+       has to stop and reason about. The cost is that a future change to --card
+       must remember --sidebar; sidebarTokens.test.ts is what pays that cost. */
+    --sidebar: 0 0% 100%; /* mirrors --card */
+    --sidebar-foreground: 222.2 84% 4.9%; /* mirrors --card-foreground */
+    --sidebar-primary: 222.2 47.4% 11.2%; /* mirrors --primary */
+    --sidebar-primary-foreground: 210 40% 98%; /* mirrors --primary-foreground */
+    --sidebar-accent: 210 40% 96.1%; /* mirrors --accent */
+    --sidebar-accent-foreground: 222.2 47.4% 11.2%; /* mirrors --accent-foreground */
+    --sidebar-border: 214.3 31.8% 91.4%; /* mirrors --border */
+    --sidebar-ring: 222.2 84% 4.9%; /* mirrors --ring */
     --radius: 0.5rem;
   }
 
@@ -97,6 +120,16 @@
     --info-subtle: 217 45% 17%;
     --info-subtle-foreground: 213 92% 80%;
     --info-border: 217 40% 28%;
+
+    /* Sidebar surface family — see the note in :root. */
+    --sidebar: 222.2 84% 4.9%; /* mirrors --card */
+    --sidebar-foreground: 210 40% 98%; /* mirrors --card-foreground */
+    --sidebar-primary: 210 40% 98%; /* mirrors --primary */
+    --sidebar-primary-foreground: 222.2 47.4% 11.2%; /* mirrors --primary-foreground */
+    --sidebar-accent: 217.2 32.6% 17.5%; /* mirrors --accent */
+    --sidebar-accent-foreground: 210 40% 98%; /* mirrors --accent-foreground */
+    --sidebar-border: 217.2 32.6% 17.5%; /* mirrors --border */
+    --sidebar-ring: 212.7 26.8% 83.9%; /* mirrors --ring */
   }
 }
 
