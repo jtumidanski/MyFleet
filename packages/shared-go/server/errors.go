@@ -13,6 +13,12 @@ var (
 	ErrUnsupportedMediaType  = errors.New("unsupported media type")   // 415
 	ErrValidation            = errors.New("validation")               // 422
 	ErrTooManyRequests       = errors.New("too many requests")        // 429
+	// ErrServiceUnavailable means the answer is UNKNOWN because something this
+	// request depends on is unavailable — not that the request was wrong. It is
+	// the carrier for that distinction across package boundaries: a caller that
+	// cannot import the failing client still classifies with
+	// errors.Is(err, ErrServiceUnavailable).
+	ErrServiceUnavailable = errors.New("service unavailable") // 503
 )
 
 func StatusFor(err error) int {
@@ -37,6 +43,8 @@ func StatusFor(err error) int {
 		return 422
 	case errors.Is(err, ErrTooManyRequests):
 		return 429
+	case errors.Is(err, ErrServiceUnavailable):
+		return 503
 	default:
 		return 500
 	}

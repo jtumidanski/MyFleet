@@ -55,6 +55,7 @@ func TestStatusFor_mapsDomainErrors(t *testing.T) {
 		ErrUnsupportedMediaType:  415,
 		ErrValidation:            422,
 		ErrTooManyRequests:       429,
+		ErrServiceUnavailable:    503,
 	}
 	for err, want := range cases {
 		if got := StatusFor(err); got != want {
@@ -79,6 +80,7 @@ func TestCodeFor_namesEveryMappedStatus(t *testing.T) {
 		422: "validation_error",
 		429: "too_many_requests",
 		500: "internal_error",
+		503: "service_unavailable",
 	}
 	for status, want := range cases {
 		if got := codeFor(status); got != want {
@@ -468,4 +470,34 @@ func TestSetErrorLogger_isSafeUnderConcurrentUse(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// TestWriteError_503KeepsTheRedactedEnvelope: 503 is the first status above 429
+// this package maps, and it is reached from a PUBLIC, unauthenticated endpoint
+// (POST /auth/refresh). Only `status` and `code` may differ from a 500 — the
+// reason for the outage is upstream-controlled and is not the caller's
+// business, so `title` stays the fixed InternalErrorTitle and no `detail` is
+// emitted.
+func TestWriteError_503KeepsTheRedactedEnvelope(t *testing.T) {
+	transient := fmt.Errorf("%w: active membership lookup failed with status 500", ErrServiceUnavailable)
+
+	rec, got := writeErrorBody(t, transient)
+
+	if rec.Code != 503 {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got.Status != "503" || got.Code != "service_unavailable" {
+		t.Fatalf("status/code = %q/%q, want 503/service_unavailable", got.Status, got.Code)
+	}
+	if got.Title != InternalErrorTitle {
+		t.Fatalf("title = %q, want %q — a 5xx title must not describe the fault", got.Title, InternalErrorTitle)
+	}
+	if got.Detail != "" {
+		t.Fatalf("detail = %q, want empty on a 5xx", got.Detail)
+	}
+	for _, secret := range []string{"membership", "lookup", "500"} {
+		if strings.Contains(rec.Body.String(), secret) {
+			t.Fatalf("503 body leaked %q: %s", secret, rec.Body.String())
+		}
+	}
 }
