@@ -10,6 +10,7 @@ import { usePendingInvites, useAcceptInvite } from '../lib/hooks/api/invites';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
+import { SignedInFooter } from '../components/auth/SignedInFooter';
 import {
   Form,
   FormControl,
@@ -129,6 +130,11 @@ export function OnboardingPage() {
           </Form>
         </CardContent>
       </Card>
+      {/* Outside PendingInvites, which returns null when nothing is waiting —
+          so FR-ONBOARD-2 (it renders on the first-run path too) falls out
+          structurally rather than needing a condition. The column already has
+          gap-4 and items-center, so no layout change is needed. */}
+      <SignedInFooter />
     </div>
   );
 }

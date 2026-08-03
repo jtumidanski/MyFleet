@@ -40,6 +40,13 @@ describe('downloadBlob', () => {
   // deferred to a macrotask — but it must still happen.
   it('revokes the object URL, but not before the click', () => {
     downloadBlob(new Blob(['x']), 'invoice.pdf');
+    // task-019 probe: this is a deliberate ORDERING assertion, not a "never
+    // happens" one — vi.runAllTimers() two lines below proves the revoke does
+    // occur. Making download.ts revoke synchronously turns this line red with
+    // no flush. expectNoCall is also unusable here: the file runs under
+    // vi.useFakeTimers(), so the helper's setTimeout(0) never fires and the
+    // test would hang until timeout.
+    // eslint-disable-next-line no-restricted-syntax
     expect(URL.revokeObjectURL).not.toHaveBeenCalled();
 
     vi.runAllTimers();

@@ -139,7 +139,7 @@ describe('AdminLayout', () => {
 
   it('gathers the identity and the sign-out action under one profile menu', async () => {
     const user = userEvent.setup();
-    const logout = vi.fn();
+    const logout = vi.fn().mockResolvedValue(undefined);
     renderAdminLayout('/admin', { logout });
 
     expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();

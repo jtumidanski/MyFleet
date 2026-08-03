@@ -122,6 +122,14 @@ type ContentInfo struct {
 	// drifting: the class that picks inline-vs-attachment is the same class
 	// the type was resolved to.
 	Disposition string
+	// Downgraded is true when the bytes being served are a smaller rendition
+	// than the caller asked for: today, a thumbnail standing in for a card
+	// that has not been generated yet. It is a statement of fact about the
+	// bytes, deliberately carrying no HTTP vocabulary — the handler decides
+	// what the fact means on the wire. The false zero value is correct for
+	// every path that serves what was asked for, which is why no existing
+	// construction site needs to change.
+	Downgraded bool
 }
 
 // AuthorizeAccess enforces fleet scoping. media-service trusts the token's
@@ -417,7 +425,21 @@ func (pr *Processor) Content(ctx context.Context, id, identityFleetID string, wa
 		Debug("serving the thumbnail in place of an unavailable card variant")
 	// 200 with the thumbnail's own bytes, type and disposition — or its own 404
 	// if there is no thumbnail either. No third attempt.
-	return pr.openVariant(ctx, m, ContentThumbnail)
+	info, rc, err = pr.openVariant(ctx, m, ContentThumbnail)
+	if err != nil {
+		// No thumbnail either: a 404, and no response to mark. Setting the
+		// flag before this check would stamp it on a zero struct being
+		// discarded — harmless today, and a trap the first time someone
+		// inspects info on an error path.
+		return ContentInfo{}, nil, err
+	}
+	// Only this call site knows a substitution happened. openVariant opened
+	// exactly the rendition it was asked for, so from where it stands nothing
+	// was substituted; pushing the flag down there would make an explicit
+	// ?variant=thumbnail request and a downgraded one indistinguishable again,
+	// which is the bug this change exists to fix.
+	info.Downgraded = true
+	return info, rc, nil
 }
 
 // openVariant opens one stored rendition. It returns server.ErrNotFound for both

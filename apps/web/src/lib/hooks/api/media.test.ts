@@ -7,6 +7,7 @@ import { mediaKeys, useMediaContentUrl } from './media';
 import { performMediaUpload, MEDIA_MAX_UPLOAD_BYTES, MEDIA_TOO_LARGE_CODE } from './media';
 import { mediaService } from '../../../services/api/MediaService';
 import { stubObjectUrl, unstubObjectUrl } from '../../../test/objectUrl';
+import { expectNoCall, expectNoCallWith } from '../../../test/expectNoCall';
 
 // useMediaContentUrl goes through mediaService.getContentBlob; mock the
 // module so no network call is needed and each test controls what blob
@@ -98,9 +99,9 @@ describe('performMediaUpload', () => {
     });
 
     // Nothing hit the network, so no orphaned media row was created either.
-    expect(deps.initUpload).not.toHaveBeenCalled();
-    expect(deps.putContent).not.toHaveBeenCalled();
-    expect(deps.confirm).not.toHaveBeenCalled();
+    await expectNoCall(deps.initUpload, 'deps.initUpload');
+    await expectNoCall(deps.putContent, 'deps.putContent');
+    await expectNoCall(deps.confirm, 'deps.confirm');
   });
 
   it('allows a file exactly at the limit', async () => {
@@ -216,7 +217,7 @@ describe('useMediaContentUrl', () => {
 
     expect(revokeObjectURL).toHaveBeenCalledWith(firstUrl);
     expect(revokeObjectURL).toHaveBeenCalledTimes(1);
-    expect(revokeObjectURL).not.toHaveBeenCalledWith(secondUrl);
+    await expectNoCallWith(revokeObjectURL, [secondUrl], 'URL.revokeObjectURL');
   });
 
   it('revokes the URL exactly once on unmount', async () => {

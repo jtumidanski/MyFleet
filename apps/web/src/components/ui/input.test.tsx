@@ -65,6 +65,11 @@ describe('Input', () => {
 
     await user.click(screen.getByLabelText('Cost'));
 
+    // task-019 probe: synchronous by construction. `showPicker` is a direct DOM
+    // call from Input's onClick, not a promise continuation; forcing
+    // `isPicker = true` in input.tsx turns this line red with no flush, so
+    // expectNoCall's flush would be pure noise here.
+    // eslint-disable-next-line no-restricted-syntax
     expect(showPicker).not.toHaveBeenCalled();
   });
 

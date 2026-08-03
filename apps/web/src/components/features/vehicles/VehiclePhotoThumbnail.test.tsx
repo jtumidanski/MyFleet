@@ -5,6 +5,7 @@ import { onlineManager } from '@tanstack/react-query';
 import { ApiError } from '@myfleet/shared-ts';
 import { renderWithProviders } from '../../../test/renderWithProviders';
 import { stubObjectUrl, unstubObjectUrl } from '../../../test/objectUrl';
+import { expectNoCall } from '../../../test/expectNoCall';
 import { mediaService } from '../../../services/api/MediaService';
 import { VehiclePhotoThumbnail } from './VehiclePhotoThumbnail';
 
@@ -58,11 +59,11 @@ describe('VehiclePhotoThumbnail', () => {
     });
   });
 
-  it('shows the "No photo" placeholder when there is no media id, and fetches nothing', () => {
+  it('shows the "No photo" placeholder when there is no media id, and fetches nothing', async () => {
     renderWithProviders(<VehiclePhotoThumbnail vehicleLabel="2019 Honda Civic" />);
 
     expect(screen.getByRole('img', { name: 'No photo' })).toBeInTheDocument();
-    expect(mediaService.getContentBlob).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(mediaService.getContentBlob), 'mediaService.getContentBlob');
   });
 
   it('falls back to a placeholder on a failed load, with a distinct label', async () => {
@@ -90,10 +91,10 @@ describe('VehiclePhotoThumbnail', () => {
 
     await screen.findByRole('img', { name: 'Photo unavailable' });
 
-    expect(toast.error).not.toHaveBeenCalled();
-    expect(toast).not.toHaveBeenCalled();
-    expect(toast.warning).not.toHaveBeenCalled();
-    expect(toast.info).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(toast.error), 'toast.error');
+    await expectNoCall(vi.mocked(toast), 'toast');
+    await expectNoCall(vi.mocked(toast.warning), 'toast.warning');
+    await expectNoCall(vi.mocked(toast.info), 'toast.info');
   });
 
   it('says "Photo unavailable", not "No photo", when a known photo cannot be fetched', async () => {
@@ -111,7 +112,7 @@ describe('VehiclePhotoThumbnail', () => {
     expect(screen.queryByRole('img', { name: 'No photo' })).not.toBeInTheDocument();
     // And the request really was never made — this is the paused state, not a
     // fetch that failed.
-    expect(mediaService.getContentBlob).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(mediaService.getContentBlob), 'mediaService.getContentBlob');
   });
 
   it('holds a skeleton while loading rather than flashing the placeholder', () => {

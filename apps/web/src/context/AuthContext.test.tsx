@@ -1,14 +1,29 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { ApiError } from '@myfleet/shared-ts';
 import { RequireAuth } from '../components/RequireAuth';
-import type { AuthContextValue } from './AuthContext';
+import { AuthProvider, type AuthContextValue } from './AuthContext';
+import { ACCESS_TOKEN_KEY } from '../lib/api/token';
 
-// Mock the auth context so RequireAuth can be exercised against arbitrary
-// authentication states without standing up the full provider/query stack.
+// Mock `useAuth` only, so RequireAuth can be exercised against arbitrary
+// authentication states without standing up the full provider/query stack —
+// while AuthProvider itself stays REAL, because its token-clearing effect is
+// under test below.
 const mockAuth = vi.fn<() => AuthContextValue>();
-vi.mock('./AuthContext', () => ({
+vi.mock('./AuthContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./AuthContext')>()),
   useAuth: () => mockAuth(),
+}));
+
+// The identity query is the input to the effect under test; drive it directly
+// rather than through fetch so each error shape is unambiguous.
+const mockUseMe = vi.fn();
+vi.mock('../lib/hooks/api/auth', () => ({
+  useMe: () => mockUseMe(),
+  logoutRequest: vi.fn(),
+  authKeys: { all: ['auth'] as const, me: () => ['auth', 'me'] as const },
 }));
 
 function baseAuth(overrides: Partial<AuthContextValue>): AuthContextValue {
@@ -125,5 +140,71 @@ describe('RequireAuth', () => {
     mockAuth.mockReturnValue(baseAuth({ isAuthenticated: false }));
     renderGuarded('/invites/abc123/accept');
     expect(screen.getByTestId('return-to')).toHaveTextContent('/invites/abc123/accept');
+  });
+});
+
+// Clearing the stored access token IS the logout: `isAuthenticated` goes false
+// and RequireAuth navigates to /login. These assert on the STORED TOKEN rather
+// than on any context flag, because the token is the thing that survives the
+// reload and decides whether the user is signed out.
+describe('AuthProvider identity-error handling', () => {
+  function renderProvider() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <div>app shell</div>
+        </AuthProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  function meFailedWith(error: unknown) {
+    mockUseMe.mockReturnValue({ isError: true, error, data: undefined, isLoading: false });
+  }
+
+  beforeEach(() => {
+    mockUseMe.mockReset();
+    localStorage.clear();
+  });
+
+  // The residual logout path. `useMe` is the first request on every mount, so a
+  // user with an expired token who reloads during a fleet-service outage goes
+  // /auth/me 401 → refresh 503 → refreshAccessToken throws → me.isError. Before
+  // the guard, this effect signed them out on someone else's outage — without
+  // refresh.ts clearing anything, which is why the refresh-layer tests all
+  // stayed green.
+  it('keeps the stored token when the identity query fails with a 503', () => {
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'still-valid-token');
+    meFailedWith(new ApiError(503, 'service_unavailable', 'Service temporarily unavailable'));
+
+    renderProvider();
+
+    expect(screen.getByText('app shell')).toBeInTheDocument();
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBe('still-valid-token');
+  });
+
+  // The other half of the guard: a genuinely dead session must still end. A
+  // blanket "never clear" would be just as wrong as the blanket clear it
+  // replaced, leaving a dead token in storage forever.
+  it('still clears the stored token when the identity query fails with a 401', () => {
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'dead-token');
+    meFailedWith(new ApiError(401, 'unauthorized', 'Unauthorized'));
+
+    renderProvider();
+
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
+  });
+
+  // An error that is not an ApiError at all — a thrown TypeError from a parse
+  // failure, say — carries no status to trust, so it must take the clearing
+  // path rather than being mistaken for an outage.
+  it('clears the stored token when the failure carries no API status', () => {
+    localStorage.setItem(ACCESS_TOKEN_KEY, 'dead-token');
+    meFailedWith(new TypeError('Failed to fetch'));
+
+    renderProvider();
+
+    expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull();
   });
 });

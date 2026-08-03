@@ -21,6 +21,7 @@ type fakeStore struct {
 	byID   map[string]Model // id   -> stored token
 
 	revokedFamilies []string // family ids passed to RevokeFamily, in order
+	revokeErr       error    // when non-nil, RevokeFamily fails with it
 }
 
 func newFakeStore() *fakeStore {
@@ -57,7 +58,14 @@ func (f *fakeStore) Consume(id string, at time.Time) error {
 }
 
 func (f *fakeStore) RevokeFamily(familyID string, at time.Time) error {
+	// Recorded BEFORE the injected failure so revokedFamilies remains a call
+	// log rather than a success log: a test asserting "no family was revoked"
+	// must be able to distinguish a call that failed from a call that never
+	// happened.
 	f.revokedFamilies = append(f.revokedFamilies, familyID)
+	if f.revokeErr != nil {
+		return f.revokeErr
+	}
 	for id, m := range f.byID {
 		if m.FamilyID() == familyID && !m.IsRevoked() {
 			m.revokedAt = &at

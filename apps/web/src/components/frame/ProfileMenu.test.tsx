@@ -1,14 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { ProfileMenu } from './ProfileMenu';
 import type { AuthContextValue } from '../../context/AuthContext';
 import type { User } from '../../types/models/user';
+import { expectNoCall } from '../../test/expectNoCall';
 
 const mockAuth = vi.fn<() => AuthContextValue>();
 vi.mock('../../context/AuthContext', () => ({
   useAuth: () => mockAuth(),
 }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 function user(overrides: Partial<User['attributes']> = {}): User {
   return {
@@ -33,7 +36,7 @@ function renderMenu(overrides: Partial<AuthContextValue> = {}) {
     isAuthenticated: true,
     isLoading: false,
     login: vi.fn(),
-    logout: vi.fn(),
+    logout: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   });
   return render(<ProfileMenu />);
@@ -42,6 +45,7 @@ function renderMenu(overrides: Partial<AuthContextValue> = {}) {
 describe('ProfileMenu', () => {
   beforeEach(() => {
     mockAuth.mockReset();
+    vi.mocked(toast.error).mockReset();
   });
 
   // FR-PROFILE-2: an icon-sized trigger with an accessible name.
@@ -73,7 +77,7 @@ describe('ProfileMenu', () => {
 
   it('signs the user out', async () => {
     const userEvents = userEvent.setup();
-    const logout = vi.fn();
+    const logout = vi.fn().mockResolvedValue(undefined);
     renderMenu({ logout });
 
     await userEvents.click(screen.getByRole('button', { name: 'Account menu' }));
@@ -125,5 +129,38 @@ describe('ProfileMenu', () => {
     await userEvents.click(screen.getByRole('button', { name: 'Account menu' }));
 
     expect(screen.getByText('Account')).toBeInTheDocument();
+  });
+
+  // FR-LOGOUT-11/12. The copy is FIXED, not `apiError.message || fallback`:
+  // WriteError redacts the title of every 5xx to the literal "internal server
+  // error", and 500 is the only status this path produces — so the house
+  // pattern would show the user that string on the exact path that exists to
+  // explain what is still true. A reviewer "fixing" this back to the house
+  // pattern is the regression this assertion catches.
+  it('warns that the server session may survive when sign-out fails', async () => {
+    const userEvents = userEvent.setup();
+    renderMenu({ logout: vi.fn().mockRejectedValue(new Error('network down')) });
+
+    await userEvents.click(screen.getByRole('button', { name: 'Account menu' }));
+    await userEvents.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(toast.error).mock.calls[0]?.[0]).toMatch(/server may still/);
+  });
+
+  // FR-LOGOUT-13: landing on the login screen is already unambiguous feedback.
+  it('raises no toast when sign-out succeeds', async () => {
+    const userEvents = userEvent.setup();
+    renderMenu({ logout: vi.fn().mockResolvedValue(undefined) });
+
+    await userEvents.click(screen.getByRole('button', { name: 'Account menu' }));
+    await userEvents.click(screen.getByRole('menuitem', { name: 'Sign out' }));
+
+    // This is a negative assertion, so it needs a flush it can rely on rather
+    // than a hand-rolled one: the helper's flush (a full microtask-queue
+    // drain plus a macrotask tick) strictly dominates the single
+    // `Promise.resolve()` tick it replaces. The absence of a toast must not
+    // be an artifact of nothing having happened yet.
+    await expectNoCall(vi.mocked(toast.error), 'toast.error');
   });
 });

@@ -6,6 +6,7 @@ import type { AuthContextValue } from '../context/AuthContext';
 import { THEME_STORAGE_KEY } from '../lib/theme';
 import { setAccessToken } from '../lib/api/token';
 import { resetMatchMedia } from '../test/setup';
+import { expectNoCall } from '../test/expectNoCall';
 
 // Mock the auth context so the page can be exercised without the provider/query
 // stack — the pattern AppLayout.test.tsx already uses.
@@ -231,18 +232,13 @@ describe('LoginPage', () => {
     act(() => toggle().click());
     expect(toggle()).toHaveAttribute('aria-label', 'Theme: light. Switch to dark.');
 
-    // Flush microtasks before asserting. react-query's mutate() dispatches its
-    // mutationFn in a promise continuation, not synchronously, so a bare
-    // assertion right after the last act() ran BEFORE any request could be
-    // made — the spy read zero even when three PATCHes were queued behind it.
-    // Together with the seeded token above, this is what makes the spy able to
-    // fail at all. Verified by probe: pointing the page at the mutation-bearing
-    // ThemeToggle makes this line report 3 calls to /api/auth/me.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // The helper's flush is what makes this spy able to fail at all: react-query's
+    // mutate() dispatches its mutationFn in a promise continuation, so a bare
+    // assertion right after the last act() ran BEFORE any request could be made.
+    // Together with the seeded token above, that is the pair of fixes from #20.
+    // Verified by probe: pointing the page at the mutation-bearing ThemeToggle
+    // makes this line report 3 calls to /api/auth/me.
+    await expectNoCall(fetchSpy, 'fetch');
     fetchSpy.mockRestore();
   });
 

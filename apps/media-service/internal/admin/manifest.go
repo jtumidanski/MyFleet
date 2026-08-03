@@ -54,6 +54,25 @@ var Manifest = []Target{
 		},
 	},
 	{
+		// Child-to-parent, ahead of media_objects. The ordering is readability
+		// only — media's Target.Where never filters a parent's deleted_at, which
+		// is what makes stamp order-independent — but it is the documented
+		// convention and FR-ADMIN-1 asks for it.
+		Key: "media_variant_failures", Table: "media.media_variant_failures",
+		Where: func(r Root) (string, []any) {
+			switch r.Scope {
+			case ScopeSystem:
+				return all, nil
+			case ScopeFleet:
+				return "media_object_id IN (SELECT id FROM media.media_objects WHERE fleet_id IN ?)",
+					[]any{r.FleetIDs}
+			case ScopeMediaIDs:
+				return "media_object_id IN ?", []any{r.MediaIDs}
+			}
+			return "", nil
+		},
+	},
+	{
 		Key: "media_objects", Table: "media.media_objects",
 		Where: func(r Root) (string, []any) {
 			switch r.Scope {

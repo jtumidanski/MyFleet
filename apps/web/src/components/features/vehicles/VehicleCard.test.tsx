@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router-dom';
 import { renderWithProviders } from '../../../test/renderWithProviders';
 import { stubObjectUrl, unstubObjectUrl } from '../../../test/objectUrl';
+import { expectNoCall } from '../../../test/expectNoCall';
 import { mediaService } from '../../../services/api/MediaService';
 import { DEFAULT_RUNTIME_CONFIG, loadRuntimeConfig } from '../../../lib/config/runtimeConfig';
 import { VehicleCard, VehicleCardSkeleton } from './VehicleCard';
@@ -79,11 +80,11 @@ describe('VehicleCard — photo', () => {
     );
   });
 
-  it('renders the placeholder at identical dimensions when no photo is set', () => {
+  it('renders the placeholder at identical dimensions when no photo is set', async () => {
     renderWithProviders(<VehicleCard vehicle={makeVehicle()} />);
     const placeholder = screen.getByRole('img', { name: 'No photo' });
     expect(placeholder).toHaveClass('aspect-[16/9]', 'w-full');
-    expect(mediaService.getContentBlob).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(mediaService.getContentBlob), 'mediaService.getContentBlob');
   });
 
   it('renders the placeholder with no error tile and no toast when the photo fails', async () => {
