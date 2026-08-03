@@ -23,6 +23,10 @@ data:
   # media object no longer exists — state earlier versions of the sweep left
   # behind. The cap keeps the first tick after a deploy short instead of turning
   # it into an unbounded bucket-deletion loop against an accumulated backlog.
+  # The cap is applied per table and its unit differs between them: for
+  # media_variants it bounds ROWS, for media_variant_failures it bounds MEDIA
+  # OBJECTS, so an object's ledger is never left half-reconciled. One tick can
+  # therefore delete more ledger rows than this number.
   # "0" turns the reconciliation pass off entirely; the per-object purge is
   # unaffected either way.
   MEDIA_PURGE_RECONCILE_LIMIT: "500"

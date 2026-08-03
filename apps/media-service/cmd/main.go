@@ -125,7 +125,9 @@ func main() {
 	// replica runs per tick (design §10.6 / A9). Hourly, not daily: jobs.Every's
 	// first tick is at T+interval, so a 24-hour sweep in a service that
 	// redeploys more often than daily never runs (design OQ-5).
-	// MEDIA_PURGE_RECONCILE_LIMIT bounds the orphan rows reconciled per tick.
+	// MEDIA_PURGE_RECONCILE_LIMIT bounds the orphans reconciled per tick, per
+	// table: orphan variant ROWS, but orphan ledger MEDIA OBJECTS, so an
+	// object's variant-failure ledger is never half-reconciled (design A-2).
 	// "0" turns the reconciliation pass off entirely, matching the
 	// MEDIA_LAZY_VARIANT_CONCURRENCY convention: a background pass that deletes
 	// from object storage needs an off switch that is not a rollback. At an

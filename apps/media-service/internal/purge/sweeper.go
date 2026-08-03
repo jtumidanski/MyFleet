@@ -39,7 +39,10 @@ type ObjectRemover interface {
 
 // Config is the sweep's tunable surface.
 type Config struct {
-	// ReconcileLimit bounds orphan rows processed per tick (FR-RECON-5).
+	// ReconcileLimit bounds the orphans processed per tick (FR-RECON-5), per
+	// table and in that table's own unit: variant ROWS for
+	// mediavariant.ListOrphaned, media OBJECTS for
+	// variantfailures.DeleteOrphaned (design A-2).
 	// 0 or negative disables the reconciliation pass entirely.
 	ReconcileLimit int
 }
