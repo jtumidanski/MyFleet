@@ -156,10 +156,11 @@ describe('ProfileMenu', () => {
     await userEvents.click(screen.getByRole('button', { name: 'Account menu' }));
     await userEvents.click(screen.getByRole('menuitem', { name: 'Sign out' }));
 
-    // The helper's flush is what lets this spy actually fail: sign-out's
-    // failure arm raises the toast from a promise continuation, so an
-    // assertion that ran before anything drains would pass whether or not
-    // the success path is guarded correctly.
+    // This is a negative assertion, so it needs a flush it can rely on rather
+    // than a hand-rolled one: the helper's flush (a full microtask-queue
+    // drain plus a macrotask tick) strictly dominates the single
+    // `Promise.resolve()` tick it replaces. The absence of a toast must not
+    // be an artifact of nothing having happened yet.
     await expectNoCall(vi.mocked(toast.error), 'toast.error');
   });
 });
