@@ -133,7 +133,22 @@ func (c *Client) FleetMemberIDs(ctx context.Context, fleetID string) ([]string, 
 	}
 	res, err := c.hc.Do(req)
 	if err != nil {
-		return nil, err
+		// url.Error's own message embeds the request URL, and this URL carries the
+		// fleet id in its path — and user/resource.go logs this error verbatim, so
+		// returning it bare puts the id in a log line as an address, contradicting
+		// this function's own comment above. Unwrap to the transport error
+		// underneath: "connection refused", "no such host", "context deadline
+		// exceeded" — the diagnostic value without the address. Same fix as Active.
+		//
+		// Redaction only, deliberately: unlike Active this does NOT classify the
+		// failure as transient. FleetMemberIDs's callers render a member list and
+		// have no use for the distinction.
+		detail := err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) && urlErr.Err != nil {
+			detail = urlErr.Err
+		}
+		return nil, fmt.Errorf("fleet member lookup transport failure: %v", detail)
 	}
 	defer func() { _ = res.Body.Close() }()
 

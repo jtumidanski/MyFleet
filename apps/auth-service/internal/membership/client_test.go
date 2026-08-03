@@ -172,6 +172,36 @@ func TestFleetMemberIDs_errorCarriesNoIDAndNoBody(t *testing.T) {
 	}
 }
 
+// TestFleetMemberIDs_transportErrorCarriesNoID covers the path
+// TestFleetMemberIDs_errorCarriesNoIDAndNoBody cannot reach: that one only
+// exercises the non-2xx branch, which was already safe. On the TRANSPORT branch
+// the bare error from http.Client.Do is a *url.Error whose message embeds the
+// request URL — and this request's URL carries the fleet id in its path. The
+// user resource logs this error verbatim, so the id landed in the logs as an
+// address on every fleet-service outage.
+func TestFleetMemberIDs_transportErrorCarriesNoID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	base := srv.URL
+	srv.Close() // nothing is listening on that port now
+
+	_, err := NewClient(base).FleetMemberIDs(context.Background(), "fleet-abc")
+
+	if err == nil {
+		t.Fatal("an unreachable fleet-service must not resolve to a member list")
+	}
+	for _, secret := range []string{"fleet-abc", "/internal/fleets/"} {
+		if strings.Contains(err.Error(), secret) {
+			t.Fatalf("the error carries %q — the request URL rode into it, and with it the fleet id: %q", secret, err)
+		}
+	}
+	// Redaction must not cost the diagnostic: an operator needs to see "connection
+	// refused" / "no such host" / "context deadline exceeded", just not the address.
+	const prefix = "fleet member lookup transport failure: "
+	if strings.TrimPrefix(err.Error(), prefix) == "" {
+		t.Fatalf("the redaction dropped the transport diagnostic entirely: %q", err)
+	}
+}
+
 // TestActive_classifiesEveryResponseShape is the table the whole task rests on.
 // Each row asserts the CLASSIFICATION, not merely that an error occurred: the
 // two buckets have opposite correct responses — a transient error becomes a 503
