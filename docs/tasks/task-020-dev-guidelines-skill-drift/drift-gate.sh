@@ -42,8 +42,10 @@ check G-09 "Jest (not jest-dom)"     "$(grep -rinE '\bjest\b' "$FE" "$FEAGENT" |
 # Substring, not \b-anchored: the drift also lives inside identifiers
 # (bucketKeys, bansService, CreateBucketDialog, BanType). English words that
 # merely contain "ban" are filtered; a legitimate prose use of "policy" can be
-# kept by putting ALLOW-VOCAB on the line.
-check G-10 "prior-project vocabulary" "$(grep -rinE 'bucket|replication|\bban|policy|policies' "${SCOPE[@]}" | grep -viE 'banner|bandwidth|abandon|\bband\b|ALLOW-VOCAB')"
+# kept by putting ALLOW-VOCAB:G-10 on the line. Markers are per-check
+# (ALLOW-VOCAB:G-10, ALLOW-VOCAB:G-14, ALLOW-VOCAB:G-15, ...) so exempting a
+# line from one check never silently exempts it from another.
+check G-10 "prior-project vocabulary" "$(grep -rinE 'bucket|replication|\bban|policy|policies' "${SCOPE[@]}" | grep -viE 'banner|bandwidth|abandon|\bband\b|ALLOW-VOCAB:G-10')"
 
 # --- design §9 Gate 1 additions ---
 check G-11 "RestModel / GetName()"   "$(grep -rnE 'RestModel|GetName\(\)' "${SCOPE[@]}")"
@@ -51,8 +53,8 @@ check G-12 "@/ path alias"           "$(grep -rnE "from ['\"]@/" "$FE" "$FEAGENT
 check G-13 "__mocks__/watchAll/mux"  "$(grep -rnE '__mocks__|watchAll|Methods\(http\.Method' "${SCOPE[@]}")"
 
 # --- additions from Phase-3 verification ---
-check G-14 "uuid.UUID entity ids"    "$(grep -rn 'uuid\.UUID' "${SCOPE[@]}" | grep -v ALLOW-VOCAB)"
-check G-15 "uint32 entity ids"       "$(grep -rn 'uint32' "${SCOPE[@]}" | grep -v ALLOW-VOCAB)"
+check G-14 "uuid.UUID entity ids"    "$(grep -rn 'uuid\.UUID' "${SCOPE[@]}" | grep -v 'ALLOW-VOCAB:G-14')"
+check G-15 "uint32 entity ids"       "$(grep -rn 'uint32' "${SCOPE[@]}" | grep -v 'ALLOW-VOCAB:G-15')"
 check G-16 "gorilla mux idiom"       "$(grep -rnE 'mux\.Router|router\.HandleFunc' "${SCOPE[@]}")"
 check G-17 "fake handler deps"       "$(grep -rnE 'HandlerDependency|HandlerContext|server\.GetHandler|d\.Logger\(\)|ParseId\(' "${SCOPE[@]}")"
 check G-18 "testify in Go examples"  "$(grep -rnE 'require\.(NoError|Error|Equal)|assert\.' "$BE" "$BEAGENT")"
