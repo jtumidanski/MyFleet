@@ -685,6 +685,9 @@ func TestContent_originalIsUnchanged(t *testing.T) {
 	if info.Size != int64(len("original-bytes")) {
 		t.Fatalf("Size = %d, want %d", info.Size, len("original-bytes"))
 	}
+	if info.Downgraded {
+		t.Fatal("Downgraded = true for ?variant=original, want false — the original is never a substitution")
+	}
 	if len(variants.calls) != 0 {
 		t.Fatalf("variant lookup ran %v times for an original request; it must not", variants.calls)
 	}
@@ -722,6 +725,12 @@ func TestContent_variantFoundServesVariantBytes(t *testing.T) {
 	}
 	if info.Size != 0 {
 		t.Fatalf("Size = %d, want 0 — the original's size must never describe a variant", info.Size)
+	}
+	// The D2 regression catcher: these bytes are byte-identical to a
+	// downgraded response's, so the flag is the ONLY thing distinguishing
+	// them. The caller asked for the thumbnail and got the thumbnail.
+	if info.Downgraded {
+		t.Fatal("Downgraded = true for an explicit ?variant=thumbnail, want false — nothing was substituted")
 	}
 	// The lookup runs as part of serving a request, so it must receive that
 	// request's context — not context.Background() manufactured inside the
@@ -918,6 +927,11 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		if info.Size != 0 {
 			t.Fatalf("Size = %d, want 0 — no variant response carries Content-Length", info.Size)
 		}
+		// The fact the handler needs: these are thumbnail bytes under a card
+		// URL, so nothing may store them under that identity.
+		if !info.Downgraded {
+			t.Fatal("Downgraded = false on a card→thumbnail substitution, want true")
+		}
 		// The load-bearing property of the downgrade exception: it must never open
 		// the original's bytes, even though those are the only bytes guaranteed to
 		// exist for a "ready" object.
@@ -933,13 +947,16 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 
-		_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+		info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
 		if !errors.Is(err, server.ErrNotFound) {
 			t.Fatalf("Content(card) = %v, want ErrNotFound", err)
 		}
 		if rc != nil {
 			_ = rc.Close()
 			t.Fatal("Content returned a body alongside the 404")
+		}
+		if info != (ContentInfo{}) {
+			t.Fatalf("ContentInfo = %+v, want the zero value — nothing was served, so there is nothing to mark", info)
 		}
 	})
 
@@ -956,13 +973,16 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, variants, testAllowlist(t))
 		obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 
-		_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentDisplay)
+		info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentDisplay)
 		if !errors.Is(err, server.ErrNotFound) {
 			t.Fatalf("Content(display) = %v, want ErrNotFound — the downgrade must not generalise", err)
 		}
 		if rc != nil {
 			_ = rc.Close()
 			t.Fatal("a missing display served bytes; only card downgrades")
+		}
+		if info != (ContentInfo{}) {
+			t.Fatalf("ContentInfo = %+v, want the zero value — the downgrade must not generalise to display", info)
 		}
 	})
 
@@ -992,7 +1012,7 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		}
 		callsBefore := len(store.getCalls)
 
-		_, rc, err := pr.Content(context.Background(), ready.ID(), "fleet-a", ContentCard)
+		info, rc, err := pr.Content(context.Background(), ready.ID(), "fleet-a", ContentCard)
 		if err != nil {
 			t.Fatalf("Content(card) with store drift = %v, want the thumbnail downgrade", err)
 		}
@@ -1002,6 +1022,12 @@ func TestContent_cardDowngradesToThumbnailOnly(t *testing.T) {
 		if len(cards.scheduled) != 1 {
 			t.Fatalf("scheduled %d generations for a card row whose object is gone, want 1 — "+
 				"regeneration is what repairs the drift", len(cards.scheduled))
+		}
+		// Store/DB drift is still a genuine substitution: the caller asked for
+		// a card and is holding a thumbnail, so the response must not be
+		// stored under the card's URL.
+		if !info.Downgraded {
+			t.Fatal("Downgraded = false when the card row's object is missing, want true")
 		}
 		// Even with store/DB drift on the card key, the fallback reads the
 		// thumbnail key only — the original is never opened.
@@ -1028,7 +1054,7 @@ func TestContent_cardPresentServesTheCardBytes(t *testing.T) {
 		testAllowlist(t), WithCardGenerator(cards))
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 
-	_, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+	info, rc, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
 	if err != nil {
 		t.Fatalf("Content(card): %v", err)
 	}
@@ -1037,6 +1063,9 @@ func TestContent_cardPresentServesTheCardBytes(t *testing.T) {
 	}
 	if len(cards.scheduled) != 0 {
 		t.Fatalf("scheduled %d generations for a card that already exists, want 0", len(cards.scheduled))
+	}
+	if info.Downgraded {
+		t.Fatal("Downgraded = true for a card that exists, want false — the downgrade branch was never entered")
 	}
 }
 
@@ -1053,7 +1082,7 @@ func TestContent_cardLookupErrorIs500WithNoDowngrade(t *testing.T) {
 		testAllowlist(t), WithCardGenerator(cards))
 	obj := seedReadyObject(t, pr, "fleet-a", []byte("original-bytes"))
 
-	_, _, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
+	info, _, err := pr.Content(context.Background(), obj.ID(), "fleet-a", ContentCard)
 	if !errors.Is(err, boom) {
 		t.Fatalf("Content(card) = %v, want the underlying lookup error", err)
 	}
@@ -1062,6 +1091,9 @@ func TestContent_cardLookupErrorIs500WithNoDowngrade(t *testing.T) {
 	}
 	if len(cards.scheduled) != 0 {
 		t.Fatalf("scheduled %d generations on a database fault, want 0", len(cards.scheduled))
+	}
+	if info != (ContentInfo{}) {
+		t.Fatalf("ContentInfo = %+v on a database fault, want the zero value — a fault must never look like a served response", info)
 	}
 }
 
