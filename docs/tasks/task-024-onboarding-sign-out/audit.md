@@ -80,3 +80,56 @@ No `services/api/`, `lib/hooks/api/`, `lib/schemas/`, or `types/` files were cha
 
 ### Non-Blocking (should fix)
 - None. All FE-* checks that apply to the changed files pass with direct file:line evidence; checks not applicable to this diff (FE-11, FE-12, FE-14, FE-17) are correctly N/A because no service/hook/schema files were touched.
+
+---
+
+## Whole-Branch Review — deferred items
+
+A separate whole-branch review (all 9 commits vs `f782de2`) returned **Ready to
+merge**, zero Critical and zero Important findings. It recorded two Minor items.
+Neither blocks merge; both are noted here so they are not lost.
+
+Both concern the same theme: the identity line is slightly weaker at its
+disambiguation job on small screens and via assistive tech than it could be.
+
+1. **`SignedInFooter.tsx:54` — truncation clips the domain, with no fallback to
+   the full value.** The line is `truncate` with no `title` attribute, and
+   ellipsis clips the *end* of the string — where the domain lives. So
+   `ada@personal-domain.example` and `ada@work-domain.example` can both render
+   as `ada@personal-dom…`, on the phone-sized viewport where a
+   wrong-account user is most likely to be looking. Minor rather than Important
+   because most addresses fit at 14px in 375px, and `ProfileMenu.tsx:58-60`
+   truncates identically — this matches the repo rather than regressing it.
+   *Options:* add `title={label}` for a desktop hover fallback, or swap
+   `truncate` for `break-all` so the address wraps to two lines and stays
+   fully readable.
+
+2. **`SignedInFooter.tsx:61-78` — a screen-reader user who tabs straight to the
+   button gets no account context.** The identity line and the button are
+   sibling `<p>` elements with no programmatic association, so tab-first
+   navigation announces only "Sign out" without saying *which* account. Linear
+   readers are unaffected. *Fix:* give the identity line an `id` and add
+   `aria-describedby` to the `Button`. This does **not** violate FR-A11Y-2 —
+   `aria-describedby` contributes to the accessible *description*, not the
+   name, so `getByRole('button', { name: 'Sign out' })` keeps passing.
+
+Four minors carried from the per-task reviews were triaged **ship as-is**:
+the omitted `: JSX.Element | null` annotation (zero other components in
+`apps/web/src` are annotated, and no lint rule requires it — adding it would
+*create* the inconsistency); the inert `lib/api/refresh` mock in
+`signOutFlow.test.tsx` (cheap insurance against stub drift); the React Router
+v7 future-flag warning (pre-existing, emitted repo-wide by
+`renderWithProviders.tsx:39`, belongs in its own commit); and the absent
+mutation proof on the invite success-state negative test (same mechanism the
+mandated pending mutation already proves).
+
+### Note for the merge decision — not a defect of this branch
+
+Until `task-022-signout-failure-handling` lands, a failed `POST /api/auth/logout`
+still lands the user on `/login` with the refresh cookie alive — the gap NFR-1
+names. That is a property of `lib/hooks/api/auth.ts:70`, whose
+`.catch(() => undefined)` swallows the failure and never checks `response.ok`.
+This branch does not change that line and was explicitly forbidden from doing
+so. `SignedInFooter`'s `catch` branch is therefore unreachable in production
+today and is built ahead of task-022, which rewrites that transport — a
+coordinated overlap recorded in `context.md`, not speculative generality.
