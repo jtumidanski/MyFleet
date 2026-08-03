@@ -30,6 +30,12 @@ interface ActivityFeedProps {
    * it the line falls back to the name frozen in the event payload.
    */
   vehicleNames?: Record<string, string>;
+  /**
+   * Whether each row names its vehicle. Off for a vehicle-scoped timeline: the
+   * page already is that vehicle, and events whose payload froze no name would
+   * otherwise render the raw id.
+   */
+  showVehicle?: boolean;
 }
 
 /**
@@ -51,6 +57,7 @@ export function ActivityFeed({
   onNext,
   title = 'Activity',
   vehicleNames,
+  showVehicle = true,
 }: ActivityFeedProps) {
   const userIds = useMemo(() => collectActivityUserIds(events), [events]);
   const { data: users } = useUsers(userIds);
@@ -82,7 +89,11 @@ export function ActivityFeed({
         ) : (
           <ol className="relative border-l border-border">
             {events.map((event) => {
-              const details = describeActivityEvent(event, { resolveUser, resolveVehicle });
+              const details = describeActivityEvent(event, {
+                resolveUser,
+                resolveVehicle,
+                includeVehicle: showVehicle,
+              });
               const actor = resolveUser(event.attributes.actorUserId);
               return (
                 <li key={event.id} className="mb-6 ml-6">

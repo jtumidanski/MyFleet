@@ -269,8 +269,13 @@ export function useSetPrimaryImage(vehicleId: string) {
       void queryClient.invalidateQueries({
         queryKey: mediaKeys.vehicleMedia(vehicleId),
       });
-      // Also invalidate vehicle detail so primaryImageMediaId is refreshed
-      void queryClient.invalidateQueries({ queryKey: ['vehicles', 'detail', vehicleId] });
+      // primaryImageMediaId is mirrored onto the vehicle, so BOTH the detail
+      // and every list card that renders a thumbnail from it go stale — see
+      // VehicleCard, which reads attributes.primaryImageMediaId. Missing the
+      // list invalidation left the old photo on the vehicles page until the
+      // 60s staleTime lapsed.
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.lists() });
     },
   });
 }

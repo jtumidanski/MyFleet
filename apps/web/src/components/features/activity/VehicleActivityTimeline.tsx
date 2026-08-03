@@ -31,6 +31,9 @@ export function VehicleActivityTimeline({ vehicleId }: VehicleActivityTimelinePr
       onPrev={() => setPage((p) => Math.max(1, p - 1))}
       onNext={() => setPage((p) => p + 1)}
       title="Vehicle Timeline"
+      // Every row on this page is the same vehicle; naming it per row is noise,
+      // and the events that carry no frozen name would show the raw id.
+      showVehicle={false}
     />
   );
 }

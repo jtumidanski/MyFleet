@@ -68,6 +68,13 @@ export type ResolveVehicle = (vehicleId: string) => string | undefined;
 export interface ActivityDescribeContext {
   resolveUser: ResolveUser;
   resolveVehicle: ResolveVehicle;
+  /**
+   * Whether to append the "Vehicle" line at all. False on a vehicle-scoped
+   * timeline, where every row is the same vehicle the page is already about —
+   * repeating it adds nothing, and for events whose payload froze no name
+   * (mileage.recorded, fuel.logged) the line would fall through to the raw id.
+   */
+  includeVehicle?: boolean;
 }
 
 /**
@@ -118,7 +125,7 @@ function miles(value: unknown): string | undefined {
  */
 export function describeActivityEvent(
   event: ActivityEvent,
-  { resolveUser, resolveVehicle }: ActivityDescribeContext,
+  { resolveUser, resolveVehicle, includeVehicle = true }: ActivityDescribeContext,
 ): ActivityDetail[] {
   const { type, payload } = event.attributes;
   const p = payload ?? {};
@@ -170,7 +177,7 @@ export function describeActivityEvent(
   // label first, then whatever the payload froze at record time (the only thing
   // left once a vehicle is deleted), and the raw id only as a last resort.
   const vehicleId = event.attributes.vehicleId;
-  if (vehicleId) {
+  if (vehicleId && includeVehicle) {
     const frozen = text(p.nickname) || [text(p.make), text(p.model)].filter(Boolean).join(' ');
     // `||` not `??`: an unresolved label and an empty frozen name are both the
     // empty case, and `??` would let '' through as the vehicle's name.

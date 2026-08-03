@@ -69,11 +69,24 @@ func (a *dbAdministrator) Update(m Model) (Model, error) {
 		}).Error; err != nil {
 		return Model{}, err
 	}
+	// Re-read rather than returning Make(e, docs) from the entity we just built.
+	// Two reasons, both bugs that were live before this:
+	//   1. ToEntity carries no CreatedAt, so the echoed model had a zero time
+	//      and every PATCH response advertised "createdAt":"0001-01-01T00:00:00Z".
+	//   2. The Updates map above is an allow-list. A column missing from it is
+	//      silently not written, and echoing the in-memory entity made the
+	//      response agree with the caller anyway — which is exactly how an
+	//      edited category looked saved until the next fetch. Returning stored
+	//      state means the response can no longer disagree with the row.
+	var stored Entity
+	if err := a.db.Where("id = ? AND deleted_at IS NULL", e.ID).First(&stored).Error; err != nil {
+		return Model{}, err
+	}
 	var docs []DocumentEntity
 	if err := a.db.Where("maintenance_record_id = ?", e.ID).Find(&docs).Error; err != nil {
 		return Model{}, err
 	}
-	return Make(e, docs), nil
+	return Make(stored, docs), nil
 }
 
 // SoftDelete stamps deleted_at on the maintenance record.

@@ -66,20 +66,21 @@ func (pr *Processor) SetPrimary(vehicleID, mediaID string) error {
 
 // RemoveMedia detaches one media object from a vehicle.
 //
-// Scoped by (vehicleID, mediaID) rather than by row id so a caller cannot
-// remove a reference belonging to a different vehicle by guessing an id — the
-// route has already authorized the vehicle, not the row.
+// Deliberately thin: the row lookup, the delete, and the primary-successor
+// decision all belong to one transaction, so they live in the administrator.
+// Reading the row here first — as this did originally — reintroduces a
+// time-of-check/time-of-use gap against a concurrent SetPrimary.
+//
+// Scoping by (vehicleID, mediaID) rather than by row id is what stops a caller
+// removing another vehicle's reference by guessing an id: the route authorized
+// the vehicle, not the row.
 func (pr *Processor) RemoveMedia(vehicleID, mediaID string) error {
-	m, err := pr.p.GetByVehicleAndMedia(vehicleID, mediaID)
-	if errors.Is(err, ErrNotFound) {
-		return server.ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if err := pr.a.SoftDelete(vehicleID, m.ID(), m.IsPrimary()); errors.Is(err, ErrNotFound) {
-		return server.ErrNotFound
-	} else if err != nil {
+	if err := pr.a.SoftDelete(vehicleID, mediaID); err != nil {
+		// ErrNotFound is package-private; callers get the shared sentinel the
+		// HTTP layer maps to 404 rather than a raw gorm error mapped to 500.
+		if errors.Is(err, ErrNotFound) {
+			return server.ErrNotFound
+		}
 		return err
 	}
 	return nil

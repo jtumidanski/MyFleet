@@ -39,8 +39,7 @@ type fakeAdministrator struct {
 	// SoftDelete arguments, captured for assertion. deleteErr forces the
 	// already-removed branch.
 	deletedVehicleID string
-	deletedID        string
-	deletedPrimary   bool
+	deletedMediaID   string
 	deleteCalls      int
 	deleteErr        error
 }
@@ -72,73 +71,37 @@ func (f *fakeAdministrator) SetPrimaryAtomic(vehicleID, targetID, targetMediaID 
 	return nil
 }
 
-func (f *fakeAdministrator) SoftDelete(vehicleID, id string, wasPrimary bool) error {
+func (f *fakeAdministrator) SoftDelete(vehicleID, mediaID string) error {
 	f.deleteCalls++
 	f.deletedVehicleID = vehicleID
-	f.deletedID = id
-	f.deletedPrimary = wasPrimary
+	f.deletedMediaID = mediaID
 	return f.deleteErr
 }
 
-func TestRemoveMedia_softDeletesTheMatchingRow(t *testing.T) {
-	row := NewBuilder().SetVehicleID("v1").SetMediaID("m1").SetIsPrimary(true).Build()
-	other := NewBuilder().SetVehicleID("v1").SetMediaID("m2").Build()
-
-	rows := []Model{row, other}
-	fa := &fakeAdministrator{rows: rows}
-	proc := NewProcessor(logrus.New(), &fakeProvider{rows: rows}, fa)
+// RemoveMedia is a delegation seam: the lookup, the delete and the successor
+// decision all live in one transaction inside the administrator, so the only
+// behaviour left to assert here is that the scope is forwarded intact and that
+// the package-private sentinel is translated. Everything else is covered
+// against a real database in administrator_test.go.
+func TestRemoveMedia_forwardsTheVehicleScopedIdentifiers(t *testing.T) {
+	fa := &fakeAdministrator{}
+	proc := NewProcessor(logrus.New(), &fakeProvider{}, fa)
 
 	if err := proc.RemoveMedia("v1", "m1"); err != nil {
 		t.Fatalf("RemoveMedia failed: %v", err)
 	}
 
-	if fa.deletedID != row.ID() {
-		t.Errorf("SoftDelete id = %q, want %q", fa.deletedID, row.ID())
-	}
-	if fa.deletedVehicleID != "v1" {
-		t.Errorf("SoftDelete vehicleID = %q, want %q", fa.deletedVehicleID, "v1")
-	}
-	// The flag is what drives promotion of a successor; passing it wrong would
-	// silently leave the vehicle pointing at the photo just removed.
-	if !fa.deletedPrimary {
-		t.Error("SoftDelete wasPrimary = false, want true for the primary row")
+	// Scoping by vehicle AND media is what stops a caller reaching another
+	// vehicle's row; dropping either argument would be an IDOR.
+	if fa.deletedVehicleID != "v1" || fa.deletedMediaID != "m1" {
+		t.Errorf("SoftDelete(%q, %q), want (\"v1\", \"m1\")", fa.deletedVehicleID, fa.deletedMediaID)
 	}
 }
 
-func TestRemoveMedia_unknownMediaIsNotFound(t *testing.T) {
-	rows := []Model{NewBuilder().SetVehicleID("v1").SetMediaID("m1").Build()}
-	fa := &fakeAdministrator{rows: rows}
-	proc := NewProcessor(logrus.New(), &fakeProvider{rows: rows}, fa)
-
-	if err := proc.RemoveMedia("v1", "nope"); !errors.Is(err, server.ErrNotFound) {
-		t.Fatalf("RemoveMedia error = %v, want server.ErrNotFound", err)
-	}
-	if fa.deleteCalls != 0 {
-		t.Errorf("SoftDelete called %d times for an unknown media id, want 0", fa.deleteCalls)
-	}
-}
-
-// A media id that belongs to a DIFFERENT vehicle must not be removable through
-// this vehicle's route — the caller was authorized against the vehicle only.
-func TestRemoveMedia_refusesAnotherVehiclesMedia(t *testing.T) {
-	rows := []Model{NewBuilder().SetVehicleID("v2").SetMediaID("m1").Build()}
-	fa := &fakeAdministrator{rows: rows}
-	proc := NewProcessor(logrus.New(), &fakeProvider{rows: rows}, fa)
-
-	if err := proc.RemoveMedia("v1", "m1"); !errors.Is(err, server.ErrNotFound) {
-		t.Fatalf("RemoveMedia error = %v, want server.ErrNotFound", err)
-	}
-	if fa.deleteCalls != 0 {
-		t.Errorf("SoftDelete called %d times across vehicles, want 0", fa.deleteCalls)
-	}
-}
-
-// A row deleted between the read and the write surfaces as 404 rather than as
-// a 500 leaking the package-private sentinel.
-func TestRemoveMedia_concurrentRemovalIsNotFound(t *testing.T) {
-	rows := []Model{NewBuilder().SetVehicleID("v1").SetMediaID("m1").Build()}
-	fa := &fakeAdministrator{rows: rows, deleteErr: ErrNotFound}
-	proc := NewProcessor(logrus.New(), &fakeProvider{rows: rows}, fa)
+// The sentinel is package-private; leaking it would map to 500 instead of 404.
+func TestRemoveMedia_translatesNotFound(t *testing.T) {
+	fa := &fakeAdministrator{deleteErr: ErrNotFound}
+	proc := NewProcessor(logrus.New(), &fakeProvider{}, fa)
 
 	if err := proc.RemoveMedia("v1", "m1"); !errors.Is(err, server.ErrNotFound) {
 		t.Fatalf("RemoveMedia error = %v, want server.ErrNotFound", err)

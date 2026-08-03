@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { Star, Trash2 } from 'lucide-react';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
+import { cn } from '../../../../lib/utils';
 import {
   Dialog,
   DialogContent,
@@ -108,7 +109,7 @@ export function PhotoGalleryDialog({
             </p>
           ) : (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {photos.map((ref) => (
+              {photos.map((ref, index) => (
                 <li
                   key={ref.id}
                   className="overflow-hidden rounded-md border border-border bg-card"
@@ -133,21 +134,26 @@ export function PhotoGalleryDialog({
                         onClick={() => void handleSetPrimary(ref.attributes.mediaId)}
                       >
                         <Star
-                          className={`h-3.5 w-3.5 ${ref.attributes.isPrimary ? 'fill-current' : ''}`}
+                          className={cn('h-3.5 w-3.5', ref.attributes.isPrimary && 'fill-current')}
                           aria-hidden="true"
                         />
-                        {ref.attributes.isPrimary ? 'Primary' : 'Make primary'}
+                        {ref.attributes.isPrimary ? 'Primary' : 'Make Primary'}
+                        <span className="sr-only"> (photo {index + 1})</span>
                       </Button>
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 shrink-0 p-0 text-destructive hover:text-destructive"
-                        disabled={removePhoto.isPending}
+                        // Only the tile actually being removed is disabled;
+                        // gating on isPending alone froze the whole gallery.
+                        disabled={
+                          removePhoto.isPending && pendingRemoval === ref.attributes.mediaId
+                        }
                         onClick={() => setPendingRemoval(ref.attributes.mediaId)}
                       >
                         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                        <span className="sr-only">Remove photo</span>
+                        <span className="sr-only">Remove photo {index + 1}</span>
                       </Button>
                     </div>
                   )}

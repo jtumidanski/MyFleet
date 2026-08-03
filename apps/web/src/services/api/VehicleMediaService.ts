@@ -5,8 +5,9 @@ import type { VehicleMediaAttributes, AddVehicleMediaAttributes } from '../../ty
 /**
  * Vehicle-media service — wraps the fleet-service vehicle-media endpoints.
  * Backend routes (apps/fleet-service/internal/vehiclemedia/resource.go, gateway-prefixed):
- *   GET  /api/fleet/vehicles/{id}/media  — list media refs for a vehicle
- *   POST /api/fleet/vehicles/{id}/media  — attach a media ref to a vehicle
+ *   GET    /api/fleet/vehicles/{id}/media            — list media refs for a vehicle
+ *   POST   /api/fleet/vehicles/{id}/media            — attach a media ref to a vehicle
+ *   DELETE /api/fleet/vehicles/{id}/media/{mediaId}  — detach a media ref
  *
  * Primary-image route is on the vehicle resource:
  *   PUT  /api/fleet/vehicles/{id}/primary-image  { mediaId }
