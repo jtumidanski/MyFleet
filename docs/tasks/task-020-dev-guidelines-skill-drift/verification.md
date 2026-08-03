@@ -86,17 +86,41 @@ or `packages/ui-components/src`: `cn`, `apiClient`, `ApiClient`, `createErrorFro
 
 ---
 
-## Gate 3a — no source was touched
+## Gate 3a — scope
+
+**This gate was deliberately relaxed after Gate 4, on the maintainer's instruction.**
+
+Gates 1–3 originally ran with the plan's docs-only constraint intact, and passed:
+33 files, zero under `apps/`. Gate 4 then found three real defects in
+`internal/membership`, and the decision was to fix them on this branch rather
+than defer them to a follow-up task.
+
+Current state — 42 files:
 
 ```
 $ git diff --name-only main...HEAD | grep -E '^(apps|packages|deploy|\.github)/'
-scope clean
+apps/auth-service/internal/membership/client.go
+apps/auth-service/internal/membership/client_test.go
+apps/fleet-service/internal/membership/administrator_db_test.go
+apps/fleet-service/internal/membership/entity.go
+apps/fleet-service/internal/membership/processor.go
+apps/fleet-service/internal/membership/processor_test.go
+apps/fleet-service/internal/membership/resource.go
+apps/fleet-service/internal/membership/resource_test.go
+
 $ git diff --name-only main...HEAD | grep -E '^\.claude/settings'
 settings untouched
 ```
 
-33 files changed, all under `.claude/skills/**`, `.claude/agents/{backend,frontend}-guidelines-reviewer.md`
-and `docs/tasks/task-020-dev-guidelines-skill-drift/**`.
+The eight source files are the three fixes in § *The real FAIL, and two findings
+beside it* below, in commits `c646643`, `838293f` and `ca70c30`. Everything else
+remains under `.claude/skills/**`,
+`.claude/agents/{backend,frontend}-guidelines-reviewer.md` and
+`docs/tasks/task-020-dev-guidelines-skill-drift/**`.
+
+`deploy/`, `.github/` and `.claude/settings.json` are still untouched, and no
+file outside `internal/membership` in either service was modified. The PRD §2
+exclusion that still holds without exception is the hook wiring.
 
 ---
 
@@ -242,7 +266,7 @@ touched: they are a record of what was found at the time.
 | --- | --- | --- | --- |
 | Rows | 81 | 46 | 17 |
 | PASS | 45 | 38 | 11 |
-| FAIL | 5 (**4 drift**) | **1 (real)** | 0 |
+| FAIL | 5 (**4 drift**) | **1 (real, now fixed)** | 0 |
 | OUT-OF-SCOPE | — | 7 | 6 |
 | VACUOUS | 31 | 0 | 0 |
 | Phase 1 completed | yes | yes | yes |
@@ -258,7 +282,8 @@ Step 4 the named checks were fixed and the reviewer re-run; the re-run is clean.
    None present in any run.
 2. **No finding traceable to guideline drift — PASS, after two rounds of fixes.**
    Run 1's four drift FAILs (DOM-01 ×2, DOM-19 ×2) are fixed in `9607dad` and
-   `b1dbb43`. The one surviving FAIL is real (below).
+   `b1dbb43`. The one surviving FAIL was real, and is now fixed in the source
+   (below) rather than deferred.
 3. **Every row cites `file:line`, PASS as well as FAIL — PASS.** This is the
    clause `DOM-08` and `FE-03` would have failed today *by passing*.
 4. **Phase 1 completed for both — PASS.** Backend `make build` exit 0, `make test`
@@ -297,39 +322,77 @@ full `model.go`, so Phase 2 classifies it as a **Domain** package. That mislabel
 what seeded `SUB-03`'s wrong citations; Phase 2 now warns about it and names the
 two real sub-domain packages.
 
-### The one real FAIL
+### The real FAIL, and two findings beside it
 
-`DOM-13` — `apps/fleet-service/internal/membership/resource.go:181`. The handler
-calls `prov.GetActiveByUserID(userID)` directly, bypassing the processor
-constructed one line earlier at `:173`. Its sibling handler at `:202` does it
-correctly via `proc.ListActiveMembers`. Backed by `file-responsibilities.md:123,135`
-and `anti-patterns.md:13,185-196,231`; the documented exception
-(`anti-patterns.md:235-247,283-287`) does not apply — same domain, no circular
-dependency, no required comment. A minority pattern (4 of ~20 `resource.go` files),
-so a real defect rather than architectural drift.
+All three are now **fixed on this branch**, test-first, each with the test verified
+to fail without its fix.
 
-**Not fixed here.** This task may not modify `apps/` (Gate 3a), and a live defect
-found by the checklist is evidence the checklist works.
+**1. `DOM-13` — `fleet-service/internal/membership/resource.go:181`** (commit `c646643`).
+The handler called `prov.GetActiveByUserID` directly, bypassing the processor
+constructed one line earlier at `:173`, while its sibling at `:202` used
+`proc.ListActiveMembers`. Backed by `file-responsibilities.md:123,135` and
+`anti-patterns.md:13,185-196,231`; the documented exception
+(`anti-patterns.md:235-247,283-287`) did not apply — same domain, no circular
+dependency, no required comment.
 
-### Observations outside the checklist
+It was also duplicating the `ErrNotFound` → `server.ErrNotFound` translation that
+the processor already owns for `GetMember`, so the two "resolve a membership"
+paths could report a missing row differently. Added `Processor.GetActiveByUserID`
+beside `GetMember` and pointed the handler at it; behaviour unchanged.
 
-Three findings no check covers. All verified against source; all in `apps/`, so all
-out of scope for this task and recorded as follow-up candidates.
+The route had **no test coverage at all**. Added four, including the 404 that
+auth-service's client relies on to mean "no fleet yet" — it treats any other
+non-2xx as a hard failure, so collapsing them would break onboarding for every
+fleetless user. Removing the translation turns that 404 into a 500, which is how
+the test was confirmed meaningful.
 
-1. **`auth-service/internal/user/resource.go:18-21,136-138,184-186,235-236`** justify
-   substituting `errInternal` by claiming `WriteError` copies `err.Error()` into the
-   title. It does not: `jsonapi.go:95-112` sets `Title: InternalErrorTitle`
-   unconditionally and only overwrites it when `status < 500`. Harmless to clients,
-   but it hands the shared error logger the string "internal server error" instead of
-   the actual fault.
-2. **`auth-service/internal/membership/client.go:27`** concatenates `userID` into a URL
-   unescaped, while `client.go:80-82` one screen below explicitly names "Active's
-   raw-concatenation habit" as something not to inherit. Not currently exploitable —
-   the caller passes a server-generated UUID.
-3. **`fleet-service/internal/membership/entity.go:88-96`** omits four columns from
-   `ToEntity()`, safe only because the administrator avoids `db.Save` by convention
-   (`administrator.go:66-72`). The parallel case in `auth-service/internal/user` is
-   type-guarded with `gorm:"<-:create"`.
+**2. Query-string injection — `auth-service/internal/membership/client.go:27`**
+(commit `838293f`). `Active` built its query by raw concatenation. The test
+demonstrates the consequence: `"u1&role=owner"` arrived as `user_id="u1"` plus an
+injected `role="owner"`. Not reachable today — the only caller passes a
+server-generated UUID — so this is defence in depth. Worth doing because the file
+already named the habit: the fleet-roster call below used `url.PathEscape`
+specifically to avoid "inheriting Active's raw-concatenation habit". Both calls now
+escape and that comment is updated.
+
+**3. Lossy `ToEntity()` round-trip — `fleet-service/internal/membership/entity.go`**
+(commit `ca70c30`). `ToEntity()` carries five columns, so a `db.Save` built from it
+zeroes `created_at`, `deleted_at` and `purge_operation_id`.
+
+Worth recording *why* the existing guard did not catch this: `cmd/entityguard_test.go`
+sweeps the whole service tree, but reports a package only once it **already**
+combines a `Save` with an unprotected column. It catches the defect on arrival
+rather than preventing it, so it correctly stayed silent here — the safety was a
+property of one call site (`UpdateRole` uses `Update("role", …)`), not of the schema.
+
+Tagged `CreatedAt` `gorm:"<-:create"`, matching `fleet`, `vehicle`, `mediaobject`
+and `auth/user`. `DeletedAt` and `PurgeOperationID` are deliberately left untagged:
+the purge and restore paths must write them, and `fleet/model.go:27-31` records that
+tagging a soft-delete column makes a restore via `Updates(map)` report success while
+the row stays deleted. The purge and entityguard suites were run specifically to
+confirm the tag did not disturb them.
+
+**Note on what this costs.** The checklist caught a live defect, which is the
+evidence that it works; fixing it on the same branch means the guidelines PR now
+also carries a behaviour-adjacent source change. Reviewers should read the three
+`fix(membership)` commits independently of the 63 documentation commits.
+
+### Still open
+
+Findings 2 and 3 above were originally listed here as out-of-scope; both are now
+fixed. One remains, deliberately not actioned:
+
+**`auth-service/internal/user/resource.go:18-21,136-138,184-186,235-236`** justify
+substituting `errInternal` by claiming `WriteError` copies `err.Error()` into the
+response title. It does not: `jsonapi.go:95-112` sets `Title: InternalErrorTitle`
+unconditionally and only overwrites it when `status < 500`. Clients are unaffected —
+the redaction happens either way — but the substitution hands the shared error logger
+the string "internal server error" in place of the actual fault, which is the
+opposite of what those comments intend.
+
+Left alone because the fix is a judgement call about four call sites' error values in
+a service this branch otherwise does not touch, and because no check covers it —
+unlike the three above, it is not evidence about the checklist. Worth its own task.
 
 ### Method note
 
