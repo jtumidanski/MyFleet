@@ -32,9 +32,9 @@ If invoked with no argument and a `plan.md` exists in the current branch's task 
 - Every PASS requires a file:line citation. Every FAIL requires a file:line citation showing what's wrong (or noting absence).
 - Do not invent new rules. Enforce only what exists in the guidelines.
 - **A PASS with no `file:line` is not a PASS.** If a check's grep returns
-  nothing, that is not evidence of compliance — it may mean the pattern cannot
-  match anything in this tree. Report it as `VACUOUS` with the command you ran.
-  FE-03 spent its whole life reporting silent PASS this way.
+  nothing, work out which of three things it means before writing a status —
+  see the Phase 3 preamble. FE-03 spent its whole life reporting silent PASS
+  because nobody made that distinction.
 
 ## Phase 0: Setup
 
@@ -91,10 +91,25 @@ List all changed/in-scope files. Classify each as:
 
 For each in-scope file, run every applicable check.
 
-Record the citation for every row, PASS included. If a check's grep returns
-nothing, do not record PASS: either the pattern is genuinely absent (PASS, cite
-the command and the files searched) or the recipe cannot match anything here
-(`VACUOUS` — report it so the checklist gets fixed).
+Record the citation for every row, PASS included.
+Three outcomes are distinct, and collapsing any two of them is how a checklist
+starts lying:
+
+- **PASS / FAIL** — the check had a subject in scope and you evaluated it. Cite
+  `file:line` either way. A grep that returns nothing is a legitimate PASS when
+  the subject exists and the forbidden pattern is genuinely absent — say what you
+  searched and how many files.
+- **OUT-OF-SCOPE** — the check's subject is not in this audit's scope at all
+  (no file of that category changed, no such layer in this package). Record the
+  command and the empty file list. This is not a defect in the code *or* in the
+  check.
+- **VACUOUS** — the check's subject IS in scope, but the recipe cannot match
+  anything anywhere in the tree, so it could never have failed. This is a defect
+  in the **check**, and it is the failure mode `DOM-08` and `FE-03` hid behind
+  for their whole lifetime. Report it loudly with the command that matched
+  nothing.
+
+Never write "N/A", "not applicable", or "skipping". Pick one of the four labels.
 
 ### Anti-Pattern Checklist
 

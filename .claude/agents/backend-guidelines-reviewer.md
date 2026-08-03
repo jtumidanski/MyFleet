@@ -34,10 +34,8 @@ If invoked with no argument and a `plan.md` exists in the current branch's task 
 - Do not invent new rules. Only enforce what exists in the guidelines.
 - Do not suggest improvements beyond what the guidelines require.
 - **A PASS with no `file:line` is not a PASS.** If a check's verification command
-  returns nothing, that is not evidence of compliance — it means the command
-  cannot match anything in this tree, and the check is broken. Report it as
-  `VACUOUS` with the command you ran, not as PASS. Every row in the output
-  table carries a citation in both directions.
+  returns nothing, work out which of three things it means before writing a
+  status — see the Phase 3 preamble. Every row carries a citation.
 
 ## Phase 0: Setup
 
@@ -89,13 +87,32 @@ Record the build errors as the audit result and DO NOT proceed to Phase 2.
 
 For EACH domain package identified in Phase 2, run every check below. These are binary — the symbol/pattern either exists or it doesn't. Use grep/read to verify each one.
 
-Record the citation for every row, PASS included. If a check's grep returns nothing, do not record PASS: either the pattern is absent (FAIL) or the recipe cannot match anything here (`VACUOUS` — report it so the checklist gets fixed). Silent green is the failure mode these checks were rebuilt to remove.
+Record the citation for every row, PASS included. Silent green is the failure
+mode these checks were rebuilt to remove.
+Three outcomes are distinct, and collapsing any two of them is how a checklist
+starts lying:
+
+- **PASS / FAIL** — the check had a subject in scope and you evaluated it. Cite
+  `file:line` either way. A grep that returns nothing is a legitimate PASS when
+  the subject exists and the forbidden pattern is genuinely absent — say what you
+  searched and how many files.
+- **OUT-OF-SCOPE** — the check's subject is not in this audit's scope at all
+  (no file of that category changed, no such layer in this package). Record the
+  command and the empty file list. This is not a defect in the code *or* in the
+  check.
+- **VACUOUS** — the check's subject IS in scope, but the recipe cannot match
+  anything anywhere in the tree, so it could never have failed. This is a defect
+  in the **check**, and it is the failure mode `DOM-08` and `FE-03` hid behind
+  for their whole lifetime. Report it loudly with the command that matched
+  nothing.
+
+Never write "N/A", "not applicable", or "skipping". Pick one of the four labels.
 
 ### Domain Package Checklist (every domain with `model.go`)
 
 | ID | Check | How to Verify | Pass Criteria |
 |----|-------|---------------|---------------|
-| DOM-01 | `builder.go` exists | File exists in package | File present with `NewBuilder()`, fluent setters, `Build()` with validation |
+| DOM-01 | `builder.go` exists | File exists in package; read the `Build()` signature | File present with `NewBuilder()`, fluent setters and `Build()`. **Two signatures are both correct.** `Build() (Model, error)` is required where the domain has construction invariants (11 of 17) and must then actually check them, returning `server.ErrValidation`. A bare `Build() Model` is correct where it has none (6 of 17: membership, activity, vehiclemedia, mileage, auth/session, auth/user) — do not FAIL it for the missing error, and do not ask for one, because it would be unreachable at every call site. The FAIL is a `(Model, error)` builder that validates nothing. |
 | DOM-02 | `ToEntity()` method | Grep for `func (m Model) ToEntity()` or `func (m *Model) ToEntity()` in `entity.go` | Method exists on Model type |
 | DOM-03 | `Make(Entity)` function | Grep for `func Make(` in `entity.go` | Function exists with signature `func Make(e Entity) Model` — **no error return**. All 17 domains are the no-error form; a `(Model, error)` signature is the deviation. |
 | DOM-04 | `Transform` function | Grep for `func Transform(` in `rest.go` | Function exists |
@@ -113,7 +130,7 @@ Record the citation for every row, PASS included. If a check's grep returns noth
 | DOM-16 | Domain returns the right sentinel | Read the domain's error values and where they are returned | The mapping itself is not the handler's job — `server.StatusFor` maps sentinels to codes (`packages/shared-go/server/errors.go:18-43`: 400/401/403/404/409/410/413/415/422/429, default 500). Verify the **domain** returns `server.ErrNotFound`, `ErrConflict`, `ErrValidation` etc. (or an error wrapping one), not that the handler writes a number. A domain error that wraps nothing lands as 500. |
 | DOM-17 | Resource type is a literal | Read `rest.go` | `Transform` returns a `server.Resource` whose `Type` is a literal string (`vehicle/rest.go:75`: `Type: "vehicles"`) and whose `ID` comes from the model. The type must not be computed, reflected, or derived from the Go type name. |
 | DOM-18 | Input structs are narrow and unexported | Read `rest.go` | Each body-carrying route has its own unexported attributes struct naming the exact fields it accepts — `createAttributes`, `patchAttributes` (`vehicle/rest.go:35,48`). No nested `Data`/`Type`/`Attributes` wrapper: `RegisterInputHandler` has already stripped the envelope. Reusing the read model as the write input is a FAIL — it lets a client set server-derived fields. |
-| DOM-19 | Table-driven tests | Read test files | Tests use `tests := []struct{...}` pattern with `t.Run` |
+| DOM-19 | Tests cover the domain's logic layers | Read the test files | The layers named in `testing-guide.md` (builder invariants, processor logic, provider error paths, REST status mapping) have tests. **Table-driven is a preference, not a mandate** — `testing-guide.md:49` says "Prefer table-driven tests", and the prevailing style here is one named `TestX_scenario` func per case (only 13 of 44 test-bearing packages use `t.Run` at all). Where a table IS used the local idiom is `cases := []struct` (13 sites) rather than `tests :=` (3). The FAIL is a test that repeats the same assertions inline across three or more cases instead of tabulating them — not the absence of a table. |
 
 ### Sub-Domain Package Checklist (action-event packages without `model.go`)
 
@@ -121,7 +138,7 @@ Record the citation for every row, PASS included. If a check's grep returns noth
 |----|-------|---------------|---------------|
 | SUB-01 | Has processor or uses parent processor | File exists or parent processor has methods for this action | Business logic not in handler |
 | SUB-02 | Has administrator for writes | `administrator.go` exists or parent administrator handles writes | No `db.Create`/`db.Save` in `resource.go` |
-| SUB-03 | Uses `RegisterInputHandler[T]` for POST | Grep `resource.go` | POST endpoints use typed input handler |
+| SUB-03 | Body-carrying routes use `RegisterInputHandler` | Grep `resource.go` for `r.Post(`, `r.Patch(`, `r.Put(` | Same rule as DOM-08, applied to the sub-domain package. Do **not** grep for POST alone: several sub-domain packages expose only a PATCH (`fleet-service/internal/membership/resource.go:53`, `auth-service/internal/user/resource.go:167`), and a POST-only recipe reports nothing on them while their correctly-wrapped routes go unexamined. |
 | SUB-04 | No manual JSON parsing | Grep `resource.go` for `json.NewDecoder`, `json.Unmarshal`, `io.ReadAll` | Zero matches |
 
 ## Phase 4: Security Review (auth-related services only)
@@ -172,9 +189,10 @@ If invoked from a task folder context (i.e., changes from a feature branch), app
 | DOM-02 | ToEntity() method | FAIL | No ToEntity() found in entity.go |
 | ... | ... | ... | ... |
 
-Every row carries evidence, PASS included. A row whose verification command
-returned nothing is `VACUOUS`, not PASS, and its Evidence cell records the
-command that failed to match.
+Every row carries evidence, PASS included. A row whose command returned nothing
+is `OUT-OF-SCOPE` (no subject in this audit) or `VACUOUS` (the recipe cannot
+match anywhere in the tree — a defect in the check), never a silent PASS. Its
+Evidence cell records the command.
 
 ## Sub-Domain Checklist Results
 [Same format per sub-domain]
@@ -210,7 +228,7 @@ command that failed to match.
         {
           "id": "DOM-01",
           "name": "builder.go exists",
-          "status": "pass | fail | warn | vacuous",
+          "status": "pass | fail | warn | out-of-scope | vacuous",
           "evidence": "file:line, required on pass as well as fail; for vacuous, the command that matched nothing"
         }
       ]
