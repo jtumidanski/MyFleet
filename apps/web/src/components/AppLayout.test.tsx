@@ -103,7 +103,7 @@ describe('AppLayout', () => {
 
   it('still signs the user out from the profile menu', async () => {
     const user = userEvent.setup();
-    const logout = vi.fn();
+    const logout = vi.fn().mockResolvedValue(undefined);
     renderLayout(baseAuth({ logout }));
 
     await user.click(screen.getByRole('button', { name: 'Account menu' }));
