@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/membership"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/user"
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // fakeUsers is a user.Provider over a map. GetBySub returns a loud error rather
@@ -289,5 +291,113 @@ func TestNewPrincipalResolver_failsClosedWhenTheAdminLookupFails(t *testing.T) {
 
 	if _, err := resolve(context.Background(), "user-1"); err == nil {
 		t.Fatal("an admin lookup failure must fail closed, not mint a principal with PlatformAdmin=false")
+	}
+}
+
+// TestNewPrincipalResolver_carriesTheTransientClassificationThrough is a
+// regression test, not a test of new code: main.go returns the membership
+// error bare today, so errors.Is already reaches through it. The risk is
+// tomorrow's edit — someone annotating it with fmt.Errorf("...: %v", err)
+// silently breaks classification for BOTH handlers, every transient failure
+// becomes a logout again, and nothing else in the repository goes red.
+func TestNewPrincipalResolver_carriesTheTransientClassificationThrough(t *testing.T) {
+	resolve := newPrincipalResolver(
+		usersWith("user-1", "a@b.com"),
+		fleetServing(t, http.StatusInternalServerError, `{"errors":[{"status":"500"}]}`),
+		&fakeAdmins{isAdmin: false},
+	)
+
+	_, err := resolve(context.Background(), "user-1")
+
+	if err == nil {
+		t.Fatal("a 500 from fleet-service must not resolve to a principal")
+	}
+	if !errors.Is(err, server.ErrServiceUnavailable) {
+		t.Fatalf("classification did not survive the resolver: %v — both handlers "+
+			"branch on errors.Is, so a %%v wrap here turns every outage back into a logout", err)
+	}
+}
+
+// TestNewPrincipalResolver_keepsAMissingUserPermanent is the other half. A user
+// row that is gone is a DEAD credential: it must reach the 401-and-clear path,
+// not the 503 that invites the browser to try again forever.
+func TestNewPrincipalResolver_keepsAMissingUserPermanent(t *testing.T) {
+	resolve := newPrincipalResolver(
+		&fakeUsers{byID: map[string]user.Model{}},
+		fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
+		&fakeAdmins{isAdmin: false},
+	)
+
+	_, err := resolve(context.Background(), "user-1")
+
+	if !errors.Is(err, user.ErrNotFound) {
+		t.Fatalf("err = %v, want user.ErrNotFound", err)
+	}
+	if errors.Is(err, server.ErrServiceUnavailable) {
+		t.Fatalf("a missing user row classified as transient: %v — the credential is dead and the session must end", err)
+	}
+}
+
+// TestNewPrincipalResolver_keepsAPermanentUpstreamFaultPermanent: a 403 from
+// fleet-service is a misconfiguration between the two services, not an outage.
+// Retrying cannot fix it, so it keeps today's fail-closed behaviour.
+func TestNewPrincipalResolver_keepsAPermanentUpstreamFaultPermanent(t *testing.T) {
+	resolve := newPrincipalResolver(
+		usersWith("user-1", "a@b.com"),
+		fleetServing(t, http.StatusForbidden, `{"errors":[{"status":"403"}]}`),
+		&fakeAdmins{isAdmin: false},
+	)
+
+	_, err := resolve(context.Background(), "user-1")
+
+	if err == nil {
+		t.Fatal("a 403 must not resolve to a principal")
+	}
+	if errors.Is(err, server.ErrServiceUnavailable) {
+		t.Fatalf("a 403 classified as transient: %v", err)
+	}
+}
+
+// TestNewPrincipalResolver_classifiesLocalInfrastructureFailuresAsTransient
+// (design D9). The resolver reads three sources; only one of them is
+// fleet-service. An auth-Postgres blip lasting longer than one request logs out
+// every active session through this same closure, for the same reason. The
+// driver's text is deliberately dropped rather than %w-wrapped so a SQLSTATE or
+// table name cannot ride into a log line even in principle.
+func TestNewPrincipalResolver_classifiesLocalInfrastructureFailuresAsTransient(t *testing.T) {
+	dbDown := errors.New(`pq: relation "auth.users" does not exist (SQLSTATE 42P01)`)
+
+	cases := map[string]func() (user.Provider, *fakeAdmins){
+		"users read fails": func() (user.Provider, *fakeAdmins) {
+			return &fakeUsers{err: dbDown}, &fakeAdmins{isAdmin: false}
+		},
+		"platform admin read fails": func() (user.Provider, *fakeAdmins) {
+			return usersWith("user-1", "a@b.com"), &fakeAdmins{err: dbDown}
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			users, admins := setup()
+			resolve := newPrincipalResolver(
+				users,
+				fleetServing(t, http.StatusOK, `{"fleet_id":"fleet-9","role":"owner"}`),
+				admins,
+			)
+
+			_, err := resolve(context.Background(), "user-1")
+
+			if err == nil {
+				t.Fatal("a failed local read must not resolve to a principal")
+			}
+			if !errors.Is(err, server.ErrServiceUnavailable) {
+				t.Fatalf("err = %v, want a transient classification — a database hiccup must not "+
+					"log every active session out", err)
+			}
+			for _, secret := range []string{"SQLSTATE", "42P01", "auth.users", "pq:"} {
+				if strings.Contains(err.Error(), secret) {
+					t.Fatalf("the error carries %q from the driver: %q", secret, err)
+				}
+			}
+		})
 	}
 }
