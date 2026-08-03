@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CategoryCombobox } from './CategoryCombobox';
 import type { MaintenanceCategory } from '../../../types/models/maintenanceCategory';
+import { expectNoCall, expectNoCallWith } from '../../../test/expectNoCall';
 
 // cmdk measures its list; jsdom implements neither method.
 beforeAll(() => {
@@ -154,7 +155,7 @@ describe('CategoryCombobox', () => {
 
     expect(mutateAsync).toHaveBeenCalledWith({ name: 'Skid Plate', kind: 'maintenance' });
     await waitFor(() => expect(onChange).toHaveBeenCalledWith('server-assigned-id'));
-    expect(onChange).not.toHaveBeenCalledWith('Skid Plate');
+    await expectNoCallWith(onChange, ['Skid Plate'], 'onChange');
   });
 
   it('surfaces a toast and selects nothing when creation fails', async () => {
@@ -170,7 +171,7 @@ describe('CategoryCombobox', () => {
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith('You do not have permission to create categories'),
     );
-    expect(onChange).not.toHaveBeenCalled();
+    await expectNoCall(onChange, 'onChange');
   });
 
   it('disables the create item while the mutation is pending', async () => {

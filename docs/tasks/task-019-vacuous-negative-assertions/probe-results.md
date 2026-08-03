@@ -269,6 +269,107 @@ production file carries neither, and the table's Guard-defeated cell reflects
 the corrected edit, not the brief's literal instruction — the same pattern as
 footnote 7's site 15 correction.
 
+| 17 | `apps/web/src/components/features/vehicles/CategoryCombobox.test.tsx` | creates a category and selects the id the server returned, not anything derived locally | `onChange` (**With** `'Skid Plate'`) | see finding¹⁰ — `handleSelect(created.id)` → `handleSelect(trimmed)` in `handleCreate`'s try arm (`CategoryCombobox.tsx`), i.e. select the locally-derived name instead of the server id | red (probe carrying `'Skid Plate'` inserted right after the create-item click, before the pre-existing `expect(mutateAsync)...` and `await waitFor(...)` lines, both of which already yield ahead of the assertion) | red¹⁰ (onChange called with `['Skid Plate']`, after strengthening) | falsifiable | migrated to `expectNoCallWith`, the positive pairing (`await waitFor(() => expect(onChange).toHaveBeenCalledWith('server-assigned-id'))`) left in place per the brief | n/a (was never vacuous) |
+| 18 | `apps/web/src/components/features/vehicles/CategoryCombobox.test.tsx` | surfaces a toast and selects nothing when creation fails | `onChange` | `onChange(trimmed)` added to the `catch (err)` arm of `handleCreate` (`CategoryCombobox.tsx`) | red (probe after the create-item click, before the pre-existing `await waitFor(() => expect(toast.error)...)`; 1 call) | red (onChange called with `['Skid Plate']`, target assertion hit directly, no earlier-line interference) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 19 | `apps/web/src/components/features/vehicles/detail/VehicleRecordsTable.test.tsx` | disables load more while a page is in flight | `onLoadMore` | `disabled={isFetchingNextPage}` removed from the Load More button (`VehicleRecordsTable.tsx`) | green (probe after the click, before the plain assertion; nothing yields in between) | red¹¹ (onLoadMore called; target assertion hit directly after strengthening) | falsifiable, fragile (design combining-table row 2: green/red) | migrated to `expectNoCall` | red / red |
+| 20 | `apps/web/src/components/features/vehicles/dialogs/PhotoGalleryDialog.test.tsx` | still reports success when only the object cleanup fails | `toast.error` | see finding¹² — the brief's named location (`PhotoGalleryDialog.tsx`'s `handleRemove`) has no cleanup call to move; the swallow is one layer down, in `useRemoveVehiclePhoto`'s `mutationFn` (`src/lib/hooks/api/media.ts`) — its inner `try { await mediaService.remove(mediaId); } catch { ... }` removed so the rejection propagates | red (probe after the confirm-remove click, before the pre-existing `await waitFor(() => expect(toast.success)...)`; 1 call) | red (toast.error called with `'media-service unavailable'`, target assertion hit directly) | falsifiable | migrated to `expectNoCall(vi.mocked(toast.error), ...)` | n/a (was never vacuous) |
+| 21 | `apps/web/src/components/features/vehicles/dialogs/PhotoGalleryDialog.test.tsx` | does not remove anything until the confirmation is accepted | `removeMedia` | see finding¹³ — remove-photo button's `onClick` changed from `setPendingRemoval(...)` to `void handleRemove(ref.attributes.mediaId)` directly (`PhotoGalleryDialog.tsx`), bypassing the confirmation | green (probe after the cancel click, before the plain assertion; nothing yields in between) | red¹³ (removeMedia called with `['v1', 'm2']`, target assertion hit directly after strengthening) | falsifiable, fragile (design combining-table row 2: green/red) | migrated to `expectNoCall` | red / red |
+| 22 | `apps/web/src/components/features/vehicles/dialogs/PhotoGalleryDialog.test.tsx` | does not remove anything until the confirmation is accepted | `removeObject` | same guard as site 21¹³ | green (same reasoning as site 21) | red¹³ (removeObject called with `['m2']`, target assertion hit directly after strengthening) | falsifiable, fragile (design combining-table row 2: green/red) | migrated to `expectNoCall` | red / red |
+| 23 | `apps/web/src/components/features/vehicles/maintenance/MaintenanceRecordForm.test.tsx` | rejects a description over 200 characters | `onSubmit` | see finding¹⁴ — `.max(200, 'Description must be 200 characters or fewer')` relaxed to `.max(10000)` in `maintenanceRecordSchema` (`src/lib/schemas/maintenanceRecord.ts`) | red (probe after the submit click, before the pre-existing `await waitFor(() => expect(screen.getByText(/200 characters or fewer/i))...)`; 1 call) | red¹⁴ (onSubmit called, target assertion hit directly after strengthening) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+
+¹⁰ Stage 2 for site 17: in the full (unmodified) test, changing
+`handleSelect(created.id)` to `handleSelect(trimmed)` in `handleCreate`'s try
+arm makes the pre-existing positive pairing fail first —
+`await waitFor(() => expect(onChange).toHaveBeenCalledWith('server-assigned-id'))`
+times out, because `onChange` is now called with `'Skid Plate'` instead,
+never with `'server-assigned-id'`. Per migration-context.md's Stage-2
+evidence-quality note, that is weaker evidence: the assertion under test
+(`not.toHaveBeenCalledWith('Skid Plate')`) is never reached. Strengthened in
+an isolated, uncommitted copy of the test: the positive pairing relaxed to
+`expect(onChange).toHaveBeenCalled()` (proving only that *some* selection
+happened, not which one); with the guard defeated, the target assertion then
+fails directly — onChange recorded as called with `['Skid Plate']`. The
+committed migration keeps the original, un-relaxed positive pairing (per the
+brief: "leave the positive assertion in place") — the relaxed variant was
+probe-only and never committed.
+
+¹¹ Stage 2 for site 19: in the full (unmodified) test, removing
+`disabled={isFetchingNextPage}` also makes the earlier
+`expect(button).toBeDisabled()` line fail first (the button that used to be
+disabled from render no longer is), before the click and the target
+`onLoadMore` assertion are ever reached. Strengthened in an isolated,
+uncommitted copy with that earlier line removed: the click then invokes
+`onLoadMore` synchronously (its `onClick` is the prop directly, not a
+promise continuation), and the target assertion catches it directly. This is
+combining-table row 2 (green/red — "falsifiable only because the defeated
+guard fires synchronously"), the same shape as sites 1/2 and 4–6 from
+earlier tasks, not Stage-1/Stage-2 vacuous (green/green); the re-probe below
+was still run for the same reason those earlier tasks ran theirs — extra
+assurance on a fragile site.
+
+¹² Finding — the task-7 brief's Stage-2 location for site 20 does not hold
+the guard. The brief names `PhotoGalleryDialog.tsx`'s `handleRemove`, saying
+"the object-cleanup failure is swallowed; move the cleanup call inside the
+try." But `handleRemove` does not call the cleanup itself — it only calls
+`await removePhoto.mutateAsync(mediaId)`, already inside its own try. The
+swallow is one layer down, inside `useRemoveVehiclePhoto`'s `mutationFn` in
+`src/lib/hooks/api/media.ts`: `await vehicleMediaService.removeMedia(...);
+try { await mediaService.remove(mediaId); } catch { /* reference is gone;
+the object is media-service's to reap */ }`. Because that inner catch
+swallows the rejection, `removePhoto.mutateAsync` never rejects, so
+`handleRemove`'s own catch (and its `toast.error`) can never fire, regardless
+of anything done to `PhotoGalleryDialog.tsx`. The real guard: delete
+`media.ts`'s inner try/catch so the rejection propagates through
+`mutateAsync` into `handleRemove`'s catch. Verified against the full
+(unmodified) test: this edit fails directly on the target assertion
+(`toast.error` called with `'media-service unavailable'`), no earlier-line
+interference. Probe-only; reverted with `git checkout --` immediately after
+use. The table's Guard-defeated cell reflects this corrected location, not
+the brief's literal instruction — the same pattern as footnote 7's site 15
+and footnote 9's site 28 corrections in earlier tasks.
+
+¹³ Stage 2 for sites 21 and 22: in the full (unmodified) test, changing the
+remove-photo button's `onClick` to call `void handleRemove(mediaId)` directly
+(bypassing `setPendingRemoval`) makes the earlier
+`await user.click(await screen.findByRole('button', { name: /cancel/i }))`
+line fail first — the `AlertDialog` never opens (its `open` is
+`pendingRemoval !== null`, and `pendingRemoval` is now never set), so no
+Cancel button ever appears and `findByRole` times out. Neither target
+assertion (`removeMedia`/`removeObject` not called) is reached. Strengthened
+in an isolated, uncommitted copy of the test: the now-structurally-moot
+cancel-click line removed (once confirmation is bypassed at the trigger
+itself, cancelling has nothing left to cancel), leaving only
+`beginRemovingSecondPhoto(user)` followed by each target assertion in turn.
+With the guard defeated: `removeMedia` fails directly, recorded as called
+with `['v1', 'm2']`; `removeObject` fails directly, recorded as called with
+`['m2']`. This is combining-table row 2 (green/red — the guard-defeat fires
+synchronously off the remove-photo click itself), not vacuous; the
+re-probes below were still run, matching the precedent of earlier tasks'
+fragile sites.
+
+¹⁴ Stage 2 for site 23: the brief's prescribed edit
+(`maintenanceRecordSchema`'s `description.max(200, ...)` relaxed to
+`.max(10000)`) is confounded by this test's own render — it never selects a
+category, so `categoryId` stays at its `''` default and independently fails
+`min(1, 'Category is required')` regardless of description length. Run
+against the full (unmodified) test with the guard applied, the earlier
+`await waitFor(() => expect(screen.getByText(/200 characters or fewer/i)).toBeInTheDocument())`
+line times out (the visible error is now "Category is required", never the
+description one), and `onSubmit` is confirmed (via
+`onSubmit.mock.calls.length === 0`) never to fire — not because the
+description guard failed to bite, but because the independently-invalid
+category blocks submission on its own. Strengthened in an isolated,
+uncommitted copy of the test: a category-selection step added (click the
+combobox, click "Oil Change") before typing the over-length description,
+isolating the description guard from the confounding field. With that
+change, defeating the guard let the form submit with the 201-character
+description, and the target assertion caught it directly — `onSubmit`
+called once with the full string. The committed migration does not add the
+category-selection step (that would change the test's own scenario); the
+Stage-2 disposition above is drawn from the strengthened, uncommitted
+variant per migration-context.md's evidence-quality note, the same
+treatment as footnote 8's sites 4–6.
+
 ## FR-TRIAGE-4 sites (unprobeable)
 
 Task 4 attempted its one predicted FR-TRIAGE-4 candidate (site 3,

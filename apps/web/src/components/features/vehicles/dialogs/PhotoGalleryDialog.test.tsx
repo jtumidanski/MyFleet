@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { PhotoGalleryDialog } from './PhotoGalleryDialog';
 import { renderWithProviders } from '../../../../test/renderWithProviders';
 import { stubObjectUrl, unstubObjectUrl } from '../../../../test/objectUrl';
+import { expectNoCall } from '../../../../test/expectNoCall';
 
 const { listByVehicle, removeMedia, removeObject, setPrimaryImage, calls } = vi.hoisted(() => {
   const calls: string[] = [];
@@ -112,7 +113,7 @@ describe('PhotoGalleryDialog — removing a photo', () => {
     // The user's photo IS gone from the vehicle; an orphaned object is
     // media-service's problem, not something to report as a failed removal.
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Photo removed'));
-    expect(toast.error).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(toast.error), 'toast.error');
   });
 
   it('does not remove anything until the confirmation is accepted', async () => {
@@ -122,8 +123,8 @@ describe('PhotoGalleryDialog — removing a photo', () => {
     await beginRemovingSecondPhoto(user);
     await user.click(await screen.findByRole('button', { name: /cancel/i }));
 
-    expect(removeMedia).not.toHaveBeenCalled();
-    expect(removeObject).not.toHaveBeenCalled();
+    await expectNoCall(removeMedia, 'removeMedia');
+    await expectNoCall(removeObject, 'removeObject');
   });
 });
 
