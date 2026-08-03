@@ -93,7 +93,9 @@ line 142). Following that block's shape, a new entry needs:
   the same way
 - `depends_on` with `condition: service_healthy` for whatever the service
   needs at boot (`postgres`, `redpanda`, `auth-service`, ...)
-- `healthcheck` — the existing blocks use
+- `healthcheck` — only `auth-service` (line 116) and `fleet-service` (line
+  165) have one today (`media-service` and `notification-service` don't);
+  follow `fleet-service`'s:
   `wget -qO- http://localhost:8080/healthz || exit 1`
 - `labels` starting with `traefik.enable=true`, plus
   `traefik.http.routers.<name>.*` entries so the compose Traefik container
@@ -162,7 +164,8 @@ during initial implementation:
 | Check | File | Requirement |
 |-------|------|-------------|
 | `builder.go` exists | `builder.go` | Fluent builder — `NewBuilder()`, setters, `Build()` that validates invariants (`DOM-01`) |
-| `Make` constructor | `entity.go` | `func Make(e Entity) Model`; a domain whose model needs child rows too takes them as extra args, e.g. `maintenancerecord` (`DOM-02`) |
+| `ToEntity()` method | `entity.go` | `func (m Model) ToEntity() Entity` — present on every domain's Model, e.g. `apps/fleet-service/internal/vehicle/entity.go:63` (`DOM-02`) |
+| `Make` constructor | `entity.go` | `func Make(e Entity) Model`; not uniform — a domain whose model needs child rows too takes them as extra args, e.g. `maintenancerecord/entity.go:44` is `func Make(e Entity, docs []DocumentEntity) Model` (`DOM-03`) |
 | `TransformSlice` function | `rest.go` | List handlers use `TransformSlice`, not an inline loop — unless decorating each row with a per-row derived value via `TransformDerived` (`DOM-05`) |
 | `logrus.FieldLogger` | `processor.go` | Constructor takes `logrus.FieldLogger`, not `*logrus.Logger` (`DOM-06`) |
 | `log` parameter in handlers | `resource.go` | Handlers use the `log` parameter `InitializeRoutes` receives — never `logrus.StandardLogger()`, which is reserved for the shared error-logger fallback (`packages/shared-go/server/jsonapi.go:70`) (`DOM-07`) |
