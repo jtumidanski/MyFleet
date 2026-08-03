@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { updateThemePreference, useMe } from './auth';
+import { ApiError } from '@myfleet/shared-ts';
+import { logoutRequest, updateThemePreference, useMe } from './auth';
 import { setAccessToken, clearAccessToken } from '../../api/token';
 
 function meDocument(meta: Record<string, unknown>) {
@@ -139,5 +140,66 @@ describe('updateThemePreference', () => {
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(path).not.toMatch(/\/users\//);
     expect(init.body as string).not.toContain('"id"');
+  });
+});
+
+describe('logoutRequest', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    clearAccessToken();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  // FR-LOGOUT-3. fetch does not reject on a non-2xx, and the old bare-fetch
+  // implementation never read `status`/`ok`, so a 500 — or an HTML error page
+  // from the gateway — was consumed as a successful sign-out.
+  it('rejects with an ApiError when the server reports a failure', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({
+          errors: [{ status: '500', code: 'internal_error', title: 'internal server error' }],
+        }),
+      }),
+    );
+
+    const outcome = await logoutRequest().then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(outcome).toBeInstanceOf(ApiError);
+    expect((outcome as ApiError).status).toBe(500);
+  });
+
+  // FR-LOGOUT-2/3: offline, DNS failure, connection reset. The old
+  // `.catch(() => undefined)` turned every one of these into a resolved
+  // promise, so the function had exactly one possible outcome.
+  it('rejects when the network request itself fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+
+    await expect(logoutRequest()).rejects.toThrow('Failed to fetch');
+  });
+
+  // FR-LOGOUT-4/5. This one passes against the old implementation too — it is a
+  // regression guard, not a red-first test. It pins the two things a rewrite
+  // onto apiClient could quietly drop: the cookie being sent, and the 204
+  // short-circuit that keeps an empty body from being parsed.
+  it('posts with credentials and treats 204 as success without parsing a body', async () => {
+    const json = vi.fn(() => {
+      throw new Error('a 204 response has no body to parse');
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204, json });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(logoutRequest()).resolves.toBeUndefined();
+
+    expect(json).not.toHaveBeenCalled();
+    const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(path).toBe('/api/auth/logout');
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
   });
 });

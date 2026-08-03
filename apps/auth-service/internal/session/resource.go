@@ -87,7 +87,25 @@ func logoutHandler(log logrus.FieldLogger, proc *Processor, cookieSecure bool) h
 		raw := readRefreshToken(req)
 		if raw != "" {
 			if err := proc.Logout(raw); err != nil {
+				// Kept alongside WriteError's own 5xx log line: this one names
+				// the operation, that one only knows the status. One redundant
+				// line beats an operator grepping for "logout" and finding
+				// nothing.
 				log.WithError(err).Error("logout revoke family")
+				// Cookie FIRST. SetCookie appends a header and WriteError
+				// flushes them, so the reverse order drops the Set-Cookie
+				// silently. Clearing the browser's copy is strictly
+				// risk-reducing even when the family survives in the database.
+				clearRefreshCookie(w, cookieSecure)
+				// The raw error is safe to pass through: StatusFor maps
+				// anything without a matching sentinel to 500, and WriteError
+				// redacts the text of every 5xx body. session.ErrNotFound is
+				// this package's own sentinel, not server.ErrNotFound, so it
+				// could not be mapped to a 404 by accident even if it reached
+				// here — which it cannot, since Processor.Logout collapses it
+				// to nil.
+				server.WriteError(w, err)
+				return
 			}
 		}
 		clearRefreshCookie(w, cookieSecure)

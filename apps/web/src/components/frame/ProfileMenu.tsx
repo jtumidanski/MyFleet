@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { CircleUser } from 'lucide-react';
+import { toast } from 'sonner';
+import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { useAuth } from '../../context/AuthContext';
 import { Button } from '../ui/button';
 import {
@@ -31,6 +33,36 @@ export function ProfileMenu() {
   const avatarUrl = (user?.attributes.avatarUrl ?? '').trim();
   const showAvatar = avatarUrl !== '' && !avatarFailed;
 
+  // logout() signs out locally in every case and rejects only to report that
+  // the server may not have revoked the refresh-token family. Hence no success
+  // toast, and copy that says what is still true rather than "sign-out failed".
+  //
+  // The message is FIXED rather than apiError.message: WriteError redacts the
+  // title of every 5xx to "internal server error", and 500 is the only status
+  // this path produces, so the house `message || fallback` pattern would show
+  // the user that string and never reach the fallback. `apiError.detail` is
+  // undefined on this path today: createErrorFromUnknown is handed an
+  // already-built ApiError, which has no `.body`, so it falls through to the
+  // generic-Error branch and rebuilds a fresh ApiError with status/code/detail
+  // discarded; separately, WriteError only ever sets Detail below 500. sonner
+  // omits the description when it is undefined. The field is passed anyway so
+  // a future non-5xx failure mode would surface its detail instead of being
+  // silently dropped.
+  //
+  // .catch rather than an async handler because onSelect is Radix's
+  // synchronous callback. Raising the toast after RequireAuth has already
+  // redirected and unmounted this menu is safe: sonner's toast is a
+  // module-level imperative API rendered by the app-root <Toaster>, not
+  // component state.
+  const handleSignOut = () => {
+    logout().catch((err: unknown) => {
+      const apiError = createErrorFromUnknown(err);
+      toast.error('Signed out on this device, but the server may still have an active session.', {
+        description: apiError.detail,
+      });
+    });
+  };
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -61,7 +93,7 @@ export function ProfileMenu() {
           )}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void logout()}>Sign out</DropdownMenuItem>
+        <DropdownMenuItem onSelect={handleSignOut}>Sign out</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
