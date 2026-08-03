@@ -156,6 +156,21 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, varia
 		r.Get("/media/{id}/content", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			id := chi.URLParam(req, "id")
+			// Per-fleet authorized bytes — never store in a shared cache.
+			// private is unconditional on every response this handler can
+			// produce; only the freshness half varies, and the success path
+			// below narrows it.
+			//
+			// no-store is the default because every error this handler returns
+			// answers differently a moment later with nothing able to
+			// invalidate it: a 404 for an unservable card becomes a 200 once
+			// the generation that miss schedules completes, a 404 for an
+			// unknown id becomes a 200 on upload, and a 403 becomes a 200 when
+			// fleet membership changes. A 404 with no explicit directive is
+			// heuristically cacheable (RFC 9111 §4.2.2), so leaving the header
+			// off would let a browser pin "no image" under the URL the same way
+			// it was pinning the soft image.
+			w.Header().Set("Cache-Control", "private, no-store")
 			v, err := ParseContentVariant(req.URL.Query().Get("variant"))
 			if err != nil {
 				server.WriteError(w, err)
@@ -204,8 +219,20 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, varia
 			if info.Size > 0 {
 				w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 			}
-			// Per-fleet authorized bytes — never store in a shared cache.
-			w.Header().Set("Cache-Control", "private, max-age=300")
+			// Bytes were served, so the no-store default set above narrows to
+			// the normal freshness window — unless they are not the bytes that
+			// were asked for.
+			cacheControl := "private, max-age=300"
+			if info.Downgraded {
+				// The bytes under this URL are a stand-in for a card that is
+				// usually generated within seconds of this request. Storing
+				// them would pin the soft image to the sharp image's URL for
+				// the whole max-age window, with nothing able to invalidate it
+				// — the response records no substitution, so no client and no
+				// cache can tell it apart from the real thing.
+				cacheControl = "private, no-store"
+			}
+			w.Header().Set("Cache-Control", cacheControl)
 			w.WriteHeader(http.StatusOK)
 			if _, err := io.Copy(w, rc); err != nil {
 				// Headers are already written, so the status cannot be changed;

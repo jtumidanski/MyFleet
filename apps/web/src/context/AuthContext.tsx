@@ -23,6 +23,11 @@ export interface AuthContextValue {
   isLoading: boolean;
   /** `returnTo` is a site-relative path to land on after the OAuth round-trip. */
   login: (returnTo?: string) => void;
+  /**
+   * Ends the local session unconditionally; rejects when the server-side
+   * revoke failed, so the caller can warn that the session may still be live
+   * on the server. See AuthProvider for the full contract.
+   */
   logout: () => Promise<void>;
 }
 
@@ -67,11 +72,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = buildLoginUrl(returnTo);
   }, []);
 
+  /**
+   * Ends the session.
+   *
+   * Signs out LOCALLY in every case — access token cleared, identity cache
+   * purged — because the user asked to leave and a server failure does not
+   * revoke that request. It then REJECTS to report that the *server* side may
+   * not have completed: the refresh-token family may still be live, and only
+   * the caller is positioned to tell the user so. Both happen, not either.
+   *
+   * `finally` rethrows implicitly, which is what makes "teardown always runs"
+   * and "the rejection still propagates" one construct rather than two.
+   */
   const logout = useCallback(async () => {
-    await logoutRequest();
-    clearAccessToken();
-    setHasToken(false);
-    queryClient.removeQueries({ queryKey: authKeys.all });
+    try {
+      await logoutRequest();
+    } finally {
+      clearAccessToken();
+      setHasToken(false);
+      queryClient.removeQueries({ queryKey: authKeys.all });
+    }
   }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(() => {
