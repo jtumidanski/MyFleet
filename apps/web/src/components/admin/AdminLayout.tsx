@@ -1,16 +1,28 @@
-import { NavLink, Outlet, Link } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
-import { cn } from '../../lib/utils';
-import { BrandMark } from '../BrandMark';
-import { ThemeToggle } from '../ThemeToggle';
-import { Button } from '../ui/button';
+import { ArrowLeft, Building2, LayoutDashboard, ScrollText, Trash2, Users } from 'lucide-react';
+import { Link, Outlet } from 'react-router-dom';
+import { BrandLink } from '../frame/BrandLink';
+import { FrameHeader } from '../frame/FrameHeader';
+import { FrameNav, type FrameNavItem } from '../frame/FrameNav';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarSeparator,
+} from '../ui/sidebar';
 
-const ADMIN_NAV = [
-  { to: '/admin', label: 'Overview', end: true },
-  { to: '/admin/fleets', label: 'Fleets' },
-  { to: '/admin/users', label: 'Users' },
-  { to: '/admin/purges', label: 'Purges' },
-  { to: '/admin/audit', label: 'Audit log' },
+const ADMIN_NAV: readonly FrameNavItem[] = [
+  { to: '/admin', label: 'Overview', icon: LayoutDashboard, end: true },
+  { to: '/admin/fleets', label: 'Fleets', icon: Building2 },
+  { to: '/admin/users', label: 'Users', icon: Users },
+  { to: '/admin/purges', label: 'Purges', icon: Trash2 },
+  { to: '/admin/audit', label: 'Audit log', icon: ScrollText },
 ];
 
 /**
@@ -19,59 +31,42 @@ const ADMIN_NAV = [
  * A dedicated shell gives destructive tooling an unmistakable mode boundary,
  * makes fleet browsing the centre of the console rather than a side trip, and
  * resolves the fleetless-admin routing problem structurally (FR-ADMIN-UI-2).
+ * The two shells share PRIMITIVES and the header row; they are still two files.
  */
 export function AdminLayout() {
-  const { user, logout } = useAuth();
-
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r border-border bg-card p-4">
-        <div className="mb-6 flex items-center gap-2 text-lg font-semibold">
-          <BrandMark className="h-5 w-5" />
-          <span>
-            MyFleet <span className="text-muted-foreground">admin</span>
-          </span>
-        </div>
-        <nav className="flex flex-col gap-1">
-          {ADMIN_NAV.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                cn(
-                  'rounded px-3 py-2 text-sm font-medium',
-                  isActive
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                )
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="mt-6 border-t border-border pt-4">
-          <Link
-            to="/"
-            className="rounded px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-          >
-            Back to my fleet
-          </Link>
-        </div>
-      </aside>
-      <div className="flex flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-border px-6 py-3">
-          <span className="text-sm text-muted-foreground">
-            {user?.attributes.displayName ?? ''}
-          </span>
-          <div className="flex items-center gap-2">
-            <ThemeToggle />
-            <Button type="button" variant="outline" size="sm" onClick={() => void logout()}>
-              Sign out
-            </Button>
-          </div>
-        </header>
+    <SidebarProvider>
+      <Sidebar collapsible="icon">
+        <SidebarHeader>
+          <BrandLink to="/admin" label="MyFleet" suffix="admin" ariaLabel="MyFleet admin home" />
+        </SidebarHeader>
+        <SidebarContent>
+          <FrameNav items={ADMIN_NAV} ariaLabel="Admin" />
+        </SidebarContent>
+        {/*
+          "Back to my fleet" sits in the footer, visually separated from the nav
+          proper (FR-NAV-7). Footer rather than a sixth nav row is the
+          structural expression of "this is the exit, not a destination" — the
+          same intent the old border-t block carried, now carried by the
+          primitive's own slot.
+        */}
+        <SidebarFooter>
+          <SidebarSeparator />
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton asChild tooltip="Back to my fleet">
+                <Link to="/">
+                  <ArrowLeft aria-hidden="true" />
+                  <span>Back to my fleet</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
+      <SidebarInset>
+        <FrameHeader />
         {/*
           The persistent mode band (FR-ADMIN-UI-3). danger-subtle, NOT
           --destructive: that token is reserved for destructive CONTROLS under
@@ -90,7 +85,7 @@ export function AdminLayout() {
         <main className="flex-1 p-6">
           <Outlet />
         </main>
-      </div>
-    </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
