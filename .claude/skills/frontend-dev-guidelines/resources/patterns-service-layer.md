@@ -223,7 +223,7 @@ All write operations use the JSON:API envelope:
 
 This applies even to "action" endpoints whose body has no meaningful attributes — restore, confirm, retry, and similar. If the backend route is wired through `server.RegisterInputHandler[T]` (`packages/shared-go/server/handler.go:47-60`), it decodes the body as a JSON:API envelope *before* the handler runs. A body that fails to decode (including a bare `{}` when a differently-shaped envelope was expected, or malformed JSON) returns **422 with `server.ErrValidation`** (`handler.go:54-56`), and the action never executes. This used to be documented as a `400 "Could not parse request body"`; it isn't — `RegisterInputHandler` always answers decode failures with `ErrValidation`, which serializes as 422.
 
-For these endpoints, send the full envelope with empty (or minimal) attributes, using the service's own `resourceType` — not a backend `GetName()` call, which doesn't exist in this codebase:
+For these endpoints, send the full envelope with empty (or minimal) attributes, using the service's own `resourceType`. The `type` string is a literal the service declares; there is no backend accessor the frontend can consult for it:
 
 ```typescript
 // VehicleService.ts:40-49
