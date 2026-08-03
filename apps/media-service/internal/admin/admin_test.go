@@ -50,6 +50,10 @@ func newMediaDB(t *testing.T) *gorm.DB {
 			id TEXT PRIMARY KEY, media_object_id TEXT, variant TEXT, object_key TEXT,
 			width INTEGER, height INTEGER, content_type TEXT, created_at DATETIME,
 			deleted_at DATETIME, purge_operation_id TEXT)`,
+		`CREATE TABLE media.media_variant_failures (
+			media_object_id TEXT, variant TEXT, reason TEXT, failed_at DATETIME,
+			deleted_at DATETIME, purge_operation_id TEXT,
+			PRIMARY KEY (media_object_id, variant))`,
 		`CREATE TABLE media.processed_events (event_id TEXT PRIMARY KEY, processed_at DATETIME)`,
 	}
 	for _, stmt := range ddl {
@@ -66,6 +70,10 @@ func newMediaDB(t *testing.T) *gorm.DB {
 		 VALUES ('mv-1', 'mo-1', 'thumb', 'k/mo-1-thumb')`,
 		`INSERT INTO media.media_variants (id, media_object_id, variant, object_key)
 		 VALUES ('mv-2', 'mo-2', 'thumb', 'k/mo-2-thumb')`,
+		`INSERT INTO media.media_variant_failures (media_object_id, variant, reason, failed_at)
+		 VALUES ('mo-1', 'card', 'undecodable', CURRENT_TIMESTAMP)`,
+		`INSERT INTO media.media_variant_failures (media_object_id, variant, reason, failed_at)
+		 VALUES ('mo-2', 'card', 'undecodable', CURRENT_TIMESTAMP)`,
 		`INSERT INTO media.processed_events (event_id, processed_at)
 		 VALUES ('evt-1', CURRENT_TIMESTAMP)`,
 	}
@@ -302,5 +310,59 @@ func TestReap_sparedRowKeepsItsOperationIDSoTheNextTickCanRetry(t *testing.T) {
 	db.Raw(`SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`).Scan(&rows)
 	if rows != 0 {
 		t.Error("the row survived a successful retry")
+	}
+}
+
+// FR-ADMIN-1/2. The ledger joins the manifest so an admin reap does not leave
+// its rows orphaned — the same defect the hourly sweep has, on a different
+// route. The full stamp -> restore -> reap round-trip, because each phase keys
+// on a different column and any one of them can be the thing that is missing.
+func TestPurge_reachesTheVariantFailureLedger(t *testing.T) {
+	db := newMediaDB(t)
+	r := newMediaRouter(t, db, &recordingRemover{})
+	const scope = `{"operation_id":"op-1","scope":"fleet","fleet_ids":["fleet-1"]}`
+
+	rec := post(t, r, "/internal/admin/purge", scope)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("stamp status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var stamped struct {
+		Affected map[string]int `json:"affected"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &stamped); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if stamped.Affected["media_variant_failures"] != 1 {
+		t.Errorf("affected = %+v, want one media_variant_failures row", stamped.Affected)
+	}
+
+	// Restore must bring it back, or a cancelled purge leaves the ledger
+	// soft-deleted forever and lazy generation silently re-enables.
+	restore := httptest.NewRecorder()
+	r.ServeHTTP(restore, httptest.NewRequest(http.MethodDelete, "/internal/admin/purge/op-1", nil))
+	if restore.Code != http.StatusOK {
+		t.Fatalf("restore status = %d: %s", restore.Code, restore.Body.String())
+	}
+	var live int64
+	db.Raw(`SELECT count(*) FROM media.media_variant_failures
+	        WHERE media_object_id = 'mo-1' AND deleted_at IS NULL`).Scan(&live)
+	if live != 1 {
+		t.Errorf("restore left %d of 1 ledger rows live", live)
+	}
+
+	// And a reap must actually remove it.
+	post(t, r, "/internal/admin/purge", scope)
+	if rec := post(t, r, "/internal/admin/reap/op-1", ""); rec.Code != http.StatusOK {
+		t.Fatalf("reap status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var left int64
+	db.Raw(`SELECT count(*) FROM media.media_variant_failures WHERE media_object_id = 'mo-1'`).Scan(&left)
+	if left != 0 {
+		t.Errorf("reap left %d ledger rows behind for the purged media object", left)
+	}
+	// The other tenant's ledger row is untouched.
+	db.Raw(`SELECT count(*) FROM media.media_variant_failures WHERE media_object_id = 'mo-2'`).Scan(&left)
+	if left != 1 {
+		t.Errorf("the purge reached another tenant's ledger rows: %d of 1 left", left)
 	}
 }
