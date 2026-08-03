@@ -157,4 +157,13 @@ describe('AdminLayout', () => {
     const { container } = renderAdminLayout();
     expect(container.querySelector('main')).toHaveClass('p-6');
   });
+
+  // risks.md: "two main landmarks" is a named risk. querySelector alone finds
+  // the FIRST <main>, so if SidebarInset ever reverted to upstream's own
+  // <main> this would still pass on the p-6 check while silently leaving a
+  // second, unstyled landmark in the DOM. State the invariant directly.
+  it('renders exactly one main landmark', () => {
+    const { container } = renderAdminLayout();
+    expect(container.querySelectorAll('main')).toHaveLength(1);
+  });
 });

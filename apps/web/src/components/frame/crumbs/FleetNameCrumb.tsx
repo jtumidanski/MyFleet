@@ -1,5 +1,4 @@
 import { useAdminFleet } from '../../../lib/hooks/api/admin';
-import { Skeleton } from '../../ui/skeleton';
 
 /**
  * The crumb standing for `/admin/fleets/:id`.
@@ -11,7 +10,11 @@ import { Skeleton } from '../../ui/skeleton';
 export function FleetNameCrumb({ id }: { id: string }) {
   const { data, isLoading } = useAdminFleet(id);
 
-  if (isLoading) return <Skeleton className="h-4 w-24" />;
+  // An inline span, not <Skeleton>: it renders inside BreadcrumbPage's
+  // <span>, and Skeleton is a <div> — invalid phrasing-content nesting.
+  if (isLoading) {
+    return <span className="inline-block h-4 w-24 animate-pulse rounded-md bg-muted" aria-hidden />;
+  }
 
   const attributes = data?.attributes;
   if (!attributes) return <>{id}</>;

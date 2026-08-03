@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { TRAILS, resolveTrail } from './breadcrumbTrails';
 
@@ -187,4 +190,69 @@ describe('TRAILS', () => {
       });
     }
   });
+});
+
+/**
+ * Everything above pins TRAILS against ITSELF — twelve internally-consistent
+ * rows. Nothing so far pins it against the actual route tree: add a route to
+ * App.tsx and forget its trail here, and nothing goes red. That page simply
+ * gets no breadcrumb — AppBreadcrumb resolves null and renders nothing — which
+ * is invisible in both a diff and a screenshot.
+ *
+ * This reads App.tsx as source (the same idiom as src/test/conventions.test.ts
+ * and sidebarTokens.test.ts) and extracts every path that renders INSIDE one
+ * of the two authenticated shells, then asserts resolveTrail knows each one.
+ *
+ * Deliberately excluded, by scope rather than by accident:
+ *  - /login: unauthenticated, no shell.
+ *  - /onboarding and /invites/:token/accept: RequireAuth-guarded, but NOT
+ *    nested inside AppLayout or AdminLayout — they render no shell, so
+ *    FR-CRUMB-7 says there is no breadcrumb region to suppress.
+ * Both shells wrap their children in a single non-self-closing <Route>, and
+ * every child Route is self-closing, so the block from the shell component's
+ * tag to the next literal `</Route>` is exactly that shell's route list —
+ * no comment-text dependency, no JSX parser required.
+ */
+describe('App.tsx route tree vs breadcrumbTrails', () => {
+  const FRAME_DIR = dirname(fileURLToPath(import.meta.url));
+  const WEB_ROOT = resolve(FRAME_DIR, '../../..');
+  const APP_TSX = readFileSync(resolve(WEB_ROOT, 'src/App.tsx'), 'utf8');
+
+  /** The child-route block for the shell component whose tag is `marker`. */
+  function shellBlock(marker: string): string {
+    const start = APP_TSX.indexOf(marker);
+    if (start === -1) throw new Error(`App.tsx: could not find ${marker}`);
+    const end = APP_TSX.indexOf('</Route>', start);
+    if (end === -1) throw new Error(`App.tsx: ${marker}'s enclosing <Route> is never closed`);
+    return APP_TSX.slice(start, end);
+  }
+
+  /** Every route inside a shell block, as absolute pathnames. */
+  function extractPaths(block: string, rootPrefix: string): string[] {
+    const paths: string[] = [];
+    if (/<Route\s+index\b/.test(block)) paths.push(rootPrefix === '' ? '/' : rootPrefix);
+    const pathPattern = /<Route\s+path="([^"]+)"/g;
+    let match: RegExpExecArray | null;
+    while ((match = pathPattern.exec(block))) {
+      const raw = match[1] as string;
+      paths.push(raw.startsWith('/') ? raw : `${rootPrefix}/${raw}`);
+    }
+    return paths;
+  }
+
+  const appShellPaths = extractPaths(shellBlock('<AppLayout'), '');
+  const adminShellPaths = extractPaths(shellBlock('<AdminLayout'), '/admin');
+  const shellRoutes = [...appShellPaths, ...adminShellPaths];
+
+  // A guard on the extraction itself: if this count drifts, the paths below
+  // are extracting the wrong thing rather than reflecting a route change.
+  it('finds twelve routes rendering inside a shell today', () => {
+    expect(shellRoutes).toHaveLength(12);
+  });
+
+  for (const path of shellRoutes) {
+    it(`resolveTrail knows the shell route ${path}`, () => {
+      expect(resolveTrail(path)).not.toBeNull();
+    });
+  }
 });

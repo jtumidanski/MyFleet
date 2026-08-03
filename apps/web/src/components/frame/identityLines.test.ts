@@ -30,6 +30,16 @@ describe('identityLines', () => {
     });
   });
 
+  // The other half of that fallback: a display name present with no email
+  // also produces an empty secondary line — ProfileMenu's `secondary !== ''`
+  // guard must suppress it exactly the same as the no-display-name case.
+  it('leaves the secondary empty when there is a display name but no email', () => {
+    expect(identityLines(user('Ada Lovelace', ''))).toEqual({
+      primary: 'Ada Lovelace',
+      secondary: '',
+    });
+  });
+
   it('treats a whitespace-only display name as absent', () => {
     expect(identityLines(user('   ', 'ada@example.com')).primary).toBe('ada@example.com');
   });

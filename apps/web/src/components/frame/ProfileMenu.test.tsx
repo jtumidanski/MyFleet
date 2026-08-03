@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ProfileMenu } from './ProfileMenu';
 import type { AuthContextValue } from '../../context/AuthContext';
@@ -93,6 +93,28 @@ describe('ProfileMenu', () => {
   it('renders no image when there is no avatar url', () => {
     const { container } = renderMenu();
     expect(container.querySelector('img')).toBeNull();
+  });
+
+  // The other half of "no image": the CircleUser fallback icon must actually
+  // be there, not just the absence of an <img>.
+  it('renders the fallback icon when there is no avatar url', () => {
+    const { container } = renderMenu();
+    expect(container.querySelector('svg')).toBeInTheDocument();
+  });
+
+  // FR-PROFILE-1's onError handler: a broken avatar URL must flip back to the
+  // icon rather than leaving a broken image frame in the trigger.
+  it('falls back to the icon when the avatar image fails to load', () => {
+    const { container } = renderMenu({
+      user: user({ avatarUrl: 'https://example.test/broken.png' }),
+    });
+
+    const img = container.querySelector('img');
+    expect(img).not.toBeNull();
+    fireEvent.error(img as Element);
+
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('svg')).toBeInTheDocument();
   });
 
   // FR-PROFILE-4, through the component rather than the pure function.

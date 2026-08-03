@@ -68,4 +68,17 @@ describe('DropdownMenu', () => {
 
     expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
   });
+
+  // Untested Radix default, credited by the plan's Verification Checklist as
+  // "moves with arrows" — this closes that gap. ArrowDown from the trigger
+  // moves focus to the first (and here, only) menuitem.
+  it('moves focus to the menu item with ArrowDown', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+
+    await user.click(screen.getByRole('button', { name: 'Account menu' }));
+    await user.keyboard('{ArrowDown}');
+
+    expect(screen.getByRole('menuitem', { name: 'Sign out' })).toHaveFocus();
+  });
 });

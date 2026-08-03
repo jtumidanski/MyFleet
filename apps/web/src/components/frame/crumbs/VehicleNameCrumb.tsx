@@ -1,5 +1,4 @@
 import { useVehicle } from '../../../lib/hooks/api/vehicles';
-import { Skeleton } from '../../ui/skeleton';
 
 /**
  * The crumb standing for `/vehicles/:id`.
@@ -12,9 +11,13 @@ import { Skeleton } from '../../ui/skeleton';
 export function VehicleNameCrumb({ id }: { id: string }) {
   const { data, isLoading } = useVehicle(id);
 
-  // Skeleton is aria-hidden by construction, so the crumb announces nothing
+  // An inline span carrying Skeleton's classes, not <Skeleton> itself: this
+  // renders inside BreadcrumbPage's <span>, and Skeleton is a <div> — invalid
+  // phrasing-content nesting. aria-hidden so the crumb announces nothing
   // until the name lands — better than announcing a UUID (FR-CRUMBNAME-4).
-  if (isLoading) return <Skeleton className="h-4 w-24" />;
+  if (isLoading) {
+    return <span className="inline-block h-4 w-24 animate-pulse rounded-md bg-muted" aria-hidden />;
+  }
 
   const attributes = data?.attributes;
   // Covers error, 404 and soft-deleted alike (FR-CRUMBNAME-5).
