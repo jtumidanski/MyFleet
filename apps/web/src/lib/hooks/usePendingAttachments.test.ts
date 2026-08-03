@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { usePendingAttachments, MAX_ATTACHMENTS } from './usePendingAttachments';
 import { mediaService } from '../../services/api/MediaService';
+import { expectNoCall } from '../../test/expectNoCall';
 
 vi.mock('../../services/api/MediaService', () => ({
   mediaService: {
@@ -89,7 +90,7 @@ describe('usePendingAttachments', () => {
     await waitFor(() => expect(result.current.items[0]!.status).toBe('failed'));
 
     act(() => result.current.remove(result.current.items[0]!.localId));
-    expect(mediaService.remove).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(mediaService.remove), 'mediaService.remove');
   });
 
   // Abandoning the form soft-deletes everything uploaded but never attached
@@ -121,7 +122,7 @@ describe('usePendingAttachments', () => {
     expect(committed).toEqual(['m1']);
 
     unmount();
-    expect(mediaService.remove).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(mediaService.remove), 'mediaService.remove');
   });
 
   it('stops accepting files at the cap', async () => {

@@ -194,6 +194,81 @@ instruction; both edits were probe-only explorations, reverted with
 `git checkout --` immediately after use, and no production behaviour was
 altered by this task.
 
+| 4 | `apps/web/src/lib/hooks/api/media.test.ts` | rejects an oversized file before any request, with a message naming the limit | `deps.initUpload` | `if (file.size > MEDIA_MAX_UPLOAD_BYTES)` early throw deleted in `performMediaUpload` (`src/lib/hooks/api/media.ts`) | green (probe inserted before the three `not.toHaveBeenCalled()` lines, after the pre-existing `await expect(...).rejects.toMatchObject(...)`; nothing yields between the probe and the plain assertions) | red⁸ (call recorded as `[{ contentType: 'image/jpeg', originalFilename: 'huge.jpg' }]`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 5 | `apps/web/src/lib/hooks/api/media.test.ts` | rejects an oversized file before any request, with a message naming the limit | `deps.putContent` | same guard as site 4 | green (same reasoning as site 4) | red⁸ (call recorded as `['m1', File {}]`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 6 | `apps/web/src/lib/hooks/api/media.test.ts` | rejects an oversized file before any request, with a message naming the limit | `deps.confirm` | same guard as site 4 | green (same reasoning as site 4) | red⁸ (call recorded as `['m1']`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 7 | `apps/web/src/lib/hooks/usePendingAttachments.test.ts` | does not call remove for an item that never uploaded | `mediaService.remove` | `if (target?.mediaId)` condition removed in `remove` (`src/lib/hooks/usePendingAttachments.ts`), calling `void mediaService.remove(target?.mediaId ?? 'probe')` unconditionally | green (probe after `act(() => result.current.remove(...))`, before the plain assertion; nothing yields in between) | red (call recorded as `['probe']`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 8 | `apps/web/src/lib/hooks/usePendingAttachments.test.ts` | commit disarms the unmount cleanup and returns the media ids | `mediaService.remove` | `if (committedRef.current) { return; }` disarm deleted from the unmount `useEffect` | green (probe after `unmount()`, before the plain assertion; nothing yields in between) | red (call recorded as `['m1']`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 28 | `apps/web/src/lib/hooks/api/media.test.ts` | revokes the previous URL exactly once when the id changes, and the new URL survives | `revokeObjectURL` (**With** `secondUrl`) | see finding⁹ — the brief's prescribed "revoke `entry?.url` instead of `objectUrl`" edit is a structural no-op; the guard actually defeated is a stray immediate `URL.revokeObjectURL(objectUrl)` added right after `setEntry(...)` in `useMediaContentUrl`'s effect | green (probe carrying `secondUrl`, inserted after the two pre-existing positive assertions, before the target assertion; nothing yields in between) | red⁹ (3 calls; the 3rd recorded as `secondUrl`) | falsifiable | migrated to `expectNoCallWith`, the two positive assertions above it left in place | n/a (was never vacuous) |
+
+⁸ **Finding — Stage 2 for sites 4–6 initially lands on an earlier line.** In
+the full (unmodified) test, deleting the `if (file.size >
+MEDIA_MAX_UPLOAD_BYTES)` guard makes the pre-existing `await
+expect(performMediaUpload(bigFile, deps)).rejects.toMatchObject({ status:
+413, ... })` assertion fail first: `deps.initUpload`/`putContent`/`confirm`
+are bare `vi.fn()`s with no resolved value, so `media.id` is read off
+`undefined` (`media` resolves to `undefined`) and the function rejects with a
+`TypeError` instead of the expected `ApiError` shape, without ever reaching
+the three `not.toHaveBeenCalled()` lines. Per migration-context.md's
+"Stage-2 evidence quality" note, that is weaker evidence. Strengthened in an
+isolated, uncommitted copy of the test: `deps` given resolved values
+(`initUpload` → `{ id: 'm1' }`, `putContent`/`confirm` → `{}`) and the
+`.rejects.toMatchObject(...)` line replaced with `await
+performMediaUpload(bigFile, deps).catch(() => undefined);`, then each of the
+other two `not.toHaveBeenCalled()` lines removed in turn so only the target
+spy's assertion remained. With the guard deleted: `deps.initUpload` fails
+directly, call recorded as `[{ contentType: 'image/jpeg', originalFilename:
+'huge.jpg' }]`; `deps.putContent` fails with `['m1', File {}]`; `deps.confirm`
+fails with `['m1']`. Every one of these calls is **synchronous** — the guard
+being gone means `deps.initUpload` is invoked the instant `performMediaUpload`
+runs, before its own first `await` even suspends — which is exactly why
+Stage 1 (a microtask probe with nothing yielding between it and the plain
+assertions, per the human ruling) came back green while Stage 2 came back
+red: combining-table row 2 ("falsifiable only because the defeated guard
+fires synchronously"), not vacuous, the same shape as sites 1/2 and 24–27
+above. Both the mock-strengthening and the guard deletion were probe-only,
+reverted (`git checkout --` for the production file; the strengthened test
+copy was never committed) immediately after use.
+
+⁹ **Finding — the task-6 brief's prescribed Stage-2 edit for site 28 does not
+defeat the guard this assertion depends on; it is a structural no-op, not
+merely a fragile pass.** The brief names: in `useMediaContentUrl`'s effect
+cleanup, change `return () => URL.revokeObjectURL(objectUrl)` to instead
+revoke `entry?.url` (falling back to `objectUrl`), "so the new URL is revoked
+too." Applied literally: the full test still **passed unchanged** — no
+observable difference from the original. Verified why with temporary
+`console.log` instrumentation of the effect (probe-only, reverted): `entry`
+inside the cleanup closure is `null` at the moment *every* cleanup for this
+hook is created, for both URLs. React Query returns `data: undefined` for a
+freshly-keyed id before its fetch resolves, and the hook's
+`if (!data) { setEntry(null); ...; return; }` branch always runs in between
+two different ids — committing `entry = null` before the *next* id's effect
+creates its own object URL — so `entry?.url ?? objectUrl` provably falls back
+to `objectUrl` every time, identical to the original code, for any sequence
+of id changes. More fundamentally: React guarantees a given effect's cleanup
+always runs strictly before the *next* effect body for the same hook slot,
+so no closure- or ref-based rewrite of "what the cleanup reads" can ever
+observe a value written by a later effect run — and in this specific test
+(no `unmount()`, only one id change), the cleanup that would revoke the
+*second* url never fires at all before the assertion executes, regardless of
+what it reads. The guard this assertion actually depends on is therefore not
+"what does the cleanup read" but "does anything revoke the new url before its
+own effect's teardown" — defeated instead by adding a stray immediate
+`URL.revokeObjectURL(objectUrl)` right after `setEntry(...)` inside the
+effect (a plausible copy/paste-style regression: "revoke on every allocation"
+instead of "revoke on cleanup only"). Run against the full (otherwise
+unmodified) test, this edit fails at the earlier
+`expect(revokeObjectURL).toHaveBeenCalledTimes(1)` line (3 calls, not 1) —
+weaker evidence per migration-context.md's note. Strengthened in an isolated,
+uncommitted copy of the test with the two preceding positive assertions
+removed, leaving only `expect(revokeObjectURL).not.toHaveBeenCalledWith(secondUrl)`:
+fails directly, 3 calls recorded, the 3rd matching `secondUrl` exactly. Both
+the brief's literal edit and the corrected one were probe-only explorations,
+reverted with `git checkout --` immediately after use; the committed
+production file carries neither, and the table's Guard-defeated cell reflects
+the corrected edit, not the brief's literal instruction — the same pattern as
+footnote 7's site 15 correction.
+
 ## FR-TRIAGE-4 sites (unprobeable)
 
 Task 4 attempted its one predicted FR-TRIAGE-4 candidate (site 3,
