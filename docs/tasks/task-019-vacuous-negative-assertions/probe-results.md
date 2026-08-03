@@ -16,26 +16,43 @@ Verdict legend: **falsifiable** / **vacuous** / **unprobeable**.
 
 | # | File | Test title | Spy | Guard defeated (stage 2) | S1 | S2 | Verdict | Fix | Re-probe |
 |---|---|---|---|---|---|---|---|---|---|
-| 39 | `apps/web/src/pages/LoginPage.test.tsx` | cycles the theme without issuing a request | `fetchSpy` | (a) no-token early return in `updateThemePreference`; (b) signed-out page pointed at the mutation-bearing `ThemeToggle` (both required — FR-FIX-2) | green¹ | red (3 calls to `/api/auth/me`) | falsifiable, fragile | migrated to `expectNoCall` | red |
-| 40 | `apps/web/src/lib/hooks/api/auth.test.ts` | makes no request and resolves when there is no token | `fetchMock` | (a) no-token early return in `updateThemePreference` | green | red (request lands; downstream `TypeError` on the mock's undefined response) | falsifiable, fragile | migrated to `expectNoCall` (uniformity, FR-HELPER-3 — was already falsifiable) | red |
+| 39 | `apps/web/src/pages/LoginPage.test.tsx` | cycles the theme without issuing a request | `fetchSpy` | (a) no-token early return in `updateThemePreference`; (b) signed-out page pointed at the mutation-bearing `ThemeToggle` (both required — FR-FIX-2) | red¹ (1 call) | red (3 calls to `/api/auth/me`) | falsifiable | migrated to `expectNoCall` | red |
+| 40 | `apps/web/src/lib/hooks/api/auth.test.ts` | makes no request and resolves when there is no token | `fetchMock` | (a) no-token early return in `updateThemePreference` | red¹ (1 call) | red (request lands; downstream `TypeError` on the mock's undefined response) | falsifiable | migrated to `expectNoCall` (uniformity, FR-HELPER-3 — was already falsifiable) | red |
 
-¹ Task 3's brief predicted S1 = red for site 39 on the theory that the
-pre-existing hand-rolled flush would let the synthetic probe be observed.
-Observed was green. Reason: the probe is inserted **immediately before** the
-final `expect(...)`, i.e. *after* the flush has already run and yielded —
-scheduling a microtask there and synchronously asserting on the very next line
-gives that microtask no chance to run before the assertion, regardless of
-whether anything upstream already yielded. This is row 2 of the design's
-combining table (`green, red → falsifiable only because the defeated guard
-fires synchronously`), not a contradiction of it: S2 defeats the guard at the
-real dispatch point (the `click()`s, well before the flush), so the
-pre-existing flush *does* catch that real dispatch even though it can never
-catch a probe scheduled after itself. Site 40 shows the same S1=green result
-for the identical structural reason. Because the mechanism is placement-driven
-rather than site-specific, this likely holds for Stage-1 probes generally
-whenever the probe is inserted after an existing flush/await rather than at the
-point of the real dispatch — worth a heads-up to later migration tasks, not a
-blocker to this one.
+¹ Stage 1 for both sites was re-run under the **human ruling recorded in
+migration-context.md ("Stage-1 probe placement — HUMAN RULING")**, which
+supersedes the plan's original "insert immediately before the assertion"
+wording. That literal wording is degenerate — a microtask queued immediately
+before a synchronous `expect()` can never run before it, so it returns green
+for every site regardless of what precedes it, and the first pass through
+this task recorded exactly that false green for both rows above. The ruling
+instead places the probe **at the dispatch point**: immediately after the
+statement that triggers the call under test, and before any intervening
+`await`/flush. Re-run against each site's pre-migration source (`git show
+bd5c43c:<path>`) under that placement:
+
+- Site 39: probe inserted after the third `act(() => toggle().click())` and
+  before the pre-existing hand-rolled
+  `await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); })`
+  flush. Command: `npx vitest run src/pages/LoginPage.test.tsx`. Result: RED —
+  `expected "fetch" to not be called at all, but actually been called 1
+  times`, the one call being `["__probe__"]`. The pre-existing flush is real
+  and catches a probe queued at the real dispatch point, which is what this
+  site's #20 fix is supposed to do.
+- Site 40: probe inserted immediately before
+  `await expect(updateThemePreference('dark')).resolves.toBeNull();` (the
+  trigger — `updateThemePreference` is invoked directly, not through a
+  mutation). Command: `npx vitest run src/lib/hooks/api/auth.test.ts`. Result:
+  RED — same failure shape, one `__probe__` call observed; the `await` on the
+  subject call itself drains the queued microtask.
+
+Both rows are corrected from green to red accordingly, and the verdict
+changes from "falsifiable, fragile" (row 2 of the design's combining table)
+to plain **falsifiable** (row 1: red/red). Stage 2, the migration, and the
+post-migration re-probes are unaffected by this correction — they were
+already run with the probe immediately before `await expectNoCall(...)`,
+which happens to coincide with the ruled placement once the helper's internal
+flush sits between the probe and its own assertion.
 
 ## FR-TRIAGE-4 sites (unprobeable)
 
