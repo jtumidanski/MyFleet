@@ -501,3 +501,79 @@ func TestWriteError_503KeepsTheRedactedEnvelope(t *testing.T) {
 		}
 	}
 }
+
+// TestRetryAfter_keepsStatusTitleAndClassification: RetryAfter must be as
+// invisible to everything else as Detailed is. It changes one response header
+// and nothing about the status, the envelope title, or what errors.Is sees.
+func TestRetryAfter_keepsStatusTitleAndClassification(t *testing.T) {
+	wrapped := RetryAfter(ErrServiceUnavailable, 5)
+
+	if got := StatusFor(wrapped); got != 503 {
+		t.Fatalf("StatusFor = %d, want 503 — StatusFor must follow Unwrap to the base sentinel", got)
+	}
+	if got := wrapped.Error(); got != ErrServiceUnavailable.Error() {
+		t.Fatalf("Error() = %q, want %q — the wrapper must not rewrite the message", got, ErrServiceUnavailable.Error())
+	}
+	if !errors.Is(wrapped, ErrServiceUnavailable) {
+		t.Fatal("errors.Is(RetryAfter(...), ErrServiceUnavailable) must be true")
+	}
+}
+
+// TestRetryAfter_survivesAnIntermediateWrap is the shape the refresh handler
+// actually produces: membership wraps the sentinel with fmt.Errorf, the handler
+// wraps THAT with RetryAfter. errors.As has to walk the whole chain for the
+// header to survive, and errors.Is has to keep reaching the sentinel for the
+// status to survive.
+func TestRetryAfter_survivesAnIntermediateWrap(t *testing.T) {
+	fromUpstream := fmt.Errorf("%w: active membership lookup failed with status 500", ErrServiceUnavailable)
+
+	rec, got := writeErrorBody(t, RetryAfter(fromUpstream, 5))
+
+	if rec.Code != 503 {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if h := rec.Header().Get("Retry-After"); h != "5" {
+		t.Fatalf("Retry-After = %q, want \"5\"", h)
+	}
+	if got.Title != InternalErrorTitle || got.Detail != "" {
+		t.Fatalf("title/detail = %q/%q, want %q/empty", got.Title, got.Detail, InternalErrorTitle)
+	}
+}
+
+// TestWriteError_setsRetryAfterBeforeCommittingTheHeaderBlock is the whole
+// reason the header assignment sits where it does. WriteJSON calls WriteHeader,
+// and every header mutation after that is silently discarded — the response
+// would still be a 503 and every status-only assertion would still pass. Read
+// the header off the recorder AFTER WriteError returns: that is what catches it.
+func TestWriteError_setsRetryAfterBeforeCommittingTheHeaderBlock(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	WriteError(rec, RetryAfter(ErrServiceUnavailable, 5))
+
+	if h := rec.Result().Header.Get("Retry-After"); h != "5" {
+		t.Fatalf("Retry-After = %q on the committed response, want \"5\" — the header was set after WriteJSON wrote the header block", h)
+	}
+}
+
+// TestWriteError_omitsRetryAfterWhenThereIsNothingToSay: an absent wrapper is
+// the overwhelmingly common case (~190 call sites), and a non-positive value is
+// a caller bug — `Retry-After: 0` tells an intermediary to retry immediately,
+// which is the opposite of the intent. Both omit the header.
+func TestWriteError_omitsRetryAfterWhenThereIsNothingToSay(t *testing.T) {
+	cases := map[string]error{
+		"plain sentinel":     ErrServiceUnavailable,
+		"unrelated 4xx":      ErrConflict,
+		"unclassified error": errors.New("boom"),
+		"zero seconds":       RetryAfter(ErrServiceUnavailable, 0),
+		"negative seconds":   RetryAfter(ErrServiceUnavailable, -1),
+	}
+	for name, err := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			WriteError(rec, err)
+			if h := rec.Result().Header.Get("Retry-After"); h != "" {
+				t.Fatalf("Retry-After = %q, want no header at all", h)
+			}
+		})
+	}
+}
