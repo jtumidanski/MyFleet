@@ -40,9 +40,14 @@ export function ProfileMenu() {
   // The message is FIXED rather than apiError.message: WriteError redacts the
   // title of every 5xx to "internal server error", and 500 is the only status
   // this path produces, so the house `message || fallback` pattern would show
-  // the user that string and never reach the fallback. The ApiError is still
-  // built — its `detail` carries anything a gateway or transport error
-  // supplied, and sonner omits the description when it is undefined.
+  // the user that string and never reach the fallback. `apiError.detail` is
+  // undefined on this path today: createErrorFromUnknown is handed an
+  // already-built ApiError, which has no `.body`, so it falls through to the
+  // generic-Error branch and rebuilds a fresh ApiError with status/code/detail
+  // discarded; separately, WriteError only ever sets Detail below 500. sonner
+  // omits the description when it is undefined. The field is passed anyway so
+  // a future non-5xx failure mode would surface its detail instead of being
+  // silently dropped.
   //
   // .catch rather than an async handler because onSelect is Radix's
   // synchronous callback. Raising the toast after RequireAuth has already

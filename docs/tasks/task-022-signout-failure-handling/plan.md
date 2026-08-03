@@ -54,7 +54,7 @@ This is the load-bearing half. While `logoutHandler` returns `204` unconditional
 - Consumes: `Processor.Logout(raw string) error` (`processor.go:136-145`) — already collapses `ErrNotFound` to `nil`; `server.WriteError(w http.ResponseWriter, err error)` and `server.InternalErrorTitle` (`packages/shared-go/server/jsonapi.go:34,95`); `server.SetErrorLogger(log logrus.FieldLogger)` (`jsonapi.go:54`); `clearRefreshCookie(w http.ResponseWriter, secure bool)` (`resource.go:130`).
 - Produces: `newRefreshRouter(t *testing.T, resolve PrincipalResolver) (chi.Router, *Processor, *fakeStore, string)` — **note the widened return, the store is now returned third**; `postLogout(r chi.Router, raw string) *httptest.ResponseRecorder`; `unusedResolver`; `fakeStore.revokeErr error`.
 
-- [ ] **Step 1: Make the `RevokeFamily` failure path reachable in the fake store**
+- [x] **Step 1: Make the `RevokeFamily` failure path reachable in the fake store**
 
 `fakeStore` has no way to fail today, so the handler's error branch cannot be exercised. Add one field and an early return. Record the call *before* the injected failure so `revokedFamilies` stays a true call log — that is what lets a test tell "never called" apart from "called and failed".
 
@@ -93,7 +93,7 @@ func (f *fakeStore) RevokeFamily(familyID string, at time.Time) error {
 }
 ```
 
-- [ ] **Step 2: Widen the router helper to hand back the store, and quiet the 5xx logger**
+- [x] **Step 2: Widen the router helper to hand back the store, and quiet the 5xx logger**
 
 In `apps/auth-service/internal/session/resource_test.go`, replace `newRefreshRouter` (currently lines 18-38) with:
 
@@ -140,7 +140,7 @@ Update the two existing call sites for the new arity:
 - line 65: `r, proc, raw := newRefreshRouter(t, resolve)` → `r, proc, _, raw := newRefreshRouter(t, resolve)`
 - line 111: `r, _, raw := newRefreshRouter(t, resolve)` → `r, _, _, raw := newRefreshRouter(t, resolve)`
 
-- [ ] **Step 3: Add the logout request helper and the resolver stub**
+- [x] **Step 3: Add the logout request helper and the resolver stub**
 
 Append to `apps/auth-service/internal/session/resource_test.go`:
 
@@ -165,7 +165,7 @@ func unusedResolver(context.Context, string) (Principal, error) {
 }
 ```
 
-- [ ] **Step 4: Write the failing test — a revoke failure must produce a 500 that still clears the cookie**
+- [x] **Step 4: Write the failing test — a revoke failure must produce a 500 that still clears the cookie**
 
 Append to `apps/auth-service/internal/session/resource_test.go`:
 
@@ -287,7 +287,7 @@ func TestLogout_returns204ForAnUnknownToken(t *testing.T) {
 }
 ```
 
-- [ ] **Step 5: Run the tests and confirm the right one fails for the right reason**
+- [x] **Step 5: Run the tests and confirm the right one fails for the right reason**
 
 Run: `go test -race -run 'TestLogout|TestRefresh' github.com/jtumidanski/myfleet/apps/auth-service/internal/session -v`
 
@@ -297,7 +297,7 @@ Expected:
 
 If `TestLogout_returns500WhenTheFamilyRevokeFails` fails on anything other than the status assertion, stop and diagnose — the test harness is wrong, not the handler.
 
-- [ ] **Step 6: Implement the handler change**
+- [x] **Step 6: Implement the handler change**
 
 In `apps/auth-service/internal/session/resource.go`, replace `logoutHandler` (lines 85-96):
 
@@ -334,12 +334,12 @@ func logoutHandler(log logrus.FieldLogger, proc *Processor, cookieSecure bool) h
 }
 ```
 
-- [ ] **Step 7: Run the package tests and confirm they all pass**
+- [x] **Step 7: Run the package tests and confirm they all pass**
 
 Run: `go test -race github.com/jtumidanski/myfleet/apps/auth-service/...`
 Expected: PASS, including all four `TestLogout_*` cases.
 
-- [ ] **Step 8: Vet and commit**
+- [x] **Step 8: Vet and commit**
 
 ```bash
 go vet github.com/jtumidanski/myfleet/apps/auth-service/...
@@ -363,7 +363,7 @@ git commit -m "fix(auth-service): report a failed logout revoke as 500 instead o
 - Consumes: `apiClient.request<T>(path: string, init?: RequestInit): Promise<T>` (`packages/shared-ts/src/apiClient.ts:42`); `ApiError` and `createErrorFromUnknown` from `@myfleet/shared-ts` (`packages/shared-ts/src/errors.ts:3,23`).
 - Produces: `logoutRequest(): Promise<void>` — unchanged signature, now **rejecting** with an `ApiError` on a non-ok status and rejecting whatever `fetch` rejected with on a transport failure.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 In `apps/web/src/lib/hooks/api/auth.test.ts`, extend the existing import of `./auth` to include `logoutRequest`:
 
@@ -442,7 +442,7 @@ describe('logoutRequest', () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests to verify the first two fail**
+- [x] **Step 2: Run the tests to verify the first two fail**
 
 ```sh
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -454,7 +454,7 @@ Expected:
 - `rejects when the network request itself fails` — **FAIL** (resolves instead of rejecting).
 - `posts with credentials and treats 204 as success without parsing a body` — **PASS** already, as documented above.
 
-- [ ] **Step 3: Rewrite `logoutRequest` onto `apiClient`**
+- [x] **Step 3: Rewrite `logoutRequest` onto `apiClient`**
 
 Replace `apps/web/src/lib/hooks/api/auth.ts:63-71` with:
 
@@ -486,14 +486,14 @@ export async function logoutRequest(): Promise<void> {
 
 The `Content-Type: application/vnd.api+json` header is no longer passed explicitly — `apiClient.request` supplies it as a default header (`apiClient.ts:46`).
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 ```sh
 npm run -w apps/web test -- src/lib/hooks/api/auth.test.ts
 ```
 Expected: PASS, all three new cases plus the pre-existing `useMe` and `updateThemePreference` suites.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/lib/hooks/api/auth.ts apps/web/src/lib/hooks/api/auth.test.ts
@@ -514,7 +514,7 @@ git commit -m "fix(web): route logoutRequest through apiClient so failures rejec
 
 Why a new test file rather than extending `AuthContext.test.tsx`: that file mocks the whole `./AuthContext` module (`AuthContext.test.tsx:10-12`) so it can drive `RequireAuth` against arbitrary auth states, which means the real provider never runs there and cannot be rendered in it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/context/AuthProvider.logout.test.tsx`:
 
@@ -617,7 +617,7 @@ describe('AuthProvider logout', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify the failure case fails**
+- [x] **Step 2: Run the test to verify the failure case fails**
 
 ```sh
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -628,7 +628,7 @@ Expected:
 - `clears the local session and still rejects when the request fails` — **FAIL** on `expect(localStorage.getItem(ACCESS_TOKEN_KEY)).toBeNull()` (it is still `'tok-123'`). The `toBeInstanceOf(Error)` line above it passes already; the teardown assertions are the ones that matter.
 - `clears the local session and resolves when the request succeeds` — **PASS** already (happy-path regression pin).
 
-- [ ] **Step 3: Move the teardown into a `finally`**
+- [x] **Step 3: Move the teardown into a `finally`**
 
 In `apps/web/src/context/AuthContext.tsx`, replace `logout` (lines 55-60):
 
@@ -667,14 +667,14 @@ and document the contract on the interface member (line 25):
   logout: () => Promise<void>;
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```sh
 npm run -w apps/web test -- src/context/AuthProvider.logout.test.tsx
 ```
 Expected: PASS, both cases.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/context/AuthContext.tsx apps/web/src/context/AuthProvider.logout.test.tsx
@@ -699,7 +699,7 @@ git commit -m "fix(web): sign out locally even when the logout request fails"
 
 **The load-bearing decision here is the fixed message.** The app's house pattern is `toast.error(apiError.message || 'fallback copy')` (e.g. `FleetNameForm.tsx:34-35`). It is wrong here, and quietly so: `server.WriteError` overwrites the title with `InternalErrorTitle` — the literal string `"internal server error"` — for every status ≥ 500 (`packages/shared-go/server/jsonapi.go:34,100-112`). Since 500 is the only status this feature produces, `apiError.message` is a constant, the `||` fallback is never reached, and following the house pattern would show the user "internal server error" on the exact path that is supposed to explain what is still true. The `ApiError` is still constructed and still carries information into the toast via `description`.
 
-- [ ] **Step 1: Repair the fixtures that assume `logout` returns nothing**
+- [x] **Step 1: Repair the fixtures that assume `logout` returns nothing**
 
 `renderMenu`'s default and three test-local `logout` mocks are bare `vi.fn()`, which returns `undefined`. Once the component calls `logout().catch(...)` those throw `TypeError: Cannot read properties of undefined (reading 'catch')`. Fix all four **before** touching the component:
 
@@ -715,7 +715,7 @@ In `apps/web/src/components/admin/AdminLayout.test.tsx` line 142 (inside `it('ga
 
 The other `logout: vi.fn()` occurrences in the suite (`DashboardPage`, `ThemeSync`, `VehiclesPage`, `LoginPage`, `FrameHeader`, `RequirePlatformAdmin`, `postPurgeRouting`, `AuthContext`) never click Sign out and need no change.
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 In `apps/web/src/components/frame/ProfileMenu.test.tsx`, extend the two top imports:
 
@@ -776,7 +776,7 @@ and append these two cases inside the `describe('ProfileMenu', …)` block:
   });
 ```
 
-- [ ] **Step 3: Run the tests to verify the failure case fails**
+- [x] **Step 3: Run the tests to verify the failure case fails**
 
 ```sh
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -788,7 +788,7 @@ Expected:
 - `raises no toast when sign-out succeeds` — **PASS** already.
 - Every pre-existing case in the file — **PASS**.
 
-- [ ] **Step 4: Implement the handler**
+- [x] **Step 4: Implement the handler**
 
 In `apps/web/src/components/frame/ProfileMenu.tsx`, add the two imports at the top of the import block:
 
@@ -832,7 +832,7 @@ and replace the menu item (line 64):
         <DropdownMenuItem onSelect={handleSignOut}>Sign out</DropdownMenuItem>
 ```
 
-- [ ] **Step 5: Run the affected suites to verify they pass**
+- [x] **Step 5: Run the affected suites to verify they pass**
 
 ```sh
 npm run -w apps/web test -- src/components/frame/ProfileMenu.test.tsx \
@@ -840,7 +840,7 @@ npm run -w apps/web test -- src/components/frame/ProfileMenu.test.tsx \
 ```
 Expected: PASS, with no unhandled-rejection report.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/frame/ProfileMenu.tsx \
@@ -856,7 +856,7 @@ git commit -m "fix(web): surface a failed sign-out through an error toast"
 
 **Files:** none modified unless a gate fails.
 
-- [ ] **Step 1: Run the full CI gate**
+- [x] **Step 1: Run the full CI gate**
 
 ```sh
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -866,7 +866,7 @@ Expected: PASS for `lint-check`, `vet`, `test`, `build`, `fe-test`, `fe-build`, 
 
 `fe-build` runs `tsc -b`, and `tsconfig.app.json` includes all of `src` — so the new test file is type-checked too, under `strict`, `noUnusedLocals`, `noUnusedParameters` and `noUncheckedIndexedAccess`. If `tsc` flags an unused import or an unchecked index access in the new tests, fix it there rather than loosening the config.
 
-- [ ] **Step 2: Walk the acceptance criteria against the evidence**
+- [x] **Step 2: Walk the acceptance criteria against the evidence**
 
 Confirm each of these has a named test that ran green in Step 1 (no browser run — PRD D3 and design §6.5: the assertions here are control flow and status codes, and jsdom's blindness to CSS does not apply):
 
@@ -888,7 +888,7 @@ grep -n "void logout()" apps/web/src/components/frame/ProfileMenu.tsx           
 grep -rn "toast.error" apps/web/src/components/AppLayout.tsx apps/web/src/components/admin/AdminLayout.tsx  # expect: no matches (FR-LOGOUT-14)
 ```
 
-- [ ] **Step 3: Commit any fixes the gate required**
+- [x] **Step 3: Commit any fixes the gate required**
 
 If Step 1 was clean, there is nothing to commit and this step is a no-op. Otherwise:
 
@@ -905,11 +905,11 @@ git commit -m "fix(task-022): address make ci findings"
 
 CLAUDE.md requires this before a PR, and it is not optional even when the plan looks complete.
 
-- [ ] **Step 1: Request the review**
+- [x] **Step 1: Request the review**
 
 Invoke `superpowers:requesting-code-review`. Both a Go service and TypeScript/React files changed, so it should dispatch `plan-adherence-reviewer`, `backend-guidelines-reviewer` and `frontend-guidelines-reviewer`. Findings land in `docs/tasks/task-022-signout-failure-handling/audit.md`.
 
-- [ ] **Step 2: Act on the findings**
+- [x] **Step 2: Act on the findings**
 
 Use `superpowers:receiving-code-review` — verify each finding against the source before implementing it. Two findings are predictable and must be pushed back on with the reasoning already recorded here rather than silently accepted:
 - "Use the house `toast.error(apiError.message || 'fallback')` pattern" — no; see Task 4's rationale. `apiError.message` is the constant `"internal server error"` on this path.
