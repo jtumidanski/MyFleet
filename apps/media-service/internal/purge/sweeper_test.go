@@ -7,6 +7,8 @@ import (
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+
+	"github.com/jtumidanski/myfleet/apps/media-service/internal/mediaobject"
 )
 
 func newSweeper(t *testing.T, db *gorm.DB, store ObjectRemover, cfg Config) *Sweeper {
@@ -45,5 +47,153 @@ func TestRunOnce_leavesAdminStampedObjectsAlone(t *testing.T) {
 	}
 	if !store.didRemove("k/mo-user") {
 		t.Error("the sweep did not remove the purged object's own bytes")
+	}
+}
+
+// T1 / FR-PURGE-1/2/3. The whole point: four keys removed — the original and
+// all three variants, including the soft-deleted one — and nothing left in any
+// of the three tables.
+func TestRunOnce_removesEveryByteAndRowForAPurgedObject(t *testing.T) {
+	db := newTestDB(t)
+	seedMediaObject(t, db, "mo-1", hourAgo(), nil)
+	seedVariant(t, db, "mv-t", "mo-1", "thumbnail", "k/mo-1-thumbnail", nil)
+	seedVariant(t, db, "mv-c", "mo-1", "card", "k/mo-1-card", nil)
+	seedVariant(t, db, "mv-d", "mo-1", "display", "k/mo-1-display", nil)
+	// A soft-deleted card left behind by an earlier admin purge. The partial
+	// unique index admits it alongside the live one, and its bytes leak unless
+	// the sweep removes them too (FR-PURGE-1).
+	seedVariant(t, db, "mv-old", "mo-1", "card", "k/mo-1-card-old", hourAgo())
+	seedLedgerRow(t, db, "mo-1", "card")
+
+	store := newRemover()
+	if err := newSweeper(t, db, store, Config{}).RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	for _, key := range []string{
+		"k/mo-1", "k/mo-1-thumbnail", "k/mo-1-card", "k/mo-1-display", "k/mo-1-card-old",
+	} {
+		if !store.didRemove(key) {
+			t.Errorf("%s was never removed — its bytes leak forever once the rows are gone", key)
+		}
+	}
+	for _, c := range []struct {
+		what  string
+		query string
+	}{
+		{"variant", `SELECT count(*) FROM media.media_variants WHERE media_object_id = 'mo-1'`},
+		{"ledger", `SELECT count(*) FROM media.media_variant_failures WHERE media_object_id = 'mo-1'`},
+		{"media object", `SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`},
+	} {
+		if n := countRows(t, db, c.query); n != 0 {
+			t.Errorf("%d %s rows survived the purge", n, c.what)
+		}
+	}
+}
+
+// T2 / FR-PURGE-7. A failing VARIANT removal must leave every row in place —
+// including the media object's, which today's code deletes regardless. The
+// object must still be purgeable on the next tick.
+func TestRunOnce_aFailedVariantRemovalKeepsEveryRow(t *testing.T) {
+	db := newTestDB(t)
+	seedMediaObject(t, db, "mo-1", hourAgo(), nil)
+	seedVariant(t, db, "mv-c", "mo-1", "card", "k/mo-1-card", nil)
+	seedLedgerRow(t, db, "mo-1", "card")
+	// A second object that must still be processed: one object's failure must
+	// not abort the sweep.
+	seedMediaObject(t, db, "mo-2", hourAgo(), nil)
+
+	store := newRemover("k/mo-1-card")
+	if err := newSweeper(t, db, store, Config{}).RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce must not return a per-object failure: %v", err)
+	}
+
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`); n != 1 {
+		t.Error("the media row was deleted even though a variant's bytes survive — " +
+			"the variant row is now unreachable and its bytes are stranded")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_variants WHERE media_object_id = 'mo-1'`); n != 1 {
+		t.Errorf("%d of 1 variant rows left; a partial failure must delete nothing", n)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_variant_failures WHERE media_object_id = 'mo-1'`); n != 1 {
+		t.Errorf("%d of 1 ledger rows left; a partial failure must delete nothing", n)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_objects WHERE id = 'mo-2'`); n != 0 {
+		t.Error("one object's failure aborted the sweep; the remaining objects must still be processed")
+	}
+
+	// And the next sweep must still see it.
+	objs, err := mediaobject.ListPurgeable(db)
+	if err != nil {
+		t.Fatalf("ListPurgeable: %v", err)
+	}
+	if len(objs) != 1 || objs[0].ID() != "mo-1" {
+		t.Errorf("ListPurgeable = %+v, want mo-1 still awaiting retry", objs)
+	}
+}
+
+// T3 / FR-PURGE-7. A failing ORIGINAL removal behaves identically. "The variant
+// rows survive" would pass vacuously in code that never touches variants, so
+// this asserts the stronger claim: the variant keys were never OFFERED to the
+// remover, because the object was abandoned before any of them was reached.
+func TestRunOnce_aFailedOriginalRemovalOffersNoVariantKeys(t *testing.T) {
+	db := newTestDB(t)
+	seedMediaObject(t, db, "mo-1", hourAgo(), nil)
+	seedVariant(t, db, "mv-c", "mo-1", "card", "k/mo-1-card", nil)
+	seedLedgerRow(t, db, "mo-1", "card")
+
+	store := newRemover("k/mo-1")
+	if err := newSweeper(t, db, store, Config{}).RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	if store.wasAsked("k/mo-1-card") {
+		t.Error("the sweep kept removing bytes after the original failed; " +
+			"the object is abandoned as a unit or not at all")
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_variants WHERE media_object_id = 'mo-1'`); n != 1 {
+		t.Errorf("%d of 1 variant rows left", n)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`); n != 1 {
+		t.Errorf("%d of 1 media rows left", n)
+	}
+}
+
+// T4 / FR-PURGE-8. Retry safety, asserted rather than assumed. A crash between
+// the byte removals and the transaction leaves rows pointing at absent objects;
+// the next sweep re-issues removal for keys that are already gone. S3 DELETE is
+// idempotent and storage.Client.RemoveObject returns nil for a missing key, so
+// the retry must proceed all the way to the row deletion.
+func TestRunOnce_retryAfterBytesAreAlreadyGoneCompletesThePurge(t *testing.T) {
+	db := newTestDB(t)
+	seedMediaObject(t, db, "mo-1", hourAgo(), nil)
+	seedVariant(t, db, "mv-c", "mo-1", "card", "k/mo-1-card", nil)
+	seedLedgerRow(t, db, "mo-1", "card")
+
+	// First tick: the bytes go, then the process "crashes" before the rows do.
+	failing := newRemover("k/mo-1-card")
+	if err := newSweeper(t, db, failing, Config{}).RunOnce(context.Background()); err != nil {
+		t.Fatalf("first RunOnce: %v", err)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`); n != 1 {
+		t.Fatalf("setup: the object should still be awaiting retry, got %d rows", n)
+	}
+
+	// Second tick: the bucket is healthy and the already-absent keys are no-ops.
+	store := newRemover()
+	if err := newSweeper(t, db, store, Config{}).RunOnce(context.Background()); err != nil {
+		t.Fatalf("retry RunOnce: %v", err)
+	}
+	for _, c := range []struct {
+		what  string
+		query string
+	}{
+		{"variant", `SELECT count(*) FROM media.media_variants WHERE media_object_id = 'mo-1'`},
+		{"ledger", `SELECT count(*) FROM media.media_variant_failures WHERE media_object_id = 'mo-1'`},
+		{"media object", `SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`},
+	} {
+		if n := countRows(t, db, c.query); n != 0 {
+			t.Errorf("the retry left %d %s rows behind", n, c.what)
+		}
 	}
 }

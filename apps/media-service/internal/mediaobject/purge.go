@@ -39,6 +39,11 @@ func ListPurgeable(db *gorm.DB) ([]Model, error) {
 }
 
 // DeleteRow hard-deletes a single media-object row by ID (purge job).
+//
+// db may be a transaction — *gorm.DB is what db.Transaction hands its callback,
+// and the sweep passes the tx so the media row goes in the same transaction as
+// the variant and ledger rows that describe it (FR-PURGE-4). Do not bind this to
+// an outer handle.
 func DeleteRow(db *gorm.DB, id string) error {
 	return db.Exec("DELETE FROM media.media_objects WHERE id = ?", id).Error
 }
