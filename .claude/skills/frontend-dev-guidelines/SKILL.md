@@ -28,7 +28,7 @@ Activate when working on:
 ## Quick Start Checklist
 - [ ] **Component** follows presentational/container split (ui/ vs features/)
 - [ ] **Types** defined with JSON:API structure (`id` + `attributes`)
-- [ ] **Service** extends `BaseService` — every concrete service does; there is no second pattern
+- [ ] **Service** reaches the network only through the shared `apiClient` — extending `BaseService` when the resource has a uniform single-type CRUD shape (10 of 16 do), a plain class calling `apiClient.request` when it does not
 - [ ] **Hook** uses query key factory with hierarchical keys (`as const`)
 - [ ] **Form** uses `react-hook-form` with `zodResolver` and Zod schema
 - [ ] **Validation schema** defined in `lib/schemas/` with inferred types
