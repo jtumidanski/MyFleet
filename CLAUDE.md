@@ -2,10 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
-
-MyFleet is a multi-service project: one or more **Go** backend services plus a **React/TypeScript** web UI. The repository is currently unscaffolded — service layout, module structure, and build tooling will be decided during the first task. Update this file (build commands, service paths, conventions) once those are settled.
-
 ## Workflow Rules
 
 When asked to understand or plan something, DO NOT start implementing code changes. Wait for explicit approval before making any edits. Planning and implementation are separate phases.
