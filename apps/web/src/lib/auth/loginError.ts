@@ -1,10 +1,6 @@
 /** The closed set auth-service redirects with (FR-ERR-4). Nothing else is valid. */
 export type LoginErrorCode =
-  | 'cancelled'
-  | 'invalid_state'
-  | 'auth_failed'
-  | 'server_error'
-  | 'service_unavailable';
+  'cancelled' | 'invalid_state' | 'auth_failed' | 'server_error' | 'service_unavailable';
 
 export interface LoginErrorNotice {
   tone: 'neutral' | 'danger';

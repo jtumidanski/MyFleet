@@ -182,7 +182,9 @@ describe('ApiClient refresh failures', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
-      json: async () => ({ errors: [{ status: '401', code: 'unauthorized', title: 'unauthorized' }] }),
+      json: async () => ({
+        errors: [{ status: '401', code: 'unauthorized', title: 'unauthorized' }],
+      }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -206,7 +208,9 @@ describe('ApiClient refresh failures', () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
-      json: async () => ({ errors: [{ status: '401', code: 'unauthorized', title: 'unauthorized' }] }),
+      json: async () => ({
+        errors: [{ status: '401', code: 'unauthorized', title: 'unauthorized' }],
+      }),
     });
     vi.stubGlobal('fetch', fetchMock);
 

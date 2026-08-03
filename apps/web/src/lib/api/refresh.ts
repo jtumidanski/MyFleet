@@ -15,9 +15,7 @@ interface RefreshResponse {
  * turns someone else's brief outage into a forced sign-in through Google.
  */
 type RefreshOutcome =
-  | { status: 'ok'; token: string }
-  | { status: 'dead' }
-  | { status: 'unavailable' };
+  { status: 'ok'; token: string } | { status: 'dead' } | { status: 'unavailable' };
 
 /**
  * In-flight refresh, shared by every caller.

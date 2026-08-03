@@ -23,13 +23,10 @@ describe('consumeLoginError', () => {
     'auth_failed',
     'server_error',
     'service_unavailable',
-  ])(
-    'parses the %s code',
-    async (code) => {
-      const { consumeLoginError } = await freshModule(`/login#error=${code}`);
-      expect(consumeLoginError()).toBe(code);
-    },
-  );
+  ])('parses the %s code', async (code) => {
+    const { consumeLoginError } = await freshModule(`/login#error=${code}`);
+    expect(consumeLoginError()).toBe(code);
+  });
 
   // FR-STATE-6: anything outside the closed set is a generic failure, and the
   // supplied string is discarded at the parser so nothing downstream can render
