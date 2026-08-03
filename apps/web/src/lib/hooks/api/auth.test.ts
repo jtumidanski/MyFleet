@@ -197,7 +197,7 @@ describe('logoutRequest', () => {
 
     await expect(logoutRequest()).resolves.toBeUndefined();
 
-    expect(json).not.toHaveBeenCalled();
+    await expectNoCall(json, 'json');
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(path).toBe('/api/auth/logout');
     expect(init.method).toBe('POST');

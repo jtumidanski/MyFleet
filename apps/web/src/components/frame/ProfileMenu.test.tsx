@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { ProfileMenu } from './ProfileMenu';
 import type { AuthContextValue } from '../../context/AuthContext';
 import type { User } from '../../types/models/user';
+import { expectNoCall } from '../../test/expectNoCall';
 
 const mockAuth = vi.fn<() => AuthContextValue>();
 vi.mock('../../context/AuthContext', () => ({
@@ -155,9 +156,10 @@ describe('ProfileMenu', () => {
     await userEvents.click(screen.getByRole('button', { name: 'Account menu' }));
     await userEvents.click(screen.getByRole('menuitem', { name: 'Sign out' }));
 
-    // Let the resolved promise's continuation run first — otherwise the
-    // absence of a toast is only true because nothing has happened yet.
-    await Promise.resolve();
-    expect(toast.error).not.toHaveBeenCalled();
+    // The helper's flush is what lets this spy actually fail: sign-out's
+    // failure arm raises the toast from a promise continuation, so an
+    // assertion that ran before anything drains would pass whether or not
+    // the success path is guarded correctly.
+    await expectNoCall(vi.mocked(toast.error), 'toast.error');
   });
 });

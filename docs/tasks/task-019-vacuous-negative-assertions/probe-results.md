@@ -16,9 +16,26 @@ Verdict legend: **falsifiable** / **vacuous** / **unprobeable**.
 
 ## Summary
 
-All 40 inventoried sites have a recorded verdict for both stages.
+All 42 inventoried sites have a recorded verdict for both stages.
 
-- **37 falsifiable.** Either Stage 1 is independently red (the assertion can
+**Growth from 40 to 42.** This branch's original inventory (Tasks 1–10)
+covered every negative call assertion that existed in `apps/web/src` when it
+forked from `main`. While it was in flight, tasks 018, 021 and 022 merged to
+`main` and each introduced a bare negative call assertion of their own —
+`ProfileMenu.test.tsx`'s "raises no toast when sign-out succeeds" and
+`auth.test.ts`'s "posts with credentials and treats 204 as success without
+parsing a body" (the latter alongside its sibling, this branch's own site 40,
+in the same file, which is why the file already appears in the table once).
+Merging `origin/main` into this branch brought both sites — and this
+branch's ESLint rule — into the same tree for the first time, and the rule
+caught them immediately: `npx eslint src` was red on exactly these two
+lines before this task's work began. That is not a gap in the rule; it is
+the rule doing the job it was added to do — catching a bug class at the
+point a new instance of it lands, rather than requiring a human to remember
+to keep checking. Sites 41 and 42 below close that gap the same way as the
+other 40.
+
+- **39 falsifiable.** Either Stage 1 is independently red (the assertion can
   observe a promise-continuation dispatch directly), or Stage 1 is green
   because the guard it depends on fires synchronously off the trigger itself,
   in which case Stage 2 is still red (design combining-table row 2 —
@@ -32,7 +49,7 @@ All 40 inventoried sites have a recorded verdict for both stages.
   assertion still trips first in the committed file (footnote¹⁵).
 - **1 unprobeable.** Site 30 — see below; this is the single most important
   finding in the whole record.
-- **2 exempted** (a subset of the 37 falsifiable sites, not a fourth
+- **2 exempted** (a subset of the 39 falsifiable sites, not a fourth
   category). Sites 37 and 38 (`input.test.tsx`, `download.test.ts`) are left
   as bare assertions, each covered by its own inline
   `eslint-disable-next-line no-restricted-syntax` comment carrying the probe
@@ -461,6 +478,8 @@ treatment as footnote 8's sites 4–6.
 | 9 | `apps/web/src/components/features/activity/ActivityFeed.test.tsx` | renders the empty state without asking for any names | `listByIds` | `enabled: sorted.length > 0` → `enabled: true` in `useUsers` (`src/lib/hooks/api/users.ts`) | green (dispatch point coincides with the assertion — `renderWithProviders(...)` yields nothing before it, and the two lines between it and the target assertion are both synchronous, non-yielding `expect()`s) | red (call recorded as `[[]]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall` (local `vi.fn()` via `vi.hoisted`, no `vi.mocked()` needed — see finding¹⁹) | n/a (was never vacuous) |
 | 37 | `apps/web/src/components/ui/input.test.tsx` | does not reach for a picker on non-picker types | `showPicker` | `const isPicker = !!type && PICKER_TYPES.has(type);` → `const isPicker = true;` in `input.tsx`, so a `type="number"` input also reaches `el.showPicker()` | green²¹ (probe placed immediately before the assertion, per the HUMAN RULING — nothing yields between the preceding `await user.click(...)` resolving and the assertion; contrary to the task-10 brief's prediction of red, see finding²¹) | red (`showPicker` called twice, target assertion hit directly) | falsifiable | exempted via inline `eslint-disable-next-line no-restricted-syntax` carrying the probe evidence (design OQ-4) — not migrated | n/a (was never vacuous) |
 | 38 | `apps/web/src/lib/utils/download.test.ts` | revokes the object URL, but not before the click | `URL.revokeObjectURL` | `setTimeout(() => URL.revokeObjectURL(url), 0);` → bare `URL.revokeObjectURL(url);` in `download.ts`, so the revoke happens synchronously, before the assertion | green (assertion is synchronous in the same tick as the trigger; this is the *correct* verdict — the assertion means "not called synchronously", which is the point, per the task-10 brief) | red (`URL.revokeObjectURL` called once with `'blob:test-url'`, target assertion hit directly) | falsifiable | exempted via inline `eslint-disable-next-line no-restricted-syntax` carrying the probe evidence (design OQ-4) — not migrated; see finding²² for the fake-timer incompatibility that independently rules out migration | n/a (was never vacuous) |
+| 41 | `apps/web/src/components/frame/ProfileMenu.test.tsx` | raises no toast when sign-out succeeds | `toast.error` | `.then(() => toast.error('__probe__'))` inserted between `logout()` and its existing `.catch(...)` in `handleSignOut` (`ProfileMenu.tsx`), so the toast also fires on the success path | red (probe inserted after the "Sign out" menu-item click, before the pre-existing hand-rolled `await Promise.resolve();`; 1 call) | red (`toast.error` called once with `["__probe__"]`, target assertion hit directly, no earlier-line interference; 10 of 11 tests in the file still passed) | falsifiable | migrated to `expectNoCall(vi.mocked(toast.error), 'toast.error')`, the hand-rolled `await Promise.resolve()` removed (it was a weaker, bespoke flush — one microtask tick, not the helper's microtask-queue-plus-macrotask flush) | red / red |
+| 42 | `apps/web/src/lib/hooks/api/auth.test.ts` | posts with credentials and treats 204 as success without parsing a body | `json` | see finding²³ — `res.status === 204 ? null : await res.json().catch(() => null)` → unconditional `await res.json().catch(() => null)` in `ApiClient.request` (`packages/shared-ts/src/apiClient.ts`) | red (probe inserted immediately before the trigger line, `await expect(logoutRequest()).resolves.toBeUndefined();`, per the same placement as site 40 — the call is invoked inline inside the awaited expression; 1 call) | red²³ (`json` called once with `[]`, after strengthening; 7 of 8 tests in the file still passed) | falsifiable | migrated to `expectNoCall(json, 'json')` (uniformity, FR-HELPER-3 — was already falsifiable) | red / red |
 
 ¹⁵ Stage 2 for sites 10 and 11 (`useDashboardWidgets.test.ts`) is confounded
 by an earlier line in the full (unmodified) test, in both directions (pre-
@@ -665,6 +684,27 @@ never fires while `vi.useFakeTimers()` is active for the suite, so the
 `await` never resolves. The migrated form was reverted with `git checkout --`
 immediately after capturing this output; it is not part of the committed
 diff.
+
+²³ Stage 2 for site 42 is confounded by an earlier line in the full
+(unmodified) test, the same shape as sites 39/40/1/2/etc. Defeating the 204
+short-circuit in `ApiClient.request` (`packages/shared-ts/src/apiClient.ts`)
+makes `res.json()` run unconditionally, but this test's `json` mock is built
+to throw (`throw new Error('a 204 response has no body to parse')`) — it
+exists to catch a regression that calls `json()` at all, by making that call
+loud. With the guard defeated, that throw surfaces as a rejection at the
+*preceding* line, `await expect(logoutRequest()).resolves.toBeUndefined()`
+(`promise rejected "Error: a 204 response has no body to parse" instead of
+resolving`), and the target `expect(json).not.toHaveBeenCalled()` /
+`expectNoCall(json, 'json')` line is never reached. Per migration-context.md's
+"Stage-2 evidence quality" note, that is weaker evidence. Strengthened by
+temporarily giving `json` a resolved value instead (`vi.fn(async () => ({}))`,
+uncommitted, reverted before and after each run): with the same guard-defeat
+edit in place, the target assertion is reached directly and fails with the
+call recorded as `[]` (no arguments — this call site invokes `res.json()`
+with none). Only the target test failed in both the pre- and
+post-migration re-runs (7 of 8 passed); both the guard-defeat and the mock
+change were probe-only and reverted with `git checkout --` /
+restoring the original throwing mock before the migration was committed.
 
 ## FR-TRIAGE-4 sites (unprobeable)
 
