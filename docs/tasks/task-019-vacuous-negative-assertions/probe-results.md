@@ -61,6 +61,11 @@ flush sits between the probe and its own assertion.
 | 25 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | fires no toast when a thumbnail fails to load | `toast` | `toast('probe')` added to the same branch⁴ | red (same placement as site 24) | red (2 calls) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 26 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | fires no toast when a thumbnail fails to load | `toast.warning` | `toast.warning('probe')` added to the same branch⁴ | red (same placement as site 24) | red (2 calls) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 | 27 | `apps/web/src/components/features/vehicles/VehiclePhotoThumbnail.test.tsx` | fires no toast when a thumbnail fails to load | `toast.info` | `toast.info('probe')` added to the same branch⁴ | red (same placement as site 24) | red (2 calls) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 12 | `apps/web/src/components/features/settings/MemberList.test.tsx` | does not fire the DELETE until the dialog is confirmed | `memberService.removeMember` | Remove row button changed to call `void confirmRemove(userId)` directly, bypassing the `AlertDialog` | red (probe after the first click, before the pre-existing `expect(await screen.findByText(...))`; 1 call) | red⁵ (call recorded as `["f1", "other"]`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 13 | `apps/web/src/components/features/settings/MemberList.test.tsx` | fires nothing when the dialog is cancelled | `memberService.removeMember` | `closeDialog` changed to also call `void confirmRemove(...)` for the pending 'remove' row (re-entrancy note⁶) | red (probe after the cancel click, before the pre-existing `await waitFor(...)`; 1 call) | red (call recorded as `["f1", "other"]`, target assertion hit directly, no earlier-line interference) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 14 | `apps/web/src/components/features/settings/MemberList.test.tsx` | is offered to owners on non-owner rows and confirms before PATCHing | `memberService.updateRole` | Make-owner row button changed to call `void confirmPromote(userId)` directly, bypassing the dialog | red (probe after the first click, before the pre-existing `expect(await screen.findByText(...))`; 1 call) | red⁵ (call recorded as `["f1", "other", "owner"]`) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 15 | `apps/web/src/components/features/settings/MemberList.test.tsx` | offers a plain leave confirmation to a member | `memberService.updateRole` | see finding⁷ — brief's prescribed dialog-bypass edit does not reach this spy; the guard actually defeated is the `if (needsSuccessor)` check in `confirmLeave` | red (probe after the in-dialog Leave click, before the pre-existing `await waitFor(...)`; 1 call) | red⁷ (call recorded as `["f1", "", "owner"]`, after defeating the corrected guard) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 16 | `apps/web/src/components/features/settings/MemberList.test.tsx` | does not remove the leaver when the promote fails | `memberService.removeMember` | `updateRole.mutateAsync(...)` in `confirmLeave` wrapped in `.catch(() => undefined)`, so the rejection no longer stops the subsequent `removeMember.mutateAsync` | red (probe after the "Transfer & leave" click, before the pre-existing `await waitFor(...)`; 1 call) | red (call recorded as `["f1", "me"]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
 
 ² Stage 2 for sites 1 and 2: in the full (unmodified) test the guard-defeat
 edit makes an *earlier* assertion fail first — `screen.getByRole('img', {
@@ -134,6 +139,60 @@ investigated further since it is immaterial to the verdict — one call would
 already be sufficient to fail `not.toHaveBeenCalled()`. All four probe edits
 were reverted before migration; the committed component carries none of
 them.
+
+⁵ Stage 2 for sites 12 and 14: in the full (unmodified) test, bypassing the
+dialog-open gate means the dialog never renders, so the confirmation-text
+assertion that precedes the target assertion (`findByText(/Remove Sam Ito
+from this fleet\?/i)` for site 12; `findByText(/Make Sam Ito an owner\?/i)`
+for site 14) times out first. Per migration-context.md's "Stage-2 evidence
+quality" note, that is weaker evidence — the assertion under test was never
+reached. Strengthened by isolating in an uncommitted, reverted copy of the
+test (removing the earlier dialog-text assertion so only the target
+`not.toHaveBeenCalled()` line remains): with only the guard-defeat edit named
+in the Guard-defeated column applied, the target assertion is reached
+directly and fails with the call recorded as shown in the table. Isolated
+and reverted independently for each site.
+
+⁶ Site 13's literal guard-defeat ("`closeDialog` also calls `confirmRemove`
+for the pending row") recurses infinitely if implemented without a guard:
+`confirmRemove` calls `closeDialog` again on its own success path, and
+because the render-closure's `pending` value is frozen for the lifetime of
+that render, an unguarded second call reads the same still-`'remove'`
+`pending` value and calls `confirmRemove` again, forever. The first attempt
+at this edit hung the run until Node ran out of heap (`FATAL ERROR:
+Ineffective mark-compacts near heap limit Allocation failed - JavaScript
+heap out of memory`, worker killed after ~68s). The probe was re-run with a
+one-off re-entrancy guard local to the edit (`let __probeClosing = false`,
+set before the extra call and checked so a recursive re-entry into
+`closeDialog` is a no-op); only that second run produced the recorded
+result. This is a probe-construction detail, not a defect: the edit was
+probe-only and fully reverted, and the committed production file carries
+neither the guard-defeat nor the re-entrancy guard.
+
+⁷ **Finding — the task-5 brief's prescribed Stage-2 edit for site 15 does
+not defeat the guard this assertion actually depends on.** The brief names
+"make the leave control call `confirmLeave()` directly" (the same shape as
+sites 12/14: change the row Leave button's `onClick` from
+`setPending({kind: 'leave'})` to `void confirmLeave()`, bypassing the
+dialog-open gate). Applied literally and isolated (uncommitted, earlier
+assertions removed so only `expect(memberService.updateRole)
+.not.toHaveBeenCalled()` remains): the test still **passed** — `updateRole`
+was never called, contradicting the brief's "expect red" prediction for
+Stage 2. Reason: this test's data is a plain member (`needsSuccessor` is
+false), and `confirmLeave` only reaches `updateRole.mutateAsync` inside
+`if (needsSuccessor)` — bypassing the dialog-open gate changes nothing about
+that internal check, so `updateRole` cannot fire via this edit regardless of
+data. The guard this assertion actually depends on is that structural
+`if (needsSuccessor)` check, not the dialog-confirmation gate the brief
+names. Defeating the real guard instead — removing the `if (needsSuccessor)`
+wrapper so `updateRole.mutateAsync({ userId: successorId, role: 'owner' })`
+runs unconditionally — reaches the target assertion directly and fails with
+the call recorded as `["f1", "", "owner"]` (the empty string is
+`successorId`, unset for a plain member). The table's Stage 2 verdict and
+Guard-defeated cell reflect this corrected edit, not the brief's literal
+instruction; both edits were probe-only explorations, reverted with
+`git checkout --` immediately after use, and no production behaviour was
+altered by this task.
 
 ## FR-TRIAGE-4 sites (unprobeable)
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../../test/renderWithProviders';
+import { expectNoCall } from '../../../test/expectNoCall';
 import { memberService } from '../../../services/api/MemberService';
 import { userService } from '../../../services/api/UserService';
 import { MemberList } from './MemberList';
@@ -163,7 +164,7 @@ describe('MemberList — removing another member', () => {
     await userEvent.click(await screen.findByRole('button', { name: /remove sam ito/i }));
 
     expect(await screen.findByText(/Remove Sam Ito from this fleet\?/i)).toBeInTheDocument();
-    expect(memberService.removeMember).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(memberService.removeMember), 'memberService.removeMember');
 
     await userEvent.click(screen.getByRole('button', { name: /^remove$/i }));
 
@@ -184,7 +185,7 @@ describe('MemberList — removing another member', () => {
     await waitFor(() =>
       expect(screen.queryByText(/Remove Sam Ito from this fleet\?/i)).not.toBeInTheDocument(),
     );
-    expect(memberService.removeMember).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(memberService.removeMember), 'memberService.removeMember');
   });
 });
 
@@ -201,7 +202,7 @@ describe('MemberList — Make owner', () => {
     await userEvent.click(await screen.findByRole('button', { name: /make sam ito an owner/i }));
 
     expect(await screen.findByText(/Make Sam Ito an owner\?/i)).toBeInTheDocument();
-    expect(memberService.updateRole).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(memberService.updateRole), 'memberService.updateRole');
 
     await userEvent.click(screen.getByRole('button', { name: /^make owner$/i }));
 
@@ -246,7 +247,7 @@ describe('MemberList — leaving', () => {
     await userEvent.click(dialog.getByRole('button', { name: /^leave$/i }));
 
     await waitFor(() => expect(memberService.removeMember).toHaveBeenCalledWith('f1', 'me'));
-    expect(memberService.updateRole).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(memberService.updateRole), 'memberService.updateRole');
   });
 
   // ux-flow state 2: an owner with a co-owner leaves without picking anyone.
@@ -324,7 +325,7 @@ describe('MemberList — leaving', () => {
     await userEvent.click(screen.getByRole('button', { name: /transfer & leave/i }));
 
     await waitFor(() => expect(memberService.updateRole).toHaveBeenCalled());
-    expect(memberService.removeMember).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(memberService.removeMember), 'memberService.removeMember');
   });
 
   // D8: the picker offers viewers too. Excluding them would create a SECOND
