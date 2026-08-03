@@ -18,6 +18,18 @@ data:
   # "0" turns lazy generation off entirely — missing cards are then served as
   # thumbnails, which is the pre-task behaviour and a supported state.
   MEDIA_LAZY_VARIANT_CONCURRENCY: "4"
+  # How many orphaned derived rows the hourly purge sweep reconciles per tick
+  # (task-023). Orphans are media_variants and media_variant_failures rows whose
+  # media object no longer exists — state earlier versions of the sweep left
+  # behind. The cap keeps the first tick after a deploy short instead of turning
+  # it into an unbounded bucket-deletion loop against an accumulated backlog.
+  # The cap is applied per table and its unit differs between them: for
+  # media_variants it bounds ROWS, for media_variant_failures it bounds MEDIA
+  # OBJECTS, so an object's ledger is never left half-reconciled. One tick can
+  # therefore delete more ledger rows than this number.
+  # "0" turns the reconciliation pass off entirely; the per-object purge is
+  # unaffected either way.
+  MEDIA_PURGE_RECONCILE_LIMIT: "500"
   # Server-side upload allowlist (PRD FR-MEDIA-2). This is a security control,
   # not a UX affordance: the client's `accept` attribute is a convenience only.
   # Adding a document type here is safe; renderable image types are hard-coded

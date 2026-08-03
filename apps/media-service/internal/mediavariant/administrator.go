@@ -68,3 +68,21 @@ func (a *dbAdministrator) Upsert(m Model) error {
 		}),
 	}).Create(&e).Error
 }
+
+// DeleteForMediaObject hard-deletes every variant row for a media object.
+//
+// db may be a transaction — pass the tx so the variant rows, the ledger rows and
+// the media-object row all go in one statement group (FR-PURGE-4).
+func DeleteForMediaObject(db *gorm.DB, mediaObjectID string) error {
+	return db.Exec(`DELETE FROM media.media_variants WHERE media_object_id = ?`, mediaObjectID).Error
+}
+
+// DeleteByID hard-deletes one variant row, used after its bytes are gone.
+//
+// One row at a time, deliberately: reconciliation removes each orphan's bytes
+// individually, and a batched delete would either lose the ability to spare
+// exactly the row whose removal failed or need the failed set threaded back
+// through, for no benefit at the per-tick cap.
+func DeleteByID(db *gorm.DB, id string) error {
+	return db.Exec(`DELETE FROM media.media_variants WHERE id = ?`, id).Error
+}

@@ -2,6 +2,7 @@ package variantfailures
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/sqlite"
@@ -96,5 +97,33 @@ func TestRecord_firstReasonWins(t *testing.T) {
 	}
 	if rows[0].Reason != ReasonUndecodable {
 		t.Fatalf("Reason = %q, want the first reason %q", rows[0].Reason, ReasonUndecodable)
+	}
+}
+
+// FR-ADMIN-3. An admin purge that is still cancellable must not suppress lazy
+// generation: if the operator cancels, the object comes back, and a ledger row
+// that was never a real failure would have permanently disabled its card.
+func TestRecorded_ignoresSoftDeletedRows(t *testing.T) {
+	db := newTestDB(t)
+	s := New(logrus.New(), db)
+	if err := s.Record("m1", "card", ReasonUndecodable); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	// Exactly what admin.Stamp writes.
+	if err := db.Exec(`UPDATE media.media_variant_failures
+	                   SET deleted_at = ?, purge_operation_id = ?
+	                   WHERE media_object_id = 'm1' AND variant = 'card'`,
+		time.Now().UTC(), "op-1").Error; err != nil {
+		t.Fatalf("stamp the ledger row: %v", err)
+	}
+
+	recorded, err := s.Recorded("m1", "card")
+	if err != nil {
+		t.Fatalf("Recorded: %v", err)
+	}
+	if recorded {
+		t.Fatal("a ledger row soft-deleted by an in-flight, still-cancellable admin purge " +
+			"must not report as a permanent failure")
 	}
 }
