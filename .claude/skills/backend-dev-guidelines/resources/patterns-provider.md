@@ -7,8 +7,9 @@ description: The per-domain read (Provider) and write (Administrator) contracts,
 
 Every domain package splits database access in two: `provider.go` owns reads,
 `administrator.go` owns writes. Both are **interfaces** with a `db`-backed
-implementation and a `New*` constructor. Nothing else in the package touches
-GORM.
+implementation and a `New*` constructor. No other file in the package issues
+writes — `db.Create` / `db.Save` / `db.Delete` live only in
+`administrator.go`.
 
 The interface is not ceremony — it is the seam the processor tests substitute.
 See [testing-guide.md](testing-guide.md) for the `fake*` / `stub*` doubles that
@@ -38,8 +39,8 @@ func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
   inside the provider.
 - Methods return `(Model, error)` — eager, plain values. There is no lazy
   provider type.
-- IDs are `string` UUIDs (`uuid.NewString()`, `builder.go:13`), never `uint32` <!-- ALLOW-VOCAB -->
-  and never `uuid.UUID`. <!-- ALLOW-VOCAB -->
+- IDs are `string` UUIDs (`uuid.NewString()`, `builder.go:13`), never `uint32` <!-- ALLOW-VOCAB:G-15 -->
+  and never `uuid.UUID`. <!-- ALLOW-VOCAB:G-14 -->
 - Providers never modify state.
 
 ### Translate `gorm.ErrRecordNotFound` at the boundary
@@ -102,6 +103,13 @@ type Provider[T any] func() (T, error)
 func Query[T any](fetch func() (T, error)) Provider[T]
 func SliceQuery[T any](fetch func() ([]T, error)) Provider[[]T]
 ```
+
+`database.Provider[T]` is an unrelated type from the per-domain `Provider`
+interface defined earlier in this file — same name, different package, no
+relationship. Its own doc comment (`query.go:3`) still calls it "a lazy,
+re-runnable data fetch", which is the "lazy evaluation" concept this file
+tells you does not exist for the domain `Provider`; that phrasing describes
+only this generic function wrapper, not the interface above.
 
 Four domains wrap their query bodies in it and invoke immediately — note the
 trailing `()`:
@@ -172,7 +180,7 @@ func (a *dbAdministrator) Insert(m Model) (Model, error) {
 `db.Save` writes **all** columns, so any column the `Model` does not carry is
 silently zeroed on an ordinary write. The fix is to round-trip the field through
 the `Model` even when nothing reads it, as `vehicle` does
-(`apps/fleet-service/internal/vehicle/model.go:20-27`):
+(`apps/fleet-service/internal/vehicle/model.go:21-27`):
 
 ```go
 // purgeOperationID must round-trip through the Model: Administrator writes
@@ -192,7 +200,7 @@ the `Model` in the same commit.
 
 When work must commit or roll back atomically with the insert, pass it as a
 hook rather than running it after the write returns
-(`apps/fleet-service/internal/vehicle/administrator.go:9-12,42-60`):
+(`apps/fleet-service/internal/vehicle/administrator.go:9-12,42-61`):
 
 ```go
 // TxHook runs side-effecting work (activity append + event emission) on the same
