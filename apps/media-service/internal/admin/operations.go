@@ -99,13 +99,19 @@ func ReapSparing(tx *gorm.DB, opID string, spareMediaObjectIDs []string) (map[st
 		q := "DELETE FROM " + t.Table + " WHERE purge_operation_id = ?"
 		args := []any{opID}
 		if len(spareMediaObjectIDs) > 0 {
-			// media_objects are spared by their own id; their variants by the
-			// object they belong to, so a spared object never loses the
-			// variants that describe it.
+			// media_objects are spared by their own id; their variants and
+			// their failure-ledger rows by the object they belong to, so a
+			// spared object never loses the rows that describe it.
 			switch t.Table {
 			case "media.media_objects":
 				q += " AND id NOT IN ?"
 			case "media.media_variants":
+				q += " AND media_object_id NOT IN ?"
+			case "media.media_variant_failures":
+				// A spared media object keeps its ledger too. Reaping the ledger
+				// of an object whose bytes are still in the bucket leaves the
+				// operation half-applied, and the next tick would retry a media
+				// object whose failure record it had already discarded.
 				q += " AND media_object_id NOT IN ?"
 			}
 			if strings.HasSuffix(q, "NOT IN ?") {

@@ -366,3 +366,25 @@ func TestPurge_reachesTheVariantFailureLedger(t *testing.T) {
 		t.Errorf("the purge reached another tenant's ledger rows: %d of 1 left", left)
 	}
 }
+
+// A-1. A media object spared because its bytes could not be removed keeps its
+// row and its variant rows for the retry — its LEDGER rows must be spared with
+// them, or the operation is left half-applied and the next tick reaps a media
+// object whose failure ledger has already been thrown away.
+func TestReap_sparedObjectKeepsItsFailureLedgerRows(t *testing.T) {
+	db := newMediaDB(t)
+	store := &recordingRemover{fail: map[string]bool{"k/mo-1": true}}
+	r := newMediaRouter(t, db, store)
+	post(t, r, "/internal/admin/purge", `{"operation_id":"op-1","scope":"fleet","fleet_ids":["fleet-1"]}`)
+
+	if rec := post(t, r, "/internal/admin/reap/op-1", ""); rec.Code == http.StatusOK {
+		t.Fatalf("a failed object removal must not report success, got %d", rec.Code)
+	}
+
+	var spared int64
+	db.Raw(`SELECT count(*) FROM media.media_variant_failures
+	        WHERE media_object_id = 'mo-1' AND purge_operation_id = 'op-1'`).Scan(&spared)
+	if spared != 1 {
+		t.Fatalf("the spared media object's ledger rows were reaped anyway: %d of 1 left", spared)
+	}
+}
