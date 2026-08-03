@@ -366,8 +366,13 @@ type patchAttributes struct {
 
 ## Transform Functions
 
-`Transform` and `TransformDerived` return a `server.Resource` and **cannot
-fail** — there is no error to propagate. `rest.go:54-103`, verbatim:
+`Transform` and `TransformDerived` return a `server.Resource` with **no
+error** in 45 of the 47 `Transform*` functions across the tree — mapping
+model getters onto a struct cannot fail, and `vehicle`'s are among them,
+shown below (`rest.go:54-103`, verbatim). The two exceptions are `activity`'s
+`Transform` and `TransformSlice`, which return `(server.Resource, error)` /
+`([]server.Resource, error)` because they unmarshal a stored JSON payload
+that can be malformed (`apps/fleet-service/internal/activity/rest.go:23,49`).
 
 ```go
 // Transform converts a Model to a JSON:API Resource carrying no derived
