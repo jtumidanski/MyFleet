@@ -370,6 +370,87 @@ Stage-2 disposition above is drawn from the strengthened, uncommitted
 variant per migration-context.md's evidence-quality note, the same
 treatment as footnote 8's sites 4–6.
 
+| 10 | `apps/web/src/components/features/dashboard/useDashboardWidgets.test.ts` | does not call saveLayout when addWidget is invoked while the layout query is still loading | `dashboardService.saveLayout` | `if (isLoading) return;` early return deleted in `addWidget` (`useDashboardWidgets.ts`) | green (dispatch point coincides with the assertion — `act(() => result.current.addWidget(...))` yields nothing before it) | green¹⁵ (isolated from an earlier-line confound — see finding¹⁵) | vacuous | migrated to `expectNoCall` | red / red¹⁵ |
+| 11 | `apps/web/src/components/features/dashboard/useDashboardWidgets.test.ts` | does nothing at the list boundaries | `dashboardService.saveLayout` | see finding¹⁵ — the brief's prescribed edit (both named boundary early returns deleted) is a structural no-op; the guard actually gating the call is each function's secondary bounds check (`if (!above \|\| !current) return;` / `if (!current \|\| !below) return;`) | green (dispatch point coincides with the assertion — the two `act(...)` calls yield nothing before it) | green¹⁵ (isolated from the same earlier-line confound as site 10 — see finding¹⁵) | vacuous | migrated to `expectNoCall` | red / red¹⁵ |
+| 29 | `apps/web/src/lib/hooks/api/members.test.ts` | useRemoveMember does not mint a token when removing another member | `mintAccessToken` | `if (!isSelf) return;` early return deleted in `useRemoveMember`'s `onSuccess` (`members.ts`) | red (probe after the `await act(async () => { result.current.mutate(...) })`, before the pre-existing `await waitFor(() => expect(result.current.isSuccess)...)`; 1 call) | red (`mintAccessToken` called once, target assertion hit directly) | falsifiable | migrated to `expectNoCall` | n/a (was never vacuous) |
+| 30 | `apps/web/src/lib/hooks/api/members.test.ts` | useUpdateMemberRole does not mint a token | `mintAccessToken` | see finding¹⁶ — `useUpdateMemberRole` never calls `mintAccessToken` under any code path; there is no "equivalent guard" to delete | red (same probe placement as site 29; 1 call) | n/a (unconstructible — see finding¹⁶) | unprobeable | migrated to `expectNoCall` (uniformity, FR-HELPER-3) | n/a (was never vacuous) |
+| 31 | `apps/web/src/lib/hooks/api/users.test.ts` | does not fire a request when there are no ids | `userService.listByIds` | `enabled: sorted.length > 0` → `enabled: true` in `useUsers` (`users.ts`) | green (dispatch point coincides with the assertion — `renderHook(...)` yields nothing before it, and the `it` callback was synchronous) | red (call recorded as `[[]]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall`, `it` made `async` | n/a (was never vacuous) |
+| 32 | `apps/web/src/lib/hooks/api/vehicleRecords.test.ts` | loadMore calls fetchNextPage only on sources that still have a next page | `fuel.fetchNextPage` | `if (fuel.hasNextPage)` condition dropped in `loadMore` (`vehicleRecords.ts`), calling `fetchFuelNextPage()` unconditionally | green (dispatch point coincides with the assertion — `result.current.loadMore()` yields nothing before it, and the `it` callback was synchronous) | red (call recorded with no arguments, once; target assertion hit directly, neighbouring `toHaveBeenCalledTimes(1)` assertions on `maintenance`/`mileage` unaffected) | falsifiable | migrated to `expectNoCall`, `it` made `async` | n/a (was never vacuous) |
+
+¹⁵ Stage 2 for sites 10 and 11 (`useDashboardWidgets.test.ts`) is confounded
+by an earlier line in the full (unmodified) test, in both directions (pre-
+and post-migration).
+
+Site 10: deleting `if (isLoading) return;` in `addWidget` does not make the
+target assertion (`expect(dashboardService.saveLayout).not.toHaveBeenCalled()`,
+pre-migration) fail — it makes the *preceding*
+`expect(result.current.widgets).toEqual([])` line fail instead, because
+`save()` writes `localWidgets` synchronously via `setLocalWidgets`, so
+`widgets` already contains the new entry by the time that line runs; the
+target assertion is never reached. Isolated in an uncommitted copy (the
+preceding `widgets` line removed), the bare target assertion is confirmed to
+still PASS even with the guard defeated — `saveLayout.mutate(...)` is
+dispatched from a promise continuation the same way React Query's queries
+are (migration-context.md), so nothing before a bare, synchronous
+`expect()` can observe it. This confirms genuine green/green vacuity, not a
+masked falsifiable site.
+
+Site 11: the brief's prescribed edit (delete `if (idx === 0) return;` in
+`moveUp` and `if (idx === widgets.length - 1) return;` in `moveDown`) is
+itself a structural no-op — with only those two lines deleted, all 7 tests
+still pass, because each function's own secondary bounds check
+(`if (!above || !current) return;` / `if (!current || !below) return;`)
+already discards the swap for exactly these boundary indices (there is no
+element above index 0, none below the last index, by construction). Forcing
+the swap through requires deleting that secondary check too; doing so
+naively corrupts the array with `undefined` and crashes inside
+`toWidgetInputs` (`Cannot read properties of undefined (reading 'type')`)
+before `saveLayout.mutate` is ever called — the file going red from a
+wholly unrelated `TypeError`, not the target assertion, is not counted as
+evidence either way. Constructing a guard-defeat that reaches `saveLayout`
+without crashing requires also filtering the corrupted slot out of the
+array before saving (`next.filter((w): w is GridWidget => w != null)`) —
+modeling a defensively-written-but-boundary-unchecked swap. With that in
+place, the same earlier-line confound as site 10 recurs (the preceding
+`expect(result.current.widgets.map(...)).toEqual(['w1', 'w2'])` line fails
+first, since the swap now silently drops a widget instead of leaving the
+list unchanged). Isolated the same way as site 10, the bare target
+assertion again PASSES with the guard defeated, confirming green/green
+vacuity by the same reasoning.
+
+Post-migration re-probes for both sites: run against the full committed
+file, Stage 1's probe is caught cleanly on both (the `widgets` assertions
+above the target line make no reference to the spy, so nothing masks it —
+`dashboardService.saveLayout` recorded as called once with `['__probe__']`
+in each). Stage 2's guard-defeat, however, still trips the preceding
+`widgets` assertion first in the full committed file (the migration does
+not touch that line, and it is unaffected by the added flush). Isolated the
+same way as the pre-migration check (temporarily removing the preceding
+`widgets` line), the migrated `await expectNoCall(...)` independently
+catches both: site 10 records `saveLayout` called once with
+`['f1', [{ type: 'recent-activity', ... }]]`; site 11 records two calls,
+both with the sole surviving `recent-activity` widget. The committed test
+is not altered to remove the confounding line — that would change the
+test's own scenario — so the Re-probe cells above record "red / red" drawn
+from this isolated evidence, the same footnoted-evidence treatment as
+footnote 14's site 23.
+
+¹⁶ Site 30 (`useUpdateMemberRole does not mint a token`): the brief names
+"the equivalent guard in useUpdateMemberRole" as `mintAccessToken`'s Stage-2
+defeat, but `useUpdateMemberRole` (`members.ts`) never calls
+`mintAccessToken` under any code path — a repo-wide
+`grep -rn "mintAccessToken" apps/web/src` (excluding tests) shows exactly
+one call site, inside `useRemoveMember`'s `onSuccess`. There is no
+conditional to delete that would make the spy fire from this function; this
+is FR-TRIAGE-4 (unconstructible), not a guard that merely doesn't bite in
+the prescribed location (contrast footnote 12's site 20, where the real
+guard existed one layer down). Stage 1 was red, so per the combining table
+("any | unconstructible | FR-TRIAGE-4 | Stage 1 governs") the site is
+recorded as **unprobeable** rather than falsifiable or vacuous — Stage 1
+alone cannot certify what Stage 2 could not test. Migrated to
+`expectNoCall` anyway for uniformity with its sibling row (site 29) and
+with the FR-HELPER-3 precedent (footnote 1's sites 39/40).
+
 ## FR-TRIAGE-4 sites (unprobeable)
 
 Task 4 attempted its one predicted FR-TRIAGE-4 candidate (site 3,
@@ -378,6 +459,13 @@ photo\", when a known photo cannot be fetched") and found it **is**
 constructible via `networkMode: 'always'`. See footnote ³ on the site 3 row
 above for the full investigation and disposition. No site in this task
 belongs in this section.
+
+Task 8 found one genuine site: site 30
+(`apps/web/src/lib/hooks/api/members.test.ts`, "useUpdateMemberRole does not
+mint a token") — `useUpdateMemberRole` never calls `mintAccessToken` under
+any code path, so no production edit to an existing conditional can make the
+spy fire from this function. See footnote ¹⁶ on the site 30 row above for
+the full investigation and disposition.
 
 ## Lint rule demonstration (FR-LINT-4)
 

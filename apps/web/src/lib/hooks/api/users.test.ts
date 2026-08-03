@@ -4,6 +4,7 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { userKeys, useUsers } from './users';
 import { userService } from '../../../services/api/UserService';
+import { expectNoCall } from '../../../test/expectNoCall';
 
 vi.mock('../../../services/api/UserService', () => ({
   userService: { listByIds: vi.fn() },
@@ -72,10 +73,10 @@ describe('useUsers', () => {
 
   // An empty id list means "the member list has not arrived yet". Firing a
   // request for it would be a guaranteed 422 from the server.
-  it('does not fire a request when there are no ids', () => {
+  it('does not fire a request when there are no ids', async () => {
     const { result } = renderHook(() => useUsers([]), { wrapper: makeWrapper(newClient()) });
 
-    expect(userService.listByIds).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(userService.listByIds), 'userService.listByIds');
     expect(result.current.fetchStatus).toBe('idle');
   });
 
