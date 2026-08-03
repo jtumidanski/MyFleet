@@ -99,3 +99,45 @@ of fact carrying no HTTP vocabulary; the handler owns the policy decision.
   pattern, but it predates this diff, is unchanged by it, and is out of scope
   per the task's explicit focus on the four listed files and the
   cache-control/domain-boundary questions.
+
+---
+
+## Post-audit amendment
+
+The audit above was written against commit `48c86c2`. Two of its citations
+described an assertion that has since been replaced, and one of its
+statements was factually wrong about production. Recorded here rather than
+edited in place, so the original findings stay readable as what was actually
+audited.
+
+**SEC-CACHE-03's reasoning was unsound.** It credited
+`resource_test.go`'s `len(rec.Header()) != 4` check with failing "if a 5th
+header were ever added" — but production already adds one. `cmd/main.go`
+wraps the router in `telemetry.CorrelationID`, which sets `X-Correlation-ID`
+on every response, so a real downgraded response carries five handler-set
+headers, not four. The assertion was scoped to the downgraded test while
+expressing a global invariant: a legitimate future global header would have
+failed that one test with a message blaming the downgrade.
+
+**What replaced it.** `TestGetContent_downgradedCardIsNotStored` now issues
+the same request as `?variant=thumbnail` against the same fixture — the two
+return identical bytes — and asserts the two header maps are equal except
+`Cache-Control`, via `assertHeadersMatchExceptCacheControl`. That states
+FR-DG-4 literally instead of approximating it with a count, and it is
+correct in production as well as in the bare test router. Proven both
+directions: setting an extra header on the downgraded path only trips it;
+setting one on every content response does not.
+
+The SEC-CACHE-03 verdict itself is unchanged — **PASS**, on stronger
+evidence. SEC-CACHE-02's incidental `resource_test.go:774-808` citation
+refers to the same superseded assertion; its argument for `no-store` does
+not depend on it.
+
+**One check the audit did not cover.** `Cache-Control` was absent entirely
+from this handler's error responses, so a 404 for an unservable card — which
+starts answering 200 seconds later, once the generation that miss schedules
+completes — was heuristically cacheable under RFC 9111 §4.2.2. The handler
+now defaults every response to `private, no-store` and narrows to
+`private, max-age=300` only on the success path, covered by
+`TestGetContent_unservableVariantIsNotStored` and
+`TestGetContent_missingObjectIsNotStored`.
