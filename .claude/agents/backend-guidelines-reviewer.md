@@ -80,7 +80,7 @@ Record the build errors as the audit result and DO NOT proceed to Phase 2.
 1. List all packages under `<service-path>/internal/`.
 2. For each package, classify it as:
    - **Domain package**: has `model.go` → full DOM checklist applies.
-   - **Sub-domain package**: has `resource.go` but no `model.go` (action-event pattern) → SUB checklist applies.
+   - **Sub-domain package**: has `resource.go` but no `model.go` (action-event pattern) → SUB checklist applies. This is rarer than it sounds: `vehiclemedia` looks like an action-event package but carries a full `model.go`, so it is a Domain package. The tree's genuine sub-domain packages are `notification-service/internal/admin` and `media-service/internal/admin`.
    - **Support package**: neither → skip checklist, note its purpose.
 
 ## Phase 3: Per-Domain Mechanical Checks
@@ -138,8 +138,8 @@ Never write "N/A", "not applicable", or "skipping". Pick one of the four labels.
 |----|-------|---------------|---------------|
 | SUB-01 | Has processor or uses parent processor | File exists or parent processor has methods for this action | Business logic not in handler |
 | SUB-02 | Has administrator for writes | `administrator.go` exists or parent administrator handles writes | No `db.Create`/`db.Save` in `resource.go` |
-| SUB-03 | Body-carrying routes use `RegisterInputHandler` | Grep `resource.go` for `r.Post(`, `r.Patch(`, `r.Put(` | Same rule as DOM-08, applied to the sub-domain package. Do **not** grep for POST alone: several sub-domain packages expose only a PATCH (`fleet-service/internal/membership/resource.go:53`, `auth-service/internal/user/resource.go:167`), and a POST-only recipe reports nothing on them while their correctly-wrapped routes go unexamined. |
-| SUB-04 | No manual JSON parsing | Grep `resource.go` for `json.NewDecoder`, `json.Unmarshal`, `io.ReadAll` | Zero matches |
+| SUB-03 | Public JSON:API routes with a body use `RegisterInputHandler` | Grep `resource.go` for `r.Post(`, `r.Patch(`, `r.Put(`, then read each one to see whether it takes a JSON:API document or a flat internal payload | Same rule as DOM-08, with one carve-out that matters because it covers **both** of the tree's real sub-domain packages. `RegisterInputHandler[T]` hard-codes the JSON:API envelope `{"data":{"attributes":T}}` (`handler.go:49-53`). An `/internal/` RPC route taking a flat body — `notification-service/internal/admin/resource.go:56` and `media-service/internal/admin/resource.go:60`, both decoding a flat `PurgeRequest` — is **correctly** plain, and requiring the wrapper there would force service-to-service callers to fake a JSON:API document. FAIL = a public JSON:API route that hand-decodes. Do not grep for POST alone. |
+| SUB-04 | No manual JSON parsing on JSON:API routes | Grep `resource.go` for `json.NewDecoder`, `json.Unmarshal`, `io.ReadAll` | Zero matches **on public JSON:API routes**. A hit inside an `/internal/` RPC handler is the SUB-03 carve-out, not a violation — cite the route and move on. Read what the hit is decoding before scoring it. |
 
 ## Phase 4: Security Review (auth-related services only)
 
