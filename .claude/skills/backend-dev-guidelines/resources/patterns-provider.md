@@ -7,9 +7,14 @@ description: The per-domain read (Provider) and write (Administrator) contracts,
 
 Every domain package splits database access in two: `provider.go` owns reads,
 `administrator.go` owns writes. Both are **interfaces** with a `db`-backed
-implementation and a `New*` constructor. No other file in the package issues
-writes — `db.Create` / `db.Save` / `db.Delete` live only in
-`administrator.go`.
+implementation and a `New*` constructor.
+
+On the ordinary request path, `db.Create` / `db.Save` / `db.Delete` appear
+only in `administrator.go` — `processor.go` and `resource.go` never call
+them directly. Batch and maintenance operations may issue their own SQL
+outside that split when they have a documented reason: `purge.go:37-51` runs
+a raw `tx.Exec` hard-delete inside its own transaction so the package does
+not need to import the admin manifest.
 
 The interface is not ceremony — it is the seam the processor tests substitute.
 See [testing-guide.md](testing-guide.md) for the `fake*` / `stub*` doubles that
@@ -104,7 +109,7 @@ func Query[T any](fetch func() (T, error)) Provider[T]
 func SliceQuery[T any](fetch func() ([]T, error)) Provider[[]T]
 ```
 
-`database.Provider[T]` is an unrelated type from the per-domain `Provider`
+`database.Provider[T]` is an unrelated type to the per-domain `Provider`
 interface defined earlier in this file — same name, different package, no
 relationship. Its own doc comment (`query.go:3`) still calls it "a lazy,
 re-runnable data fetch", which is the "lazy evaluation" concept this file
