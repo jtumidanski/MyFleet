@@ -24,7 +24,12 @@ type Client struct {
 func NewClient(base string) *Client { return &Client{base: base, hc: http.DefaultClient} }
 
 func (c *Client) Active(ctx context.Context, userID string) (Membership, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/internal/memberships/active?user_id="+userID, nil)
+	// QueryEscape, not raw concatenation: an unescaped `&` in userID would end
+	// this parameter and inject the rest as its own. The value is a
+	// server-generated UUID today, so this is defence in depth rather than a
+	// live fix — the same reasoning the fleet roster call below already applies.
+	endpoint := c.base + "/internal/memberships/active?user_id=" + url.QueryEscape(userID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return Membership{}, err
 	}
@@ -78,8 +83,8 @@ func (c *Client) FleetMemberIDs(ctx context.Context, fleetID string) ([]string, 
 	defer cancel()
 
 	// PathEscape even though fleetID is a validated JWT claim and so is not
-	// attacker-shaped: it costs nothing and stops the next caller inheriting
-	// Active's raw-concatenation habit.
+	// attacker-shaped: it costs nothing, and escaping is now what both calls in
+	// this file do.
 	endpoint := c.base + "/internal/fleets/" + url.PathEscape(fleetID) + "/members"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {

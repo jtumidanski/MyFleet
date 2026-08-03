@@ -167,3 +167,31 @@ func TestFleetMemberIDs_errorCarriesNoIDAndNoBody(t *testing.T) {
 		t.Fatalf("error %q must carry neither the fleet id nor the upstream body", err)
 	}
 }
+
+// Active builds its query string by concatenation, so a userID carrying a `&`
+// would end the user_id parameter and inject whatever follows as a separate
+// one. Not currently reachable — the caller passes a server-generated UUID —
+// but client.go:80-82 already calls out "Active's raw-concatenation habit" as
+// something not to inherit, and the next caller may not be so careful.
+func TestActive_escapesTheUserIDIntoTheQueryString(t *testing.T) {
+	const hostile = "u1&role=owner"
+
+	var seen string
+	var seenRole string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.URL.Query().Get("user_id")
+		seenRole = r.URL.Query().Get("role")
+		_, _ = w.Write([]byte(`{"fleet_id":"f1","role":"viewer"}`))
+	}))
+	defer srv.Close()
+
+	if _, err := NewClient(srv.URL).Active(context.Background(), hostile); err != nil {
+		t.Fatalf("Active: %v", err)
+	}
+	if seen != hostile {
+		t.Fatalf("user_id arrived as %q, want %q — the value was not escaped", seen, hostile)
+	}
+	if seenRole != "" {
+		t.Fatalf("a second parameter role=%q was injected from the user id", seenRole)
+	}
+}
