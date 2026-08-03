@@ -15,11 +15,13 @@ const CODES: readonly string[] = [
   'service_unavailable',
 ];
 
-// One sentence for all three failure codes. The invalid_state / auth_failed /
-// server_error split exists for log correlation in auth-service, not for the
-// reader — a person cannot act differently on it, and "invalid state" is jargon
-// (design §4.2, open question 3). The table is keyed on all four codes anyway,
-// so diverging one later is a one-line change.
+// One sentence for three of the four failure codes. The invalid_state /
+// auth_failed / server_error split exists for log correlation in auth-service,
+// not for the reader — a person cannot act differently on it, and "invalid
+// state" is jargon (design §4.2, open question 3). service_unavailable is the
+// fourth failure code and deliberately does NOT share this sentence; see its
+// entry below. (cancelled is not a failure at all.) The table is keyed on all
+// five codes anyway, so diverging another one later is a one-line change.
 const GENERIC_FAILURE =
   "Sign-in didn't complete. Nothing was saved — try again, or use a different Google account.";
 
