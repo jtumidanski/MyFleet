@@ -120,8 +120,18 @@ const DialogContent = React.forwardRef<
               against the box and would otherwise scroll out of view. The inner
               region carries the `grid gap-4` that used to sit on the box, so
               every existing consumer keeps the child spacing it was built
-              against. */}
-          <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto">{children}</div>
+              against.
+
+              `p-1.5 -m-1.5` is a clipping fix, not spacing: `overflow-y-auto`
+              forces overflow-x to `auto` as well (a scroll container cannot be
+              visible on one axis only), so this box clips its children's focus
+              rings — `ring-2 ring-offset-2` paints 4px OUTSIDE the control, and
+              a field whose edge meets this edge loses that side of its ring
+              entirely. The padding moves the clip boundary 6px out; the equal
+              negative margin pulls the box back into the `p-6` gutter so every
+              child stays exactly where it was. Change the two together or the
+              dialog's spacing shifts. */}
+          <div className="-m-1.5 grid min-h-0 flex-1 gap-4 overflow-y-auto p-1.5">{children}</div>
           {/* Rendered after children so Radix's initial autofocus lands on the
               first control in the body rather than on Close. */}
           <DialogPrimitive.Close

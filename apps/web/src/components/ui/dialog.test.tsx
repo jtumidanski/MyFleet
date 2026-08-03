@@ -184,3 +184,30 @@ describe('Dialog — content lifecycle', () => {
     expect(screen.getByLabelText('First field')).toHaveValue('');
   });
 });
+
+describe('Dialog — focus rings are not clipped', () => {
+  /**
+   * The scrolling body clips on BOTH axes — `overflow-y: auto` forces
+   * `overflow-x` to `auto` too — so its edge cropped the `ring-offset-2 ring-2`
+   * a focused control paints 4px outside itself. Measured in Chromium: a field
+   * flush with that edge rendered 0 of its 4 left-hand ring pixels.
+   *
+   * jsdom loads no stylesheet and can never see that, so this asserts the
+   * remedy instead: padding that moves the clip boundary out, and an equal
+   * negative margin that keeps every child where it was. They are only correct
+   * as a pair — padding alone reflows the dialog, margin alone re-crops it —
+   * so the test fails if either goes missing or they drift apart.
+   */
+  it('pads the scrolling body and cancels it with an equal negative margin', async () => {
+    render(<Harness />);
+    await userEvent.click(screen.getByRole('button', { name: 'Open' }));
+
+    const body = screen.getByLabelText('First field').closest('.overflow-y-auto');
+    expect(body).not.toBeNull();
+
+    const classes = body!.className.split(/\s+/);
+    const pad = classes.find((c) => /^p-[\d.]+$/.test(c));
+    expect(pad, `no uniform padding on the scrolling body: ${body!.className}`).toBeDefined();
+    expect(classes).toContain(`-m-${pad!.slice(2)}`);
+  });
+});
