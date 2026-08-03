@@ -166,3 +166,61 @@ describe('ApiClient.requestBlob', () => {
     }
   });
 });
+
+describe('ApiClient refresh failures', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // FR-SPA-6. When the original request 401s and the refresh answers 503, the
+  // caller must see the 503. A 401 would be a lie — the caller's credentials
+  // were never the problem — and downstream code keys on status. This works
+  // with no code in this package: a rejection from onRefresh propagates
+  // straight out of fetchAuthenticated, which is exactly why refresh.ts throws
+  // instead of widening the onRefresh return type.
+  it('propagates a rejecting onRefresh instead of surfacing the original 401', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        errors: [{ status: '401', code: 'unauthorized', title: 'unauthorized' }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new ApiClient({
+      baseUrl: '',
+      getAccessToken: () => 'tok-123',
+      onRefresh: async () => {
+        throw new ApiError(503, 'service_unavailable', 'Service temporarily unavailable');
+      },
+    });
+
+    await expect(client.request('/api/fleet/vehicles')).rejects.toMatchObject({ status: 503 });
+    // FR-SPA-5: one-shot, no retry loop. The original request was attempted
+    // once and never retried.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // The other half: an onRefresh that resolves null keeps today's behaviour
+  // exactly — the original 401 surfaces, still one-shot.
+  it('surfaces the original 401 when onRefresh resolves null', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({
+        errors: [{ status: '401', code: 'unauthorized', title: 'unauthorized' }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new ApiClient({
+      baseUrl: '',
+      getAccessToken: () => 'tok-123',
+      onRefresh: async () => null,
+    });
+
+    await expect(client.request('/api/fleet/vehicles')).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

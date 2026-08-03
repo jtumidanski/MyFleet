@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -23,6 +24,12 @@ type PrincipalResolver func(ctx context.Context, userID string) (Principal, erro
 
 // RefreshCookieName is the cookie carrying the opaque rotating refresh token.
 const RefreshCookieName = "refresh_token"
+
+// refreshRetryAfterSeconds is the advisory Retry-After on a 503 from this
+// handler. It matches the auth→fleet lookup timeout and the restart timescale
+// of a fleet-service pod. Advisory only: the SPA does not auto-retry, so the
+// header is for correctness, intermediaries, and any future client.
+const refreshRetryAfterSeconds = 5
 
 // InitializePublicRoutes wires POST /auth/refresh and POST /auth/logout. These
 // are PUBLIC (no JWT middleware): the refresh token itself authenticates the
@@ -58,6 +65,23 @@ func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve PrincipalRe
 
 		principal, err := resolve(req.Context(), userID)
 		if err != nil {
+			if errors.Is(err, server.ErrServiceUnavailable) {
+				// Someone else's outage is not an authentication failure. The
+				// refresh token is still good, so the session survives — but the
+				// cookie must carry the ROTATED value. Rotate already consumed
+				// the presented token and committed the new one to the store, so
+				// leaving the browser with the old value makes its next attempt
+				// indistinguishable from a replay, and Processor.Rotate answers a
+				// replay by revoking the whole family. That revocation is exactly
+				// the logout this branch exists to prevent.
+				//
+				// Warn with its own message, not Error: an outage must read as an
+				// outage rather than as a wave of authentication failures.
+				log.WithError(err).Warn("resolve principal on refresh: upstream unavailable")
+				SetRefreshCookie(w, newRaw, cookieSecure)
+				server.WriteError(w, server.RetryAfter(err, refreshRetryAfterSeconds))
+				return
+			}
 			// Fail closed (FR-5): a token with incomplete identity is never
 			// minted. Clear the cookie too — unlike this path's previous bare
 			// 401 — so a session whose user row is gone stops re-presenting a
@@ -71,6 +95,13 @@ func refreshHandler(log logrus.FieldLogger, proc *Processor, resolve PrincipalRe
 		access, err := proc.MintAccess(principal)
 		if err != nil {
 			log.WithError(err).Error("mint access on refresh")
+			// Same reason as the transient branch above: Rotate has already
+			// consumed the presented token and committed the new one, so an exit
+			// that writes neither the rotated value nor a clear leaves the browser
+			// holding a spent token. Its next attempt then reads as a replay and
+			// Processor.Rotate revokes the whole family — signing the user out of
+			// every device over what is a local signing fault.
+			SetRefreshCookie(w, newRaw, cookieSecure)
 			server.WriteError(w, server.ErrUnauthorized)
 			return
 		}

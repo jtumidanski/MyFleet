@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -173,22 +175,35 @@ func newPrincipalResolver(users user.Provider, fleet *membership.Client, admins 
 	return func(ctx context.Context, userID string) (session.Principal, error) {
 		u, err := users.GetByID(userID)
 		if err != nil {
-			return session.Principal{}, err
+			// A missing row is the PERMANENT case: the credential names a user
+			// who is gone, and the session must end.
+			if errors.Is(err, user.ErrNotFound) {
+				return session.Principal{}, err
+			}
+			// Anything else from the local store — a dead pool, a failed-over
+			// primary, a connection refused — is the same defect this task fixes
+			// one layer up: the answer is unknown, so the session must survive.
+			// The driver's error is deliberately NOT %w-wrapped, so a SQLSTATE or
+			// table name cannot ride into a log line even in principle.
+			return session.Principal{}, fmt.Errorf("%w: user lookup failed", server.ErrServiceUnavailable)
 		}
 		// A 404 from fleet-service is NOT an error here: membership.Client maps
 		// it to a zero Membership, and the OIDC callback keys its onboarding
 		// redirect off an empty ActiveFleetID. Turning it into an error would
-		// break a new user's first login.
+		// break a new user's first login. A transport or 5xx failure IS an
+		// error, and arrives already classified — it passes through bare so
+		// errors.Is keeps reaching the sentinel.
 		m, err := fleet.Active(ctx, userID)
 		if err != nil {
 			return session.Principal{}, err
 		}
 		// Fail closed: a lookup error must not mint a token that silently
 		// claims false, because the console's absence would then read as
-		// "you are not an admin" rather than "we could not tell".
+		// "you are not an admin" rather than "we could not tell". Transient for
+		// the same reason as the users read above.
 		isAdmin, err := admins.IsAdmin(userID)
 		if err != nil {
-			return session.Principal{}, err
+			return session.Principal{}, fmt.Errorf("%w: platform admin lookup failed", server.ErrServiceUnavailable)
 		}
 		return session.Principal{
 			UserID:        userID,

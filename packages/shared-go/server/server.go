@@ -31,6 +31,8 @@ func codeFor(status int) string {
 		return "validation_error"
 	case 429:
 		return "too_many_requests"
+	case 503:
+		return "service_unavailable"
 	default:
 		return "internal_error"
 	}
