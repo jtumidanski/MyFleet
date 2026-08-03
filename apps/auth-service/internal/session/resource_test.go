@@ -248,6 +248,11 @@ func TestRefresh_transientFailureMintsNothingAndDisclosesNothing(t *testing.T) {
 
 	rec := postRefresh(r, raw)
 
+	// Snapshot the raw body BEFORE decoding: json.Decoder.Decode drains the
+	// *bytes.Buffer, so reading rec.Body.String() afterward would return "" and
+	// the leak loop below would pass vacuously no matter what the body said.
+	rawBody := rec.Body.String()
+
 	var body struct {
 		Data   any `json:"data"`
 		Errors []struct {
@@ -270,12 +275,16 @@ func TestRefresh_transientFailureMintsNothingAndDisclosesNothing(t *testing.T) {
 		t.Fatalf("status/code = %q/%q, want 503/service_unavailable — the SPA keys on the code",
 			body.Errors[0].Status, body.Errors[0].Code)
 	}
+	if body.Errors[0].Title != server.InternalErrorTitle {
+		t.Fatalf("title = %q, want %q — a 5xx title must not describe the fault",
+			body.Errors[0].Title, server.InternalErrorTitle)
+	}
 	if body.Errors[0].Detail != "" {
 		t.Fatalf("detail = %q, want empty", body.Errors[0].Detail)
 	}
 	for _, secret := range []string{"membership", "lookup", "user-1"} {
-		if strings.Contains(rec.Body.String(), secret) {
-			t.Fatalf("the 503 body leaked %q: %s", secret, rec.Body.String())
+		if strings.Contains(rawBody, secret) {
+			t.Fatalf("the 503 body leaked %q: %s", secret, rawBody)
 		}
 	}
 }
