@@ -9,9 +9,7 @@ import { matchPath } from 'react-router-dom';
  * know it until a query lands.
  */
 export type Crumb =
-  | { kind: 'static'; label: string; to: string }
-  | { kind: 'vehicle' }
-  | { kind: 'fleet' };
+  { kind: 'static'; label: string; to: string } | { kind: 'vehicle' } | { kind: 'fleet' };
 
 export interface Trail {
   pattern: string;
