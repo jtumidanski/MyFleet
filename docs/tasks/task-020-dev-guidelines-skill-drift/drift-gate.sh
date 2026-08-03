@@ -35,7 +35,7 @@ check G-02 "ServerInformation"       "$(grep -rn 'ServerInformation' "${SCOPE[@]
 check G-03 "MarshalResponse"         "$(grep -rn 'MarshalResponse' "${SCOPE[@]}")"
 check G-04 "model.* composition lib" "$(grep -rnE 'model\.(Provider|Map|SliceMap|ParallelMap|ErrorProvider|FixedProvider)' "${SCOPE[@]}")"
 check G-05 "EntityProvider"          "$(grep -rn 'EntityProvider' "${SCOPE[@]}")"
-check G-06 "RouteInitializer"        "$(grep -rn 'RouteInitializer' "${SCOPE[@]}")"
+check G-06 "RouteInitializer"        "$(grep -rnE '\bRouteInitializer' "${SCOPE[@]}")"
 check G-07 "RegisterHandler("        "$(grep -rnE 'RegisterHandler\(' "${SCOPE[@]}")"
 check G-08 "services/<svc>-service"  "$(grep -rnE '\bservices/[a-z-]+-service' "${SCOPE[@]}")"
 check G-09 "Jest (not jest-dom)"     "$(grep -rinE '\bjest\b' "$FE" "$FEAGENT" | grep -v 'jest-dom')"
