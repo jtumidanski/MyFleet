@@ -104,7 +104,7 @@ if err := server.New(log).
             pr.Use(authmw.JWT(keyfn, authmw.WithLogger(log)))
             fleet.InitializeRoutes(log, db, membershipAdmin, membershipProc)(pr)
             vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
-            // ...ten more domains' InitializeRoutes(pr), same group, same middleware
+            // ...nine more domains' InitializeRoutes(pr), same group, same middleware
             dashboard.InitializeRoutes(log, db, scheduleProc, activityProc, vehicleProc)(pr)
         })
     }).
