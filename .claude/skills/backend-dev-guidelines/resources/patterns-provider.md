@@ -38,8 +38,8 @@ func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
   inside the provider.
 - Methods return `(Model, error)` — eager, plain values. There is no lazy
   provider type.
-- IDs are `string` UUIDs (`uuid.NewString()`, `builder.go:13`), never `uint32`
-  and never a typed binary UUID value.
+- IDs are `string` UUIDs (`uuid.NewString()`, `builder.go:13`), never `uint32` <!-- ALLOW-VOCAB -->
+  and never `uuid.UUID`. <!-- ALLOW-VOCAB -->
 - Providers never modify state.
 
 ### Translate `gorm.ErrRecordNotFound` at the boundary
