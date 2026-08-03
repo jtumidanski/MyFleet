@@ -102,3 +102,58 @@ future parallel test in the same package would race on this var.
 with `Detailed` in either order (both implement `Unwrap`, and `errors.As`
 walks the whole chain) — hand-traced correct in the design, but no test
 exercises both wrappers applied to the same error together.
+
+### 9. `Active`'s request-construction error is returned unredacted
+
+`apps/auth-service/internal/membership/client.go`'s `Active` returns the
+`http.NewRequestWithContext` error bare. On a malformed base URL that is a
+`*url.Error` whose message includes the endpoint with `?user_id=`, reaching
+`session/resource.go` or `oidc/resource.go` at Error level. Narrow — only
+reachable via startup misconfiguration, and `QueryEscape` means the user id
+itself cannot break parsing — but the redaction applied a dozen lines below
+(the transport-failure unwrap to `urlErr.Err`) is not applied here.
+
+### 10. The underlying database error is discarded entirely
+
+`cmd/main.go`'s principal-resolver wrapping neither wraps nor logs the driver
+error on a local infrastructure failure, so a Postgres outage leaves
+auth-service with a fixed `"user lookup failed"` / `"platform admin lookup
+failed"` message and no SQLSTATE anywhere in its logs. This is the direct,
+correct consequence of the stated redaction invariant (no driver text may
+reach a log line) — recorded only so the diagnosability cost is a known
+trade-off, not fixed here.
+
+## From the final re-review
+
+### 11. A cold reload during an outage still bounces to `/login`
+
+The fix that keeps the access token on a 503 (`3bb7147`) stops an
+**in-session** refresh from logging the user out — that is what
+`verification.md` Check 1 exercised, via a client-side navigation. It does
+not, by itself, stop a **cold page reload** made while the outage is still in
+progress: `AuthContext.tsx` computes
+`isAuthenticated = hasToken && !!data?.user`, and on a fresh page load
+`me.data` is `undefined` until `useMe` resolves, so `RequireAuth` still
+navigates to `/login` regardless of whether the token survives underneath.
+What the fix genuinely buys in this case is that the token is still in
+`localStorage` when the user lands back on `/login` — so recovery is a
+reload once `fleet-service` returns, not a full Google sign-in round-trip.
+Not fixed here; would need `isAuthenticated`/`RequireAuth` to tolerate a
+loading identity query rather than treating "not yet resolved" the same as
+"not authenticated".
+
+### 12. A 503 without a JSON:API body clears the token instead of surviving
+
+`AuthContext.tsx`'s guard (`me.error instanceof ApiError && me.error.status
+=== 503`) only recognizes a 503 that `createErrorFromUnknown` could parse a
+JSON:API envelope from. `ApiClient.request` (`packages/shared-ts/src/apiClient.ts`)
+reads the body with `res.json().catch(() => null)`; if an intermediary
+answers 503 with an HTML body instead of JSON — e.g. Traefik returning its
+own 503 when a service has no healthy endpoints, rather than the request
+ever reaching auth-service — `body` is `null`, and `createErrorFromUnknown`
+falls through to `ApiError(0, 'unknown')`. The `status === 503` guard misses
+that (`status` is `0`), so the token is cleared and the user is signed out
+for an outage the code was specifically written to survive. auth-service's
+own `/auth/me` handler never emits a 503, so this gap is infrastructure-level
+only — reachable through Traefik/the reverse proxy, not through
+auth-service's own responses. Not fixed here.

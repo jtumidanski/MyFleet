@@ -406,7 +406,12 @@ Behavioural — these restate the issue's acceptance list and are the bar:
       message, not the generic failure.
 - [x] The SPA does not redirect to `/login` when a refresh answers `503`; the
       stored access token survives and the failed request surfaces a `503`
-      `ApiError`, not a `401`.
+      `ApiError`, not a `401`. (Verified for an in-session refresh — a
+      client-side navigation while the app is already mounted, per
+      `verification.md` Check 1. Token survival holds unconditionally, but a
+      **cold page reload** during the outage still lands on `/login`, because
+      `AuthContext.tsx`'s `isAuthenticated = hasToken && !!data?.user` is
+      false until `useMe` resolves; see `follow-ups.md`.)
 
 Code and verification:
 

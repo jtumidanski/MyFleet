@@ -501,3 +501,39 @@ None. No FAIL checks.
   function itself, not of a concurrent window.** Because `inflight` is shared, a
   `refreshAccessToken` racing on the same dead outcome will clear the token while
   `mintAccessToken` is in flight. Pre-existing structure, unchanged by this diff.
+
+---
+
+## Resolutions
+
+> Appended after the fixes below landed. The sections above are the reviewers'
+> findings as written at audit time and are left unmodified — this section
+> records what happened next, so the file does not go on asserting things the
+> tree has since made false.
+
+- **G1** (plan/PRD checkboxes unchecked) — resolved in `270a390`. `plan.md` is
+  now 55/55 checked; `prd.md` §10 is 17/18 (item 18, "issue closed by the PR",
+  is correctly left open until merge).
+- **G2** (browser-verification record gitignored/untracked) — resolved in
+  `270a390`. `verification.md` and `login-outage.png` are now tracked files in
+  `docs/tasks/task-018-transient-upstream-503/`.
+- **G3** (out-of-scope defects recorded nowhere durable) — resolved in
+  `270a390`. Both are now in `follow-ups.md`.
+- **B-2** (`FleetMemberIDs` leaked the fleet id into a log line) — **FIXED** in
+  `c8a6f3c`, which unwraps to `urlErr.Err` before returning and adds a
+  transport-path disclosure test (the existing test only exercised the
+  already-safe non-2xx path).
+- **Whole-branch review's Important finding** — `AuthContext` cleared the
+  stored access token on *any* `useMe` error, including a 503, which reopened
+  the exact forced-logout this task exists to prevent via a path none of the
+  refresh-layer tests could see. **FIXED** in `3bb7147`: the clear is now
+  gated on the error not being `ApiError` with `status === 503`.
+- **Also fixed:** the `MintAccess` spent-token exit on refresh, which left the
+  browser holding a token that would read as a replay on the next refresh and
+  revoke the whole family (`b37f27d`); two stale comments in `client.ts` and
+  `loginError.ts` that no longer matched the code beneath them (`9569e42`);
+  and an unreachable assertion in
+  `TestRefresh_transientResolverFailureKeepsTheSessionAlive` (`b37f27d`).
+- **Still open, deliberately deferred:** B-1, B-3, B-4, and the frontend and
+  whole-branch minor findings above are not fixed on this branch. All are
+  captured in `follow-ups.md` rather than left to vanish with this audit.
