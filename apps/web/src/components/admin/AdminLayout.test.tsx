@@ -72,7 +72,16 @@ describe('AdminLayout', () => {
     // FR-ADMIN-UI-3: the band states the caller's scope in plain words and
     // offers a way out, on every screen.
     renderAdminLayout();
-    expect(screen.getByText(/platform admin/i)).toBeInTheDocument();
+    const band = screen.getByText(/platform admin/i).closest('div');
+    expect(band).toBeInTheDocument();
+    // danger-subtle, NOT --destructive: that token is reserved for
+    // destructive CONTROLS, and this is a mode indicator, not a button. Pin
+    // the semantic tokens so a future swap to --destructive goes red here.
+    expect(band).toHaveClass(
+      'border-danger-border',
+      'bg-danger-subtle',
+      'text-danger-subtle-foreground',
+    );
     expect(screen.getByRole('link', { name: /back to my fleet/i })).toBeInTheDocument();
   });
 

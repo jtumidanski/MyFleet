@@ -38,7 +38,7 @@ Every task's requirements implicitly include this section.
 - Consumes: nothing.
 - Produces: the CSS custom properties `--sidebar`, `--sidebar-foreground`, `--sidebar-primary`, `--sidebar-primary-foreground`, `--sidebar-accent`, `--sidebar-accent-foreground`, `--sidebar-border`, `--sidebar-ring` in both themes, and the Tailwind classes `bg-sidebar`, `text-sidebar-foreground`, `bg-sidebar-primary`, `text-sidebar-primary-foreground`, `bg-sidebar-accent`, `text-sidebar-accent-foreground`, `border-sidebar-border`, `ring-sidebar-ring`. Also the npm packages `@radix-ui/react-dropdown-menu`, `@radix-ui/react-tooltip`, `@radix-ui/react-separator`.
 
-- [ ] **Step 1: Install dependencies**
+- [x] **Step 1: Install dependencies**
 
 This worktree has no `node_modules`, so `make ci` fails confusingly until this runs (design §10).
 
@@ -51,7 +51,7 @@ npm install -w apps/web @radix-ui/react-dropdown-menu @radix-ui/react-tooltip @r
 
 npm writes caret ranges (`^1.1.x`), matching the sibling Radix entries in `apps/web/package.json`. Confirm the three lines landed under `dependencies` (not `devDependencies`) and that `package-lock.json` at the repo root changed.
 
-- [ ] **Step 2: Write the failing token test**
+- [x] **Step 2: Write the failing token test**
 
 Create `apps/web/src/test/sidebarTokens.test.ts`:
 
@@ -148,7 +148,7 @@ describe('tailwind.config.ts', () => {
 });
 ```
 
-- [ ] **Step 3: Run it and watch it fail**
+- [x] **Step 3: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/test/sidebarTokens.test.ts
@@ -156,7 +156,7 @@ npm run -w apps/web test -- src/test/sidebarTokens.test.ts
 
 Expected: FAIL — `are all defined in light (:root)` reports all eight tokens missing.
 
-- [ ] **Step 4: Add the light-theme tokens**
+- [x] **Step 4: Add the light-theme tokens**
 
 In `apps/web/src/index.css`, inside `:root`, insert immediately **before** `--radius: 0.5rem;`:
 
@@ -186,7 +186,7 @@ In `apps/web/src/index.css`, inside `:root`, insert immediately **before** `--ra
     --sidebar-ring: 222.2 84% 4.9%; /* mirrors --ring */
 ```
 
-- [ ] **Step 5: Add the dark-theme tokens**
+- [x] **Step 5: Add the dark-theme tokens**
 
 In the same file, inside `.dark`, append after `--info-border: 217 40% 28%;` (the last line of the block):
 
@@ -203,7 +203,7 @@ In the same file, inside `.dark`, append after `--info-border: 217 40% 28%;` (th
     --sidebar-ring: 212.7 26.8% 83.9%; /* mirrors --ring */
 ```
 
-- [ ] **Step 6: Register the family in Tailwind**
+- [x] **Step 6: Register the family in Tailwind**
 
 In `apps/web/tailwind.config.ts`, inside `theme.extend.colors`, immediately after the closing `},` of the `info` family:
 
@@ -220,7 +220,7 @@ In `apps/web/tailwind.config.ts`, inside `theme.extend.colors`, immediately afte
         },
 ```
 
-- [ ] **Step 7: Run the test to verify it passes**
+- [x] **Step 7: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/test/sidebarTokens.test.ts
@@ -228,7 +228,7 @@ npm run -w apps/web test -- src/test/sidebarTokens.test.ts
 
 Expected: PASS, 8 tests.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add package-lock.json apps/web/package.json apps/web/src/index.css apps/web/tailwind.config.ts apps/web/src/test/sidebarTokens.test.ts
@@ -249,7 +249,7 @@ git commit -m "feat(web): add the --sidebar-* token family and sidebar dependenc
 
 shadcn ships this as `hooks/use-mobile.tsx`. It goes to `src/lib/hooks/` instead because this repo's convention is `src/lib/hooks/<camelCase>.ts` for hooks (`usePendingAttachments.ts`, `useRuntimeConfig.ts`) and `components/ui/` for components (design §2.2).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/lib/hooks/useIsMobile.test.ts`:
 
@@ -304,7 +304,7 @@ describe('useIsMobile', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/lib/hooks/useIsMobile.test.ts
@@ -312,7 +312,7 @@ npm run -w apps/web test -- src/lib/hooks/useIsMobile.test.ts
 
 Expected: FAIL — cannot resolve `./useIsMobile`.
 
-- [ ] **Step 3: Write the hook**
+- [x] **Step 3: Write the hook**
 
 Create `apps/web/src/lib/hooks/useIsMobile.ts`:
 
@@ -351,7 +351,7 @@ export function useIsMobile(): boolean {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/lib/hooks/useIsMobile.test.ts
@@ -359,7 +359,7 @@ npm run -w apps/web test -- src/lib/hooks/useIsMobile.test.ts
 
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/lib/hooks/useIsMobile.ts apps/web/src/lib/hooks/useIsMobile.test.ts
@@ -381,7 +381,7 @@ git commit -m "feat(web): add useIsMobile for the sidebar primitive"
 
 `sidebar.tsx` imports `Separator` and the tooltip set directly, so both are vendored faithfully rather than trimmed — editing the vendored file to drop a dependency makes every future shadcn diff noisier than the dependency is expensive (design §2.2).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `apps/web/src/components/ui/separator.test.tsx`:
 
@@ -456,7 +456,7 @@ describe('Tooltip', () => {
 });
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 ```bash
 npm run -w apps/web test -- src/components/ui/separator.test.tsx src/components/ui/tooltip.test.tsx
@@ -464,7 +464,7 @@ npm run -w apps/web test -- src/components/ui/separator.test.tsx src/components/
 
 Expected: FAIL — cannot resolve `./separator` or `./tooltip`.
 
-- [ ] **Step 3: Vendor `separator.tsx`**
+- [x] **Step 3: Vendor `separator.tsx`**
 
 Create `apps/web/src/components/ui/separator.tsx`:
 
@@ -494,7 +494,7 @@ Separator.displayName = SeparatorPrimitive.Root.displayName;
 export { Separator };
 ```
 
-- [ ] **Step 4: Vendor `tooltip.tsx`**
+- [x] **Step 4: Vendor `tooltip.tsx`**
 
 Create `apps/web/src/components/ui/tooltip.tsx`:
 
@@ -536,7 +536,7 @@ TooltipContent.displayName = TooltipPrimitive.Content.displayName;
 export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider };
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 ```bash
 npm run -w apps/web test -- src/components/ui/separator.test.tsx src/components/ui/tooltip.test.tsx
@@ -544,7 +544,7 @@ npm run -w apps/web test -- src/components/ui/separator.test.tsx src/components/
 
 Expected: PASS, 5 tests.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/ui/separator.tsx apps/web/src/components/ui/separator.test.tsx apps/web/src/components/ui/tooltip.tsx apps/web/src/components/ui/tooltip.test.tsx
@@ -574,7 +574,7 @@ git commit -m "feat(web): vendor the shadcn separator and tooltip primitives"
 2. **`SidebarInset` renders a `<div>`, not a `<main>`.** Both layouts render their own `<main className="flex-1 p-6">` inside it (FR-HEADER-4). Nesting `<main>` inside `<main>` is invalid and produces two `main` landmarks.
 3. **`SidebarRail` is `aria-hidden="true"`.** It duplicates `SidebarTrigger` exactly and is already `tabIndex={-1}`, so upstream's `aria-label="Toggle Sidebar"` puts two identically-named controls in the accessibility tree. It stays a pointer-only convenience; the labelled trigger remains the accessible route (FR-SIDEBAR-7 asks for the rail, not for a second announced control).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/ui/sidebar.test.tsx`:
 
@@ -688,7 +688,7 @@ describe('SidebarTrigger', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/ui/sidebar.test.tsx
@@ -696,7 +696,7 @@ npm run -w apps/web test -- src/components/ui/sidebar.test.tsx
 
 Expected: FAIL — cannot resolve `./sidebar`.
 
-- [ ] **Step 3: Create `apps/web/src/components/ui/sidebar.tsx` — part 1 of 2 (top of the file)**
+- [x] **Step 3: Create `apps/web/src/components/ui/sidebar.tsx` — part 1 of 2 (top of the file)**
 
 ```tsx
 import * as React from 'react';
@@ -1044,7 +1044,7 @@ const SidebarInset = React.forwardRef<HTMLDivElement, React.ComponentProps<'div'
 SidebarInset.displayName = 'SidebarInset';
 ```
 
-- [ ] **Step 4: Append part 2 of 2 to the same file**
+- [x] **Step 4: Append part 2 of 2 to the same file**
 
 ```tsx
 const SidebarInput = React.forwardRef<
@@ -1433,7 +1433,7 @@ export {
 };
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/ui/sidebar.test.tsx
@@ -1441,7 +1441,7 @@ npm run -w apps/web test -- src/components/ui/sidebar.test.tsx
 
 Expected: PASS, 7 tests.
 
-- [ ] **Step 6: Verify the file type-checks and breaks no conventions**
+- [x] **Step 6: Verify the file type-checks and breaks no conventions**
 
 ```bash
 npm run -w apps/web build
@@ -1451,7 +1451,7 @@ npm run -w apps/web test -- src/test/conventions.test.ts
 
 Expected: all three succeed. The conventions run matters specifically: it fails the build on any hardcoded palette class in a `.tsx` under `src`, and a vendored file is exactly where one would sneak in.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/ui/sidebar.tsx apps/web/src/components/ui/sidebar.test.tsx
@@ -1471,7 +1471,7 @@ git commit -m "feat(web): vendor the shadcn sidebar primitive with SPA cookie pe
 - Consumes: `@radix-ui/react-dropdown-menu` (Task 1).
 - Produces, from `src/components/ui/dropdown-menu.tsx`: `DropdownMenu`, `DropdownMenuTrigger`, `DropdownMenuContent`, `DropdownMenuItem`, `DropdownMenuCheckboxItem`, `DropdownMenuRadioItem`, `DropdownMenuLabel`, `DropdownMenuSeparator`, `DropdownMenuShortcut`, `DropdownMenuGroup`, `DropdownMenuPortal`, `DropdownMenuSub`, `DropdownMenuSubContent`, `DropdownMenuSubTrigger`, `DropdownMenuRadioGroup`. Task 10's `ProfileMenu` uses `DropdownMenu`, `DropdownMenuTrigger`, `DropdownMenuContent`, `DropdownMenuLabel`, `DropdownMenuSeparator`, `DropdownMenuItem`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/ui/dropdown-menu.test.tsx`:
 
@@ -1549,7 +1549,7 @@ describe('DropdownMenu', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/ui/dropdown-menu.test.tsx
@@ -1557,7 +1557,7 @@ npm run -w apps/web test -- src/components/ui/dropdown-menu.test.tsx
 
 Expected: FAIL — cannot resolve `./dropdown-menu`.
 
-- [ ] **Step 3: Add the jsdom stubs**
+- [x] **Step 3: Add the jsdom stubs**
 
 Append to `apps/web/src/test/setup.ts`, after the `ResizeObserver` block:
 
@@ -1576,7 +1576,7 @@ Element.prototype.setPointerCapture = function setPointerCapture(): void {};
 Element.prototype.releasePointerCapture = function releasePointerCapture(): void {};
 ```
 
-- [ ] **Step 4: Vendor `dropdown-menu.tsx`**
+- [x] **Step 4: Vendor `dropdown-menu.tsx`**
 
 Create `apps/web/src/components/ui/dropdown-menu.tsx`:
 
@@ -1754,7 +1754,7 @@ export {
 };
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/ui/dropdown-menu.test.tsx
@@ -1762,7 +1762,7 @@ npm run -w apps/web test -- src/components/ui/dropdown-menu.test.tsx
 
 Expected: PASS, 3 tests.
 
-- [ ] **Step 6: Run the whole suite — the setup.ts change is global**
+- [x] **Step 6: Run the whole suite — the setup.ts change is global**
 
 ```bash
 npm run -w apps/web test
@@ -1770,7 +1770,7 @@ npm run -w apps/web test
 
 Expected: PASS. `setup.ts` runs before every test file, so a mistake there breaks everything at once rather than in one file.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/ui/dropdown-menu.tsx apps/web/src/components/ui/dropdown-menu.test.tsx apps/web/src/test/setup.ts
@@ -1793,7 +1793,7 @@ This is the fifth primitive, added by the design (§6.1) beyond FR-SIDEBAR-1's f
 
 **One deliberate deviation:** upstream's `BreadcrumbPage` carries `role="link" aria-disabled="true"`. FR-CRUMB-3 requires the current page be rendered as **non-interactive** text, and a disabled link still answers `getByRole('link', …)`, which makes "the last crumb is not a link" untestable. It is a plain `<span aria-current="page">` here.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/ui/breadcrumb.test.tsx`:
 
@@ -1852,7 +1852,7 @@ describe('Breadcrumb', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/ui/breadcrumb.test.tsx
@@ -1860,7 +1860,7 @@ npm run -w apps/web test -- src/components/ui/breadcrumb.test.tsx
 
 Expected: FAIL — cannot resolve `./breadcrumb`.
 
-- [ ] **Step 3: Vendor `breadcrumb.tsx`**
+- [x] **Step 3: Vendor `breadcrumb.tsx`**
 
 Create `apps/web/src/components/ui/breadcrumb.tsx`:
 
@@ -1963,7 +1963,7 @@ export {
 };
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/ui/breadcrumb.test.tsx
@@ -1971,7 +1971,7 @@ npm run -w apps/web test -- src/components/ui/breadcrumb.test.tsx
 
 Expected: PASS, 4 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/ui/breadcrumb.tsx apps/web/src/components/ui/breadcrumb.test.tsx
@@ -1999,7 +1999,7 @@ git commit -m "feat(web): vendor the shadcn breadcrumb primitive"
 
 `useMatches()` — the obvious React Router way to do this — **throws in this app**. It calls `useDataRouterState`, which requires `DataRouterStateContext`, which only exists under `createBrowserRouter`; `App.tsx:100` uses `<BrowserRouter>` (design §6.2). Matching a table with `matchPath` is the alternative, and it is the same matcher `NavLink` uses.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/frame/breadcrumbTrails.test.ts`:
 
@@ -2121,7 +2121,7 @@ describe('TRAILS', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/breadcrumbTrails.test.ts
@@ -2129,7 +2129,7 @@ npm run -w apps/web test -- src/components/frame/breadcrumbTrails.test.ts
 
 Expected: FAIL — cannot resolve `./breadcrumbTrails`.
 
-- [ ] **Step 3: Write the table**
+- [x] **Step 3: Write the table**
 
 Create `apps/web/src/components/frame/breadcrumbTrails.ts`:
 
@@ -2216,7 +2216,7 @@ export function resolveTrail(pathname: string): ResolvedTrail | null {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/breadcrumbTrails.test.ts
@@ -2224,7 +2224,7 @@ npm run -w apps/web test -- src/components/frame/breadcrumbTrails.test.ts
 
 Expected: PASS, 24 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/frame/breadcrumbTrails.ts apps/web/src/components/frame/breadcrumbTrails.test.ts
@@ -2248,7 +2248,7 @@ git commit -m "feat(web): add the route-to-breadcrumb-trail table"
 
 **Why this issues no extra requests (FR-CRUMBNAME-6):** `VehicleNameCrumb` calls the same `useVehicle(id)` hook with the same `vehicleKeys.detail(id)` key that `VehicleDetailPage.tsx:50` uses, and both mount in the same commit, so React Query dedupes them into one in-flight request. `useVehicle` also carries `staleTime: 60_000`, so back-navigation resolves from cache with no request at all. Likewise `useAdminFleet(id)` / `adminKeys.fleet(id)` against `AdminFleetsPage.tsx:174`.
 
-- [ ] **Step 1: Write the failing vehicle test**
+- [x] **Step 1: Write the failing vehicle test**
 
 Create `apps/web/src/components/frame/crumbs/VehicleNameCrumb.test.tsx`:
 
@@ -2356,7 +2356,7 @@ describe('the vehicle title rule', () => {
 });
 ```
 
-- [ ] **Step 2: Write the failing fleet test**
+- [x] **Step 2: Write the failing fleet test**
 
 Create `apps/web/src/components/frame/crumbs/FleetNameCrumb.test.tsx`:
 
@@ -2406,7 +2406,7 @@ describe('FleetNameCrumb', () => {
 });
 ```
 
-- [ ] **Step 3: Run both and watch them fail**
+- [x] **Step 3: Run both and watch them fail**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/crumbs
@@ -2414,7 +2414,7 @@ npm run -w apps/web test -- src/components/frame/crumbs
 
 Expected: FAIL — cannot resolve `./VehicleNameCrumb` or `./FleetNameCrumb`.
 
-- [ ] **Step 4: Write `VehicleNameCrumb.tsx`**
+- [x] **Step 4: Write `VehicleNameCrumb.tsx`**
 
 Create `apps/web/src/components/frame/crumbs/VehicleNameCrumb.tsx`:
 
@@ -2450,7 +2450,7 @@ export function VehicleNameCrumb({ id }: { id: string }) {
 }
 ```
 
-- [ ] **Step 5: Write `FleetNameCrumb.tsx`**
+- [x] **Step 5: Write `FleetNameCrumb.tsx`**
 
 Create `apps/web/src/components/frame/crumbs/FleetNameCrumb.tsx`:
 
@@ -2477,7 +2477,7 @@ export function FleetNameCrumb({ id }: { id: string }) {
 }
 ```
 
-- [ ] **Step 6: Run both to verify they pass**
+- [x] **Step 6: Run both to verify they pass**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/crumbs
@@ -2485,7 +2485,7 @@ npm run -w apps/web test -- src/components/frame/crumbs
 
 Expected: PASS, 10 tests.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/frame/crumbs
@@ -2506,7 +2506,7 @@ git commit -m "feat(web): resolve vehicle and fleet names for the breadcrumb"
 
 Propless for the same reason `FrameHeader` is: the location is ambient, and one table serves both shells, so there is nothing a caller could usefully pass that would not just be a chance to disagree (design §6.3).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/frame/AppBreadcrumb.test.tsx`:
 
@@ -2585,7 +2585,7 @@ describe('AppBreadcrumb', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/AppBreadcrumb.test.tsx
@@ -2593,7 +2593,7 @@ npm run -w apps/web test -- src/components/frame/AppBreadcrumb.test.tsx
 
 Expected: FAIL — cannot resolve `./AppBreadcrumb`.
 
-- [ ] **Step 3: Write the component**
+- [x] **Step 3: Write the component**
 
 Create `apps/web/src/components/frame/AppBreadcrumb.tsx`:
 
@@ -2669,7 +2669,7 @@ export function AppBreadcrumb() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/AppBreadcrumb.test.tsx
@@ -2677,7 +2677,7 @@ npm run -w apps/web test -- src/components/frame/AppBreadcrumb.test.tsx
 
 Expected: PASS, 8 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/frame/AppBreadcrumb.tsx apps/web/src/components/frame/AppBreadcrumb.test.tsx
@@ -2706,7 +2706,7 @@ git commit -m "feat(web): render the route-driven breadcrumb trail"
 
 **The theme toggle is not folded in** (FR-PROFILE-7). `ThemeToggle` fires a session-bound mutation; `ThemeToggleButton` exists precisely so the signed-out login page can render the control without one. Merging them would drag that mutation toward the login page.
 
-- [ ] **Step 1: Write the failing `identityLines` test**
+- [x] **Step 1: Write the failing `identityLines` test**
 
 Create `apps/web/src/components/frame/identityLines.test.ts`:
 
@@ -2757,7 +2757,7 @@ describe('identityLines', () => {
 });
 ```
 
-- [ ] **Step 2: Write the failing `ProfileMenu` test**
+- [x] **Step 2: Write the failing `ProfileMenu` test**
 
 Create `apps/web/src/components/frame/ProfileMenu.test.tsx`:
 
@@ -2871,7 +2871,7 @@ describe('ProfileMenu', () => {
 });
 ```
 
-- [ ] **Step 3: Run both and watch them fail**
+- [x] **Step 3: Run both and watch them fail**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/identityLines.test.ts src/components/frame/ProfileMenu.test.tsx
@@ -2879,7 +2879,7 @@ npm run -w apps/web test -- src/components/frame/identityLines.test.ts src/compo
 
 Expected: FAIL — cannot resolve `./identityLines` or `./ProfileMenu`.
 
-- [ ] **Step 4: Write `identityLines.ts`**
+- [x] **Step 4: Write `identityLines.ts`**
 
 Create `apps/web/src/components/frame/identityLines.ts`:
 
@@ -2911,7 +2911,7 @@ export function identityLines(user: User | null | undefined): IdentityLines {
 }
 ```
 
-- [ ] **Step 5: Write `ProfileMenu.tsx`**
+- [x] **Step 5: Write `ProfileMenu.tsx`**
 
 Create `apps/web/src/components/frame/ProfileMenu.tsx`:
 
@@ -2986,7 +2986,7 @@ export function ProfileMenu() {
 }
 ```
 
-- [ ] **Step 6: Run both to verify they pass**
+- [x] **Step 6: Run both to verify they pass**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/identityLines.test.ts src/components/frame/ProfileMenu.test.tsx
@@ -2994,7 +2994,7 @@ npm run -w apps/web test -- src/components/frame/identityLines.test.ts src/compo
 
 Expected: PASS, 12 tests.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/frame/identityLines.ts apps/web/src/components/frame/identityLines.test.ts apps/web/src/components/frame/ProfileMenu.tsx apps/web/src/components/frame/ProfileMenu.test.tsx
@@ -3017,7 +3017,7 @@ Rendered through `SidebarMenuButton size="lg" asChild` so the collapse behaviour
 
 `BrandMark` stays `aria-hidden` — its own doc comment explains why — so the accessible name comes from the link's `aria-label` and nothing announces the brand twice.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/frame/BrandLink.test.tsx`:
 
@@ -3092,7 +3092,7 @@ describe('BrandLink', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/BrandLink.test.tsx
@@ -3100,7 +3100,7 @@ npm run -w apps/web test -- src/components/frame/BrandLink.test.tsx
 
 Expected: FAIL — cannot resolve `./BrandLink`.
 
-- [ ] **Step 3: Write the component**
+- [x] **Step 3: Write the component**
 
 Create `apps/web/src/components/frame/BrandLink.tsx`:
 
@@ -3150,7 +3150,7 @@ export function BrandLink({ to, label, suffix, ariaLabel }: BrandLinkProps) {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/BrandLink.test.tsx
@@ -3158,7 +3158,7 @@ npm run -w apps/web test -- src/components/frame/BrandLink.test.tsx
 
 Expected: PASS, 5 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/frame/BrandLink.tsx apps/web/src/components/frame/BrandLink.test.tsx
@@ -3185,7 +3185,7 @@ git commit -m "feat(web): make the sidebar brand lockup a link home"
 
 **Why a `<nav>` wrapper:** the sidebar primitive renders `<div>`s and a `<ul>`, no landmark. The PRD's accessibility section requires the sidebar nav be a `<nav>` landmark, and a per-shell label ("Main", "Admin") keeps the two shells' landmarks distinguishable.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/frame/FrameNav.test.tsx`:
 
@@ -3259,7 +3259,7 @@ describe('FrameNav', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/FrameNav.test.tsx
@@ -3267,7 +3267,7 @@ npm run -w apps/web test -- src/components/frame/FrameNav.test.tsx
 
 Expected: FAIL — cannot resolve `./FrameNav`.
 
-- [ ] **Step 3: Write the component**
+- [x] **Step 3: Write the component**
 
 Create `apps/web/src/components/frame/FrameNav.tsx`:
 
@@ -3343,7 +3343,7 @@ export function FrameNav({
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/FrameNav.test.tsx
@@ -3351,7 +3351,7 @@ npm run -w apps/web test -- src/components/frame/FrameNav.test.tsx
 
 Expected: PASS, 7 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/frame/FrameNav.tsx apps/web/src/components/frame/FrameNav.test.tsx
@@ -3374,7 +3374,7 @@ FR-HEADER-1 specifies an identical row for both shells, FR-HEADER-2 requires ide
 
 `h-14` is fixed rather than shadcn's `h-16` shrinking to `h-12` on collapse: a header that changes height when the sidebar collapses moves every page's content up and down (FR-HEADER-2). Today's `py-3` around a 36px button yields ~60px, so 56px is a 4px change — visible only to a pixel diff.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/frame/FrameHeader.test.tsx`:
 
@@ -3466,7 +3466,7 @@ describe('FrameHeader', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/FrameHeader.test.tsx
@@ -3474,7 +3474,7 @@ npm run -w apps/web test -- src/components/frame/FrameHeader.test.tsx
 
 Expected: FAIL — cannot resolve `./FrameHeader`.
 
-- [ ] **Step 3: Write the component**
+- [x] **Step 3: Write the component**
 
 Create `apps/web/src/components/frame/FrameHeader.tsx`:
 
@@ -3511,7 +3511,7 @@ export function FrameHeader() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/frame/FrameHeader.test.tsx
@@ -3519,7 +3519,7 @@ npm run -w apps/web test -- src/components/frame/FrameHeader.test.tsx
 
 Expected: PASS, 4 tests. If the first test fails on the order lookup, print `names` to see what the theme toggle's accessible name actually is — `ThemeToggleButton` renders it as `Theme: <preference>`; the assertion is on the ordering, not on the exact copy.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/frame/FrameHeader.tsx apps/web/src/components/frame/FrameHeader.test.tsx
@@ -3542,7 +3542,7 @@ The `bg-card` rationale comment does **not** come along: it moved to `index.css`
 
 `AppLayout` no longer reads `user` or `logout` from `useAuth` — `ProfileMenu` owns both. Leaving them destructured would fail `noUnusedLocals`.
 
-- [ ] **Step 1: Rewrite the test to describe the new frame**
+- [x] **Step 1: Rewrite the test to describe the new frame**
 
 Replace the whole of `apps/web/src/components/AppLayout.test.tsx` with:
 
@@ -3735,7 +3735,7 @@ describe('AppLayout admin entry point', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/AppLayout.test.tsx
@@ -3743,7 +3743,7 @@ npm run -w apps/web test -- src/components/AppLayout.test.tsx
 
 Expected: FAIL — the brand link, the profile menu and the sidebar trigger do not exist yet.
 
-- [ ] **Step 3: Rewrite the layout**
+- [x] **Step 3: Rewrite the layout**
 
 Replace the whole of `apps/web/src/components/AppLayout.tsx` with:
 
@@ -3813,7 +3813,7 @@ export function AppLayout() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/AppLayout.test.tsx
@@ -3821,7 +3821,7 @@ npm run -w apps/web test -- src/components/AppLayout.test.tsx
 
 Expected: PASS, 12 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/AppLayout.tsx apps/web/src/components/AppLayout.test.tsx
@@ -3846,7 +3846,7 @@ git commit -m "feat(web): rebuild the fleet shell on the sidebar primitive"
 
 **`Building2`, confirmed** (design §7): a MyFleet "fleet" is a household, which argues for `Home` — but `Home` in the admin sidebar would sit inches from "Back to my fleet" and read as that link's icon rather than as the fleets *collection*. `Building2` is the conventional tenant glyph in admin consoles, and the console's job is to look at tenants.
 
-- [ ] **Step 1: Update the test**
+- [x] **Step 1: Update the test**
 
 Replace the whole of `apps/web/src/components/admin/AdminLayout.test.tsx` with:
 
@@ -4009,7 +4009,7 @@ describe('AdminLayout', () => {
 });
 ```
 
-- [ ] **Step 2: Run it and watch it fail**
+- [x] **Step 2: Run it and watch it fail**
 
 ```bash
 npm run -w apps/web test -- src/components/admin/AdminLayout.test.tsx
@@ -4017,7 +4017,7 @@ npm run -w apps/web test -- src/components/admin/AdminLayout.test.tsx
 
 Expected: FAIL — no brand link, no profile menu, no sidebar trigger.
 
-- [ ] **Step 3: Rewrite the layout**
+- [x] **Step 3: Rewrite the layout**
 
 Replace the whole of `apps/web/src/components/admin/AdminLayout.tsx` with:
 
@@ -4115,7 +4115,7 @@ export function AdminLayout() {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 ```bash
 npm run -w apps/web test -- src/components/admin/AdminLayout.test.tsx
@@ -4123,7 +4123,7 @@ npm run -w apps/web test -- src/components/admin/AdminLayout.test.tsx
 
 Expected: PASS, 11 tests.
 
-- [ ] **Step 5: Run the route-tree guard, which mounts both shells for real**
+- [x] **Step 5: Run the route-tree guard, which mounts both shells for real**
 
 ```bash
 npm run -w apps/web test -- src/components/admin/postPurgeRouting.test.tsx
@@ -4131,7 +4131,7 @@ npm run -w apps/web test -- src/components/admin/postPurgeRouting.test.tsx
 
 Expected: PASS, 3 tests. This file imports the **real** route tree and renders the console at five routes, so it is the check that the rewritten shells still work inside `App.tsx` — including that `/admin` is still a sibling of the authenticated shell and a fleetless platform admin is not bounced to `/onboarding`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/admin/AdminLayout.tsx apps/web/src/components/admin/AdminLayout.test.tsx
@@ -4150,7 +4150,7 @@ git commit -m "feat(web): rebuild the admin console shell on the sidebar primiti
 
 This is the gate, not a formality. Two of its checks — the collapsed rail's appearance and the no-extra-request claim — **cannot** be asserted in vitest, because jsdom has no CSS engine and no network panel (design §8.4).
 
-- [ ] **Step 1: Run the full CI gate**
+- [x] **Step 1: Run the full CI gate**
 
 ```bash
 cd /home/tumidanski/source/MyFleet/.worktrees/task-017-app-frame-navigation
@@ -4160,11 +4160,11 @@ make ci
 
 Expected: PASS. `make ci` runs `lint-check vet test build fe-test fe-build manifests carfax-template`. The Go and manifest halves should be untouched — if either fails, something outside this task's scope changed and must be reverted, not worked around.
 
-- [ ] **Step 2: Bring up the stack and the dev server**
+- [x] **Step 2: Bring up the stack and the dev server**
 
 Follow `docs/runbooks/local-debugging.md` §1 (stack) and §2 (frontend with hot reload), then sign in per §3.
 
-- [ ] **Step 3: Verify what jsdom cannot see, in real Chromium**
+- [x] **Step 3: Verify what jsdom cannot see, in real Chromium**
 
 Drive a real browser per `docs/runbooks/local-debugging.md` §4. Check, in **both** light and dark themes:
 
@@ -4178,21 +4178,21 @@ Drive a real browser per `docs/runbooks/local-debugging.md` §4. Check, in **bot
 8. The brand link and every nav link show a visible focus ring under keyboard focus (FR-BRAND-5).
 9. A vehicle with a very long nickname truncates its crumb; the theme toggle and profile menu stay on screen and the page body does not scroll horizontally (FR-CRUMB-9).
 
-- [ ] **Step 4: Verify the no-extra-request claim in the network panel**
+- [x] **Step 4: Verify the no-extra-request claim in the network panel**
 
 Open the browser's network panel, navigate to `/vehicles`, then click into a vehicle. Confirm `/api/fleet/vehicles/{id}` is requested **once**, not twice (FR-CRUMBNAME-6). Then go back and forward again within 60 seconds and confirm the crumb resolves with **no** request at all (`useVehicle` carries `staleTime: 60_000`).
 
 Repeat for `/admin/fleets` → a fleet.
 
-- [ ] **Step 5: Verify the crumb matches the page title**
+- [x] **Step 5: Verify the crumb matches the page title**
 
 On a vehicle with a nickname, confirm the breadcrumb's last crumb and the page's `<h1>` read identically. Repeat on a vehicle without one (FR-CRUMBNAME-2). Then break a lookup — navigate to `/vehicles/00000000-0000-0000-0000-000000000000` — and confirm the crumb shows the raw UUID rather than a generic label (FR-CRUMBNAME-5).
 
-- [ ] **Step 6: Verify the login page is untouched**
+- [x] **Step 6: Verify the login page is untouched**
 
 Sign out. On `/login`, confirm the theme toggle still works and fires **no** network request (FR-PROFILE-7 / FR-PRETOGGLE-3). This is the regression folding the theme control into the profile menu would have caused.
 
-- [ ] **Step 7: Run the code review**
+- [x] **Step 7: Run the code review**
 
 Per CLAUDE.md's "Code Review Before PR", this is not optional even when the plan looks complete:
 
