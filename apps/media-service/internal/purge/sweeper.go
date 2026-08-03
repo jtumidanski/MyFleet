@@ -62,10 +62,18 @@ func NewSweeper(log logrus.FieldLogger, db *gorm.DB, store ObjectRemover, cfg Co
 type summary struct {
 	mediaObjectsPurged int
 	objectsRemoved     int
+	orphanVariants     int
+	orphanFailures     int
+	// reconcileCapped is a heuristic, not a fact: exactly `limit` orphans could
+	// be exactly all of them. It is reported rather than swallowed because a
+	// silently truncated cleanup reads as "finished" when it is not
+	// (FR-RECON-6).
+	reconcileCapped bool
 }
 
 func (sum summary) empty() bool {
-	return sum.mediaObjectsPurged == 0 && sum.objectsRemoved == 0
+	return sum.mediaObjectsPurged == 0 && sum.objectsRemoved == 0 &&
+		sum.orphanVariants == 0 && sum.orphanFailures == 0
 }
 
 func (sum summary) log(log logrus.FieldLogger) {
@@ -73,25 +81,89 @@ func (sum summary) log(log logrus.FieldLogger) {
 		return
 	}
 	log.WithFields(logrus.Fields{
-		"media_objects_purged": sum.mediaObjectsPurged,
-		"objects_removed":      sum.objectsRemoved,
+		"media_objects_purged":       sum.mediaObjectsPurged,
+		"objects_removed":            sum.objectsRemoved,
+		"orphan_variants_reconciled": sum.orphanVariants,
+		"orphan_failures_deleted":    sum.orphanFailures,
+		"reconcile_capped":           sum.reconcileCapped,
 	}).Info("media purge sweep completed")
 }
 
-// RunOnce executes one tick.
+// RunOnce executes one tick: the per-object pass, then reconciliation.
 //
 // Call it under database.WithLeaderLock(db, "media-purge", …) so only one
 // replica sweeps per tick (FR-RECON-8).
 //
 // It returns an error only for a failure that aborts a whole pass — the
-// ListPurgeable query itself. Per-object failures are logged and stepped over,
-// never returned: returning one would abandon every media object behind it in
-// the list, which is exactly what FR-PURGE-7 forbids.
+// ListPurgeable query, or the orphan query. Per-object and per-orphan failures
+// are logged and stepped over, never returned: returning one would abandon
+// every item behind it, which is exactly what FR-PURGE-7 forbids.
+//
+// Both passes run even if the first one fails. They are independent — the
+// reconciliation pass is defined by the ABSENCE of a media object, so it shares
+// no state with the per-object pass — and the self-healing safety net should not
+// be silenced by an unrelated query failure.
 func (s *Sweeper) RunOnce(ctx context.Context) error {
 	var sum summary
-	err := s.purgeExpired(ctx, &sum)
+	perObjectErr := s.purgeExpired(ctx, &sum)
+	reconcileErr := s.reconcile(ctx, &sum)
 	sum.log(s.log)
-	return err
+	if perObjectErr != nil {
+		return perObjectErr
+	}
+	return reconcileErr
+}
+
+// reconcile removes derived state whose media object no longer exists: variant
+// rows (and the bytes they are the last record of) and variant-failure ledger
+// rows.
+//
+// It is permanent, not a one-shot migration (FR-RECON-7). Once the backlog left
+// by earlier versions drains it matches zero rows per tick and costs one
+// anti-join per table — an honest recurring cost, which is why ReconcileLimit
+// <= 0 is an off switch rather than something an operator has to roll back to
+// escape. It stays because lazy card generation writes variant rows from REQUEST
+// context, outside the media-purge lock, so a variant row can in principle
+// appear for a media object the sweep is deleting. A per-tick pass makes that
+// race self-healing within an hour.
+func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error {
+	if s.cfg.ReconcileLimit <= 0 {
+		return nil
+	}
+
+	orphans, err := mediavariant.ListOrphaned(s.db, s.cfg.ReconcileLimit)
+	if err != nil {
+		return fmt.Errorf("list orphaned variants: %w", err)
+	}
+	// Each row is handled individually so one failed byte removal spares exactly
+	// its own row. Volume is bounded by the cap, so the per-row statement cost is
+	// acceptable; a batched delete would lose the sparing.
+	for _, v := range orphans {
+		if rerr := s.store.RemoveObject(ctx, v.ObjectKey); rerr != nil {
+			// The row survives, so its object_key — the only remaining record of
+			// these bytes — stays reachable for the next tick (FR-RECON-3).
+			s.log.WithError(rerr).WithFields(logrus.Fields{
+				"variant_id": v.ID, "object_key": v.ObjectKey,
+			}).Warn("remove orphaned variant object failed")
+			continue
+		}
+		if derr := mediavariant.DeleteByID(s.db, v.ID); derr != nil {
+			s.log.WithError(derr).WithField("variant_id", v.ID).
+				Warn("delete orphaned variant row failed")
+			continue
+		}
+		sum.orphanVariants++
+	}
+	sum.reconcileCapped = len(orphans) == s.cfg.ReconcileLimit
+
+	// The ledger carries no object_key, so orphans there are deleted directly
+	// (FR-RECON-4).
+	n, err := variantfailures.DeleteOrphaned(s.db, s.cfg.ReconcileLimit)
+	if err != nil {
+		return fmt.Errorf("delete orphaned variant failures: %w", err)
+	}
+	sum.orphanFailures += n
+	return nil
 }
 
 // purgeExpired is the per-object pass: for each media object whose recovery

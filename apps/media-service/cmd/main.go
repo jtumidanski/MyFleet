@@ -125,7 +125,14 @@ func main() {
 	// replica runs per tick (design §10.6 / A9). Hourly, not daily: jobs.Every's
 	// first tick is at T+interval, so a 24-hour sweep in a service that
 	// redeploys more often than daily never runs (design OQ-5).
-	sweeper := purge.NewSweeper(log, db, store, purge.Config{})
+	// MEDIA_PURGE_RECONCILE_LIMIT bounds the orphan rows reconciled per tick.
+	// "0" turns the reconciliation pass off entirely, matching the
+	// MEDIA_LAZY_VARIANT_CONCURRENCY convention: a background pass that deletes
+	// from object storage needs an off switch that is not a rollback. At an
+	// hourly cadence the default drains 12,000 orphans a day.
+	sweeper := purge.NewSweeper(log, db, store, purge.Config{
+		ReconcileLimit: config.GetInt("MEDIA_PURGE_RECONCILE_LIMIT", 500),
+	})
 	go jobs.Every(ctx, 1*time.Hour, func(ctx context.Context) error {
 		_, err := database.WithLeaderLock(db, "media-purge", func() error {
 			return sweeper.RunOnce(ctx)
