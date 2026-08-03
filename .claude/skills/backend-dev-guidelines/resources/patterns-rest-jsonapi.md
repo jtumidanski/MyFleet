@@ -102,11 +102,18 @@ All four steps are in the block above: `server.ParsePage(req)` (reads
 `packages/shared-go/server/pagination.go:20-33`) → `proc.ListByFleet(fleetID,
 page)`, which returns `(models, total, error)` → `page.Meta(total)`, giving
 `{total, totalPages, number, size}` → `server.Document{Data: ..., Meta: ...}`.
-On a domain JSON:API route, do not compute the offset in the handler —
-`page.Offset()` belongs to the provider query. Both handler-level
-`page.Offset()` call sites in the tree are internal routes that query the
-database directly (`maintenanceschedule/resource.go:302`,
-`platformadmin/resource.go:124`); see [Anti-Patterns](#anti-patterns-to-avoid).
+**Paginating a database query belongs to the provider**, which takes
+`server.Page` and applies `Offset()`/`Limit()` to the query — do not assemble an
+offset in a handler in order to run a query there.
+
+Slicing an **in-memory** aggregate the handler has already assembled is a
+different operation and is legitimate. `maintenanceschedule/resource.go:299-313`
+is the live example: `queueHandler` calls `proc.Queue(...)` at `:293`, then pages
+the returned slice with `entries[start:end]` and reports the true length through
+`page.Meta(total)`. No SQL is involved — the code says so at `:301` ("Page the
+already-filtered slice in memory") — and it is an ordinary JWT-protected domain
+route (`GET /fleets/{id}/maintenance/upcoming` and `/overdue`, registered under
+`InitializeRoutes` at `resource.go:257,259`), not an exception.
 
 ---
 
@@ -579,8 +586,8 @@ under one of two structural exceptions — check which one applies before flaggi
    `platformadmin/resource.go:143`, `mediaobject/resource.go:276`,
    `membership/resource.go:181`. (`mediaobject` has a full processor with both
    collaborators, so it is the route class, not a missing facade, that decides
-   this.) The two handler-level `page.Offset()` uses are the same family
-   (`maintenanceschedule/resource.go:302`, `platformadmin/resource.go:124`).
+   this.) `platformadmin/resource.go:124` is the same family — an internal route
+   running its own `db.Raw` with `page.Size, page.Offset()`.
 2. **The domain's `Processor` does not hold that collaborator**, so there is no
    facade to bypass: `mileage`'s processor holds neither
    (`mileage/processor.go:14-17` — only a `VehicleMileageUpdater`), and
