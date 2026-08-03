@@ -58,6 +58,12 @@ Verified:
 - `Retry-After: 5` present.
 - `Set-Cookie` value is non-empty and **different** from the presented cookie
   (rotated) — `<TOKEN-A>` → `<TOKEN-B>`.
+
+  (Token values throughout this document are redacted. They were ephemeral rows
+  in a throwaway local Postgres, but they are token-shaped and tripped the
+  repository's secret scanner. What the evidence rests on is the *shape* — that
+  the value written alongside the 503 is non-empty, differs from the one
+  presented, and is not the clearing form — not the literal strings.)
 - **Not** the clearing form: `Expires=Wed, 02 Sep 2026...` (30 days out), no
   `Max-Age=0`, no past `Expires`.
 - Body: `status: "503"`, `code: "service_unavailable"`,
@@ -162,8 +168,7 @@ the "Try again" button.
 
 `POST /api/auth/refresh` presenting the **exact cookie value written
 alongside the 503** in Check 1
-(`<TOKEN-C>`, captured from the browser's
-cookie jar):
+(`<TOKEN-C>`, captured from the browser's cookie jar):
 
 ```
 STATUS=200
