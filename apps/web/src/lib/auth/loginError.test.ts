@@ -17,13 +17,16 @@ describe('consumeLoginError', () => {
     window.history.replaceState(null, '', '/login');
   });
 
-  it.each<LoginErrorCode>(['cancelled', 'invalid_state', 'auth_failed', 'server_error'])(
-    'parses the %s code',
-    async (code) => {
-      const { consumeLoginError } = await freshModule(`/login#error=${code}`);
-      expect(consumeLoginError()).toBe(code);
-    },
-  );
+  it.each<LoginErrorCode>([
+    'cancelled',
+    'invalid_state',
+    'auth_failed',
+    'server_error',
+    'service_unavailable',
+  ])('parses the %s code', async (code) => {
+    const { consumeLoginError } = await freshModule(`/login#error=${code}`);
+    expect(consumeLoginError()).toBe(code);
+  });
 
   // FR-STATE-6: anything outside the closed set is a generic failure, and the
   // supplied string is discarded at the parser so nothing downstream can render
@@ -100,4 +103,30 @@ describe('noticeFor', () => {
       });
     },
   );
+
+  // The one failure whose ADVICE differs: wait and retry, rather than try a
+  // different Google account. That is why it does not reuse GENERIC_FAILURE —
+  // unlike the invalid_state / auth_failed / server_error split, which exists
+  // for log correlation and which the reader cannot act on differently.
+  it('tells the user an outage is temporary rather than reusing the generic copy', async () => {
+    const { noticeFor } = await freshModule('/login');
+
+    expect(noticeFor('service_unavailable')).toEqual({
+      tone: 'danger',
+      message: 'Sign-in is temporarily unavailable. Nothing was saved — try again in a moment.',
+    });
+    // Distinct from the generic failure, which advises a different Google
+    // account — the wrong thing to do during an outage.
+    expect(noticeFor('service_unavailable').message).not.toBe(noticeFor('server_error').message);
+  });
+
+  // The union member alone is not enough: CODES is a hand-maintained
+  // readonly string[], and isLoginErrorCode silently degrades anything missing
+  // from it to server_error (loginError.ts:58). That degradation is what makes
+  // shipping the backend ahead of the frontend safe — and what would hide this
+  // mistake in review.
+  it('accepts service_unavailable through the CODES allowlist', async () => {
+    const { consumeLoginError } = await freshModule('/login#error=service_unavailable');
+    expect(consumeLoginError()).toBe('service_unavailable');
+  });
 });

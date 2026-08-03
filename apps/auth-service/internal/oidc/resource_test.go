@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/session"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/user"
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // --- fakes satisfying the consumer-side interfaces (design §3.2) ---
@@ -671,5 +673,51 @@ func TestCallbackDestination_prefersReturnPath(t *testing.T) {
 				t.Errorf("destination(%q, %q) = %q, want %q", tc.fleetID, tc.returnPath, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestCallback_transientResolverFailureRedirectsWithServiceUnavailable: a user
+// signing in during a fleet-service outage is told to try again shortly, rather
+// than being shown a generic failure that implies their account is broken. The
+// permanent case in TestCallback_failureRedirectsToLogin ("principal resolution
+// fails", plain error → server_error) must stay green beside this: that pairing
+// is what proves the branch actually split rather than moved.
+func TestCallback_transientResolverFailureRedirectsWithServiceUnavailable(t *testing.T) {
+	d := okDeps()
+	d.Resolve = func(context.Context, string) (session.Principal, error) {
+		return session.Principal{}, fmt.Errorf("%w: active membership lookup failed with status 500",
+			server.ErrServiceUnavailable)
+	}
+
+	rec, hook := callback(t, d, "/auth/callback?code=abc&state=s-1", stateCookie(t, "s-1", "nonce-1"))
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	want := "http://app.test/login#error=service_unavailable"
+	if got := rec.Header().Get("Location"); got != want {
+		t.Fatalf("Location = %q, want %q", got, want)
+	}
+	// FR-REFRESH-6's callback-side twin: an outage must not read as a wave of
+	// authentication failures.
+	if !loggedAt(hook, logrus.WarnLevel, "resolve principal on callback: upstream unavailable") {
+		t.Errorf("the transient failure must log at warn with its own message: %+v", hook.AllEntries())
+	}
+	// FR-CALLBACK-3: the state cookie behaviour is identical to every other
+	// post-verification exit. failLogin's deliberate non-clearing and the single
+	// unconditional clear after verifyStateCookie are a reviewed departure from
+	// task-010's FR-ERR-8 — do not disturb them.
+	if !clearsStateCookie(rec) {
+		t.Error("this exit is after state verification, so the abandoned attempt's cookie must still be cleared")
+	}
+	// FR-CALLBACK-4: no refresh token has been issued on this path, so there is
+	// no cookie-preservation question — and no half-session may be left behind.
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == session.RefreshCookieName && c.Value != "" {
+			t.Errorf("a failed callback set a refresh cookie: %q", c.Value)
+		}
+	}
+	if strings.Contains(rec.Header().Get("Location"), "access_token") {
+		t.Error("a failed callback carried an access token in the fragment")
 	}
 }

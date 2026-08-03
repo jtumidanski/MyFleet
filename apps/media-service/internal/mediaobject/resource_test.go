@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -763,6 +764,156 @@ func TestGetContent_thumbnailServesVariantWithoutContentLength(t *testing.T) {
 	}
 	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
 		t.Fatalf("Cache-Control = %q, want private, max-age=300 on a variant response too", cc)
+	}
+}
+
+// TestGetContent_downgradedCardIsNotStored is the whole point of the cache
+// change. thumbnailRouter seeds thumbnail and display but no card, so
+// ?variant=card downgrades. Those soft bytes must not be stored under the
+// sharp image's URL: the card generation the downgrade schedules usually
+// completes within seconds, and nothing can invalidate a cache entry that
+// recorded no substitution.
+func TestGetContent_downgradedCardIsNotStored(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=card", nil))
+
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-store" {
+		t.Fatalf("Cache-Control = %q, want private, no-store — a soft image must never be stored under the card URL", cc)
+	}
+	// Everything else is byte-identical to what this request returns today:
+	// the substitution stays undetectable by the client (FR-DG-4).
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "thumb-bytes" {
+		t.Fatalf("body = %q, want thumb-bytes", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Fatalf("Content-Type = %q, want the thumbnail row's own image/jpeg", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); cd != `inline; filename="photo.png"` {
+		t.Fatalf("Content-Disposition = %q, want inline with the original's filename", cd)
+	}
+	if xcto := rec.Header().Get("X-Content-Type-Options"); xcto != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff on every response", xcto)
+	}
+	if cl := rec.Header().Get("Content-Length"); cl != "" {
+		t.Fatalf("Content-Length = %q, want it omitted — a variant records no byte count", cl)
+	}
+	// FR-DG-4, stated literally: a downgraded response must be
+	// indistinguishable from the thumbnail response it is made of, except
+	// for the cache directive. Comparing the two header sets encodes that
+	// requirement directly, where counting headers only approximated it —
+	// a count also fails whenever a legitimate header is added to every
+	// response (production wraps this router in telemetry.CorrelationID,
+	// which sets one), and it blames the downgrade for it.
+	thumbRec := httptest.NewRecorder()
+	router.ServeHTTP(thumbRec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=thumbnail", nil))
+	assertHeadersMatchExceptCacheControl(t, rec.Header(), thumbRec.Header())
+}
+
+// assertHeadersMatchExceptCacheControl fails unless got and want carry the same
+// header names with the same values, ignoring Cache-Control. It is how these
+// tests say "identical on the wire apart from the cache directive" without
+// hard-coding how many headers a response happens to carry.
+func assertHeadersMatchExceptCacheControl(t *testing.T, got, want http.Header) {
+	t.Helper()
+	for name, wantVals := range want {
+		if name == "Cache-Control" {
+			continue
+		}
+		if !slices.Equal(got[name], wantVals) {
+			t.Fatalf("header %s = %v, want %v — the downgrade must stay invisible to clients", name, got[name], wantVals)
+		}
+	}
+	for name, gotVals := range got {
+		if name == "Cache-Control" {
+			continue
+		}
+		if _, ok := want[name]; !ok {
+			t.Fatalf("response carries an extra header %s = %v that the thumbnail response does not — "+
+				"the downgrade must stay invisible to clients", name, gotVals)
+		}
+	}
+}
+
+// TestGetContent_presentCardIsStillCached is the other row of the policy table
+// at the handler. Every other max-age=300 assertion covers a variant that
+// cannot downgrade, so without this one nothing pins "?variant=card that
+// actually finds a card keeps the normal freshness window" — an implementation
+// that reached for no-store on the whole card path would pass the rest of the
+// suite.
+func TestGetContent_presentCardIsStillCached(t *testing.T) {
+	store := &fakeStore{
+		bucket:  "myfleet-media",
+		getBody: []byte("original-bytes"),
+		getBodies: map[string][]byte{
+			"fleet-a/thumb.jpg": []byte("thumb-bytes"),
+			"fleet-a/card.jpg":  []byte("card-bytes"),
+		},
+	}
+	variants := &fakeVariants{refs: map[string]VariantRef{
+		"thumbnail": {ObjectKey: "fleet-a/thumb.jpg", ContentType: "image/jpeg"},
+		"card":      {ObjectKey: "fleet-a/card.jpg", ContentType: "image/jpeg"},
+	}}
+	router, proc := testRouterWithVariants(t, store, variants, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=card", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "card-bytes" {
+		t.Fatalf("body = %q, want card-bytes — the card exists, so nothing was substituted", rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, max-age=300" {
+		t.Fatalf("Cache-Control = %q, want private, max-age=300 — a card that was actually served is cacheable like any other variant", cc)
+	}
+}
+
+// TestGetContent_unservableVariantIsNotStored covers the miss that produces no
+// bytes at all: ?variant=card with no card AND no thumbnail is a 404. A 404 is
+// heuristically cacheable under RFC 9111 §4.2.2, so without an explicit
+// directive a browser may pin "no image" under the card URL the same way it was
+// pinning the soft image — and the generation the miss schedules means the URL
+// usually starts answering 200 seconds later.
+func TestGetContent_unservableVariantIsNotStored(t *testing.T) {
+	store := &fakeStore{bucket: "myfleet-media", getBody: []byte("original-bytes")}
+	router, proc := testRouterWithVariants(t, store, &fakeVariants{}, 1024)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=card", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-store" {
+		t.Fatalf("Cache-Control = %q, want private, no-store — a 404 that becomes a 200 seconds later must not be stored", cc)
+	}
+}
+
+// TestGetContent_missingObjectIsNotStored is the same guarantee on the error
+// path that does not involve a variant at all: an unknown id is a 404 whose
+// answer changes the moment the object is uploaded, and it must not be stored
+// either. Together with the test above this pins the directive to every error
+// this handler can return, not just the downgrade-adjacent one.
+func TestGetContent_missingObjectIsNotStored(t *testing.T) {
+	router, _, _ := thumbnailRouter(t)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/00000000-0000-0000-0000-000000000000/content", nil))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", rec.Code, rec.Body.String())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-store" {
+		t.Fatalf("Cache-Control = %q, want private, no-store — an error response is per-fleet and must never be stored", cc)
 	}
 }
 

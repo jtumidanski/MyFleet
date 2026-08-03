@@ -13,6 +13,12 @@ var (
 	ErrUnsupportedMediaType  = errors.New("unsupported media type")   // 415
 	ErrValidation            = errors.New("validation")               // 422
 	ErrTooManyRequests       = errors.New("too many requests")        // 429
+	// ErrServiceUnavailable means the answer is UNKNOWN because something this
+	// request depends on is unavailable — not that the request was wrong. It is
+	// the carrier for that distinction across package boundaries: a caller that
+	// cannot import the failing client still classifies with
+	// errors.Is(err, ErrServiceUnavailable).
+	ErrServiceUnavailable = errors.New("service unavailable") // 503
 )
 
 func StatusFor(err error) int {
@@ -37,6 +43,8 @@ func StatusFor(err error) int {
 		return 422
 	case errors.Is(err, ErrTooManyRequests):
 		return 429
+	case errors.Is(err, ErrServiceUnavailable):
+		return 503
 	default:
 		return 500
 	}
@@ -64,6 +72,32 @@ type detailedError struct {
 func (e *detailedError) Error() string  { return e.base.Error() }
 func (e *detailedError) Unwrap() error  { return e.base }
 func (e *detailedError) Detail() string { return e.detail }
+
+// RetryAfter wraps a status sentinel with the number of seconds a client should
+// wait before retrying, which WriteError emits as the Retry-After header.
+//
+// The value rides on the ERROR rather than on a second WriteError entry point,
+// mirroring Detailed: the delay is a property of the failure, so it can be
+// attached once where the failure is understood and survive any number of
+// intermediate returns. A parallel WriteErrorWith… would also have to be
+// duplicated for every future response concern.
+//
+// Error() returns the base sentinel's message for the same reason Detailed's
+// does — the envelope `title` is err.Error(), and a wrapper must not rewrite it.
+// RetryAfter and Detailed compose in either order; errors.As walks the whole
+// chain, so neither has to know about the other.
+func RetryAfter(base error, seconds int) error {
+	return &retryAfterError{base: base, seconds: seconds}
+}
+
+type retryAfterError struct {
+	base    error
+	seconds int
+}
+
+func (e *retryAfterError) Error() string   { return e.base.Error() }
+func (e *retryAfterError) Unwrap() error   { return e.base }
+func (e *retryAfterError) RetryAfter() int { return e.seconds }
 
 // APIError is one entry in the standard error envelope (design §6).
 type APIError struct {

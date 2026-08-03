@@ -6,7 +6,11 @@
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
-    "types": ["vitest/globals"]
+    "types": ["vitest/globals"],
+    // The sanctioned build is `tsc --noEmit` (consumers import src/index.ts
+    // directly), so nothing lands here normally. This keeps an ad-hoc bare
+    // `tsc` from scattering .js next to the sources; dist/ is gitignored.
+    "outDir": "dist"
   },
   "include": ["src"]
 }

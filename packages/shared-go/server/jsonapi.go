@@ -94,6 +94,15 @@ func errorLogger() logrus.FieldLogger {
 // ~190 call sites would be pure noise.
 func WriteError(w http.ResponseWriter, err error) {
 	status := StatusFor(err)
+	// BEFORE WriteJSON, which calls WriteHeader: after that point every header
+	// mutation is silently discarded, and the response would still be the right
+	// status with the header missing. A non-positive value is a caller bug —
+	// Retry-After: 0 tells an intermediary to hammer immediately — so it is
+	// dropped rather than emitted.
+	var ra interface{ RetryAfter() int }
+	if errors.As(err, &ra) && ra.RetryAfter() > 0 {
+		w.Header().Set("Retry-After", itoa(ra.RetryAfter()))
+	}
 	apiErr := APIError{
 		Status: itoa(status),
 		Code:   codeFor(status),

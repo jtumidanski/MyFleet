@@ -1,18 +1,27 @@
 /** The closed set auth-service redirects with (FR-ERR-4). Nothing else is valid. */
-export type LoginErrorCode = 'cancelled' | 'invalid_state' | 'auth_failed' | 'server_error';
+export type LoginErrorCode =
+  'cancelled' | 'invalid_state' | 'auth_failed' | 'server_error' | 'service_unavailable';
 
 export interface LoginErrorNotice {
   tone: 'neutral' | 'danger';
   message: string;
 }
 
-const CODES: readonly string[] = ['cancelled', 'invalid_state', 'auth_failed', 'server_error'];
+const CODES: readonly string[] = [
+  'cancelled',
+  'invalid_state',
+  'auth_failed',
+  'server_error',
+  'service_unavailable',
+];
 
-// One sentence for all three failure codes. The invalid_state / auth_failed /
-// server_error split exists for log correlation in auth-service, not for the
-// reader — a person cannot act differently on it, and "invalid state" is jargon
-// (design §4.2, open question 3). The table is keyed on all four codes anyway,
-// so diverging one later is a one-line change.
+// One sentence for three of the four failure codes. The invalid_state /
+// auth_failed / server_error split exists for log correlation in auth-service,
+// not for the reader — a person cannot act differently on it, and "invalid
+// state" is jargon (design §4.2, open question 3). service_unavailable is the
+// fourth failure code and deliberately does NOT share this sentence; see its
+// entry below. (cancelled is not a failure at all.) The table is keyed on all
+// five codes anyway, so diverging another one later is a one-line change.
 const GENERIC_FAILURE =
   "Sign-in didn't complete. Nothing was saved — try again, or use a different Google account.";
 
@@ -22,6 +31,19 @@ const NOTICES: Record<LoginErrorCode, LoginErrorNotice> = {
   invalid_state: { tone: 'danger', message: GENERIC_FAILURE },
   auth_failed: { tone: 'danger', message: GENERIC_FAILURE },
   server_error: { tone: 'danger', message: GENERIC_FAILURE },
+  // The one code that does NOT reuse GENERIC_FAILURE. Every other failure
+  // advises trying a different Google account; during an outage that is the
+  // wrong advice, and nothing about the user's account is at fault.
+  //
+  // tone: 'danger' rather than 'neutral' because LoginPage keys more than
+  // colour off it — role="alert" and the "Try again" button label both hang on
+  // tone === 'danger', and both are right here. 'neutral' is reserved for the
+  // deliberate cancellation, and would leave an outage rendering as muted body
+  // text under a "Continue with Google" button.
+  service_unavailable: {
+    tone: 'danger',
+    message: 'Sign-in is temporarily unavailable. Nothing was saved — try again in a moment.',
+  },
 };
 
 /** Maps a code to how the login page should present it. */

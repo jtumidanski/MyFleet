@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/url"
 	"path"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/session"
 	"github.com/jtumidanski/myfleet/apps/auth-service/internal/user"
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 const stateCookieName = "oidc_state"
@@ -90,6 +92,10 @@ const (
 	errInvalidState loginErrorCode = "invalid_state"
 	errAuthFailed   loginErrorCode = "auth_failed"
 	errServerError  loginErrorCode = "server_error"
+	// The one failure whose ADVICE differs: wait and retry, rather than try a
+	// different Google account. It is emitted from exactly one call site — the
+	// resolver's transient branch — and every other failLogin keeps its code.
+	errServiceUnavailable loginErrorCode = "service_unavailable"
 )
 
 // failLogin returns the browser to the SPA's login page carrying a coarse
@@ -261,6 +267,14 @@ func callbackHandler(log logrus.FieldLogger, d Dependencies) http.HandlerFunc {
 		// returns. This is the first place a read replica would break.
 		principal, err := d.Resolve(ctx, u.ID())
 		if err != nil {
+			// A fleet-service or database outage is not a broken account. Warn,
+			// not Error, and its own login code, so the page can say "try again
+			// in a moment" instead of implying the user's account is at fault.
+			if errors.Is(err, server.ErrServiceUnavailable) {
+				log.WithError(err).Warn("resolve principal on callback: upstream unavailable")
+				failLogin(w, req, d, errServiceUnavailable)
+				return
+			}
 			log.WithError(err).Error("resolve principal on callback")
 			failLogin(w, req, d, errServerError)
 			return
