@@ -139,7 +139,7 @@ export function useInvalidateVehicles() {
 
 ## Staleness is per hook
 
-There is no standalone query-client module and no global staleness policy. The `QueryClient` is created inline by `AppProviders.tsx:32-42`, with exactly two defaults:
+There is no standalone query-client module and no global staleness policy. <!-- ALLOW-VOCAB:G-10 --> The `QueryClient` is created inline by `AppProviders.tsx:32-42`, with exactly two defaults:
 
 ```typescript
 new QueryClient({
