@@ -62,6 +62,14 @@ check G-19 "mock-struct convention"  "$(grep -rnE 'Mock struct|\{package\}/mock/
 check G-20 "frontend/ root path"     "$(grep -rnE '(^|[^a-z/])frontend/' "$FE" "$FEAGENT")"
 check G-21 "dead FE paths"           "$(grep -rnE 'components/common/|types/api/|lib/breadcrumbs/|lib/query-client|React Table|DataTable|data-table|\.service\.ts|services/api/index\.ts' "$FE" "$FEAGENT")"
 check G-22 "unset tsconfig flags"    "$(grep -rnE 'exactOptionalPropertyTypes|noImplicitOverride' "$FE")"
+# Deliberately no ALLOW-VOCAB:G-23 escape, unlike G-10/G-14/G-15. Those
+# checks exempt lines because their terms have legitimate uses in a backend
+# guideline (prose mentioning "policy", a real uuid.UUID/uint32 type name).
+# nginx.conf and bruno have no such legitimate use here: the only nginx.conf
+# in the tree serves the SPA (apps/web), not backend API routing, and no
+# bruno collection exists anywhere. A future task should not "fix" this
+# asymmetry with G-10/G-14/G-15 by adding a marker -- that would let a real
+# nginx/bruno regression back in unflagged.
 check G-23 "nginx.conf/bruno"        "$(grep -rniE 'nginx\.conf|bruno' "$BE")"
 
 echo
