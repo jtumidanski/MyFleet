@@ -205,7 +205,18 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, varia
 				w.Header().Set("Content-Length", strconv.FormatInt(info.Size, 10))
 			}
 			// Per-fleet authorized bytes — never store in a shared cache.
-			w.Header().Set("Cache-Control", "private, max-age=300")
+			// private is unconditional; only the freshness half varies.
+			cacheControl := "private, max-age=300"
+			if info.Downgraded {
+				// The bytes under this URL are a stand-in for a card that is
+				// usually generated within seconds of this request. Storing
+				// them would pin the soft image to the sharp image's URL for
+				// the whole max-age window, with nothing able to invalidate it
+				// — the response records no substitution, so no client and no
+				// cache can tell it apart from the real thing.
+				cacheControl = "private, no-store"
+			}
+			w.Header().Set("Cache-Control", cacheControl)
 			w.WriteHeader(http.StatusOK)
 			if _, err := io.Copy(w, rc); err != nil {
 				// Headers are already written, so the status cannot be changed;

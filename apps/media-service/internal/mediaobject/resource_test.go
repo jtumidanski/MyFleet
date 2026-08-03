@@ -766,6 +766,50 @@ func TestGetContent_thumbnailServesVariantWithoutContentLength(t *testing.T) {
 	}
 }
 
+// TestGetContent_downgradedCardIsNotStored is the whole point of the cache
+// change. thumbnailRouter seeds thumbnail and display but no card, so
+// ?variant=card downgrades. Those soft bytes must not be stored under the
+// sharp image's URL: the card generation the downgrade schedules usually
+// completes within seconds, and nothing can invalidate a cache entry that
+// recorded no substitution.
+func TestGetContent_downgradedCardIsNotStored(t *testing.T) {
+	router, proc, _ := thumbnailRouter(t)
+	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, memberRequest(http.MethodGet, "/media/"+id+"/content?variant=card", nil))
+
+	if cc := rec.Header().Get("Cache-Control"); cc != "private, no-store" {
+		t.Fatalf("Cache-Control = %q, want private, no-store — a soft image must never be stored under the card URL", cc)
+	}
+	// Everything else is byte-identical to what this request returns today:
+	// the substitution stays undetectable by the client (FR-DG-4).
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "thumb-bytes" {
+		t.Fatalf("body = %q, want thumb-bytes", rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Fatalf("Content-Type = %q, want the thumbnail row's own image/jpeg", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); cd != `inline; filename="photo.png"` {
+		t.Fatalf("Content-Disposition = %q, want inline with the original's filename", cd)
+	}
+	if xcto := rec.Header().Get("X-Content-Type-Options"); xcto != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q, want nosniff on every response", xcto)
+	}
+	if cl := rec.Header().Get("Content-Length"); cl != "" {
+		t.Fatalf("Content-Length = %q, want it omitted — a variant records no byte count", cl)
+	}
+	// No new response header may be introduced: the four above are the entire
+	// header set a content response carries, downgraded or not.
+	if n := len(rec.Header()); n != 4 {
+		t.Fatalf("response carries %d headers (%v), want exactly Content-Type, X-Content-Type-Options, "+
+			"Content-Disposition and Cache-Control — the downgrade must stay invisible to clients", n, rec.Header())
+	}
+}
+
 func TestGetContent_displayAndOriginalVariantsAreAccepted(t *testing.T) {
 	router, proc, _ := thumbnailRouter(t)
 	id := seedStoredObject(t, proc, "fleet-a", []byte("original-bytes"))
