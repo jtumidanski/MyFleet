@@ -376,6 +376,11 @@ treatment as footnote 8's sites 4–6.
 | 30 | `apps/web/src/lib/hooks/api/members.test.ts` | useUpdateMemberRole does not mint a token | `mintAccessToken` | see finding¹⁶ — `useUpdateMemberRole` never calls `mintAccessToken` under any code path; there is no "equivalent guard" to delete | red (same probe placement as site 29; 1 call) | n/a (unconstructible — see finding¹⁶) | unprobeable | migrated to `expectNoCall` (uniformity, FR-HELPER-3) | n/a (was never vacuous) |
 | 31 | `apps/web/src/lib/hooks/api/users.test.ts` | does not fire a request when there are no ids | `userService.listByIds` | `enabled: sorted.length > 0` → `enabled: true` in `useUsers` (`users.ts`) | green (dispatch point coincides with the assertion — `renderHook(...)` yields nothing before it, and the `it` callback was synchronous) | red (call recorded as `[[]]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall`, `it` made `async` | n/a (was never vacuous) |
 | 32 | `apps/web/src/lib/hooks/api/vehicleRecords.test.ts` | loadMore calls fetchNextPage only on sources that still have a next page | `fuel.fetchNextPage` | `if (fuel.hasNextPage)` condition dropped in `loadMore` (`vehicleRecords.ts`), calling `fetchFuelNextPage()` unconditionally | green (dispatch point coincides with the assertion — `result.current.loadMore()` yields nothing before it, and the `it` callback was synchronous) | red (call recorded with no arguments, once; target assertion hit directly, neighbouring `toHaveBeenCalledTimes(1)` assertions on `maintenance`/`mileage` unaffected) | falsifiable | migrated to `expectNoCall`, `it` made `async` | n/a (was never vacuous) |
+| 33 | `apps/web/src/pages/VehiclesPage.test.tsx` | keeps the dialog open with inline errors when required fields are blank | `vehicleService.createInFleet` | `vehicleSchema`'s `make`/`model` relaxed to `z.string().trim()` and `year` made `.optional()` (`src/lib/schemas/vehicle.ts`) — see finding¹⁷ for the earlier-line confound | red (probe after the submit click, before the pre-existing `expect(await screen.findByText('Make is required'))...`; 1 call) | red¹⁷ (call recorded as `["f1", { make: "", model: "", ... }]`, after strengthening) | falsifiable | migrated to `expectNoCall(vi.mocked(...), ...)` | n/a (was never vacuous) |
+| 34 | `apps/web/src/pages/VehiclesPage.test.tsx` | closes on %s without creating a vehicle (`it.each` — Escape / the close button / Cancel) | `vehicleService.createInFleet` | see finding¹⁸ — **not** FR-TRIAGE-4, contrary to the task-9 brief's prediction; the brief's prescribed edit (swallow the error and close the dialog in `handleCreate`'s catch) is a structural no-op for this test, since none of the three dismiss paths ever invoke `handleCreate`. The guard that actually gates this assertion is architectural (none of Escape/Close/Cancel call the create handler at all); defeated by wiring `onOpenChange` (catches Escape and the Close button) and `onCancel` (catches Cancel) in `VehiclesPage.tsx` to each also call `createVehicle.mutateAsync(...)` on close | red (probe after `await dismiss();`, before the pre-existing `await waitFor(...)`; 1 call, for all three parameterized cases) | red¹⁸ (all three parameterized cases fail directly on the target line, each recorded as one call with all-`undefined` attributes) | falsifiable | migrated to `expectNoCall(vi.mocked(...), ...)` | n/a (was never vacuous) |
+| 35 | `apps/web/src/pages/VehiclesPage.test.tsx` | closes on an outside pointer-down without creating a vehicle | `vehicleService.createInFleet` | `onInteractOutside` added to `DialogContent` in `VehiclesPage.tsx`, calling `createVehicle.mutateAsync(...)` | red (probe after `fireEvent.pointerDown(document.body)`, before the pre-existing `await waitFor(...)`; 1 call) | red (call recorded as `["f1", { make: undefined, model: undefined, ... }]`, target assertion hit directly, no earlier-line interference) | falsifiable | migrated to `expectNoCall(vi.mocked(...), ...)` | n/a (was never vacuous) |
+| 36 | `apps/web/src/pages/admin/AdminFleetsPage.test.tsx` | opens the confirmation dialog instead of purging directly | `createPurgeMutate` | `BlastRadiusPanel`'s `onPurge` in `AdminFleetsPage.tsx` changed from `() => setConfirmOpen(true)` to call `createPurge.mutate(...)` directly, bypassing the confirmation | green (dispatch point coincides with the assertion — nothing yields between the purge-button click and the very next line, which is the target assertion itself) | red (call recorded as `[{ scope: 'fleet', target_type: 'fleet', target_id: 'f1', confirmation: 'Test Fleet' }, { onSuccess }]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall` (local `vi.fn()`, no `vi.mocked()` needed — see finding¹⁹) | n/a (was never vacuous) |
+| 9 | `apps/web/src/components/features/activity/ActivityFeed.test.tsx` | renders the empty state without asking for any names | `listByIds` | `enabled: sorted.length > 0` → `enabled: true` in `useUsers` (`src/lib/hooks/api/users.ts`) | green (dispatch point coincides with the assertion — `renderWithProviders(...)` yields nothing before it, and the two lines between it and the target assertion are both synchronous, non-yielding `expect()`s) | red (call recorded as `[[]]`, target assertion hit directly) | falsifiable | migrated to `expectNoCall` (local `vi.fn()` via `vi.hoisted`, no `vi.mocked()` needed — see finding¹⁹) | n/a (was never vacuous) |
 
 ¹⁵ Stage 2 for sites 10 and 11 (`useDashboardWidgets.test.ts`) is confounded
 by an earlier line in the full (unmodified) test, in both directions (pre-
@@ -451,6 +456,105 @@ alone cannot certify what Stage 2 could not test. Migrated to
 `expectNoCall` anyway for uniformity with its sibling row (site 29) and
 with the FR-HELPER-3 precedent (footnote 1's sites 39/40).
 
+¹⁷ Stage 2 for site 33: in the full (unmodified) test, relaxing
+`vehicleSchema` (`make`/`model` to bare `z.string().trim()`, `year` to
+`.optional()`) makes the pre-existing
+`expect(await screen.findByText('Make is required')).toBeInTheDocument()`
+line fail first — with the fields now valid, the form submits successfully,
+the dialog closes, and neither validation message ever renders. Per
+migration-context.md's Stage-2 evidence-quality note, that is weaker
+evidence — the assertion under test is never reached. Strengthened in an
+isolated, uncommitted copy of the test: the three preceding assertions
+(the two `findByText`/`getByText` validation-message checks and the
+`getByRole('dialog')` check) replaced with the helper's own flush
+(`await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); })`)
+so the mutation has a chance to settle; with only the target
+`not.toHaveBeenCalled()` line left, the guard defeat reaches it directly and
+fails, call recorded as
+`['f1', { make: '', model: '', year: undefined, ... }]`. Both the schema
+relaxation and the isolated flush were probe-only, reverted with
+`git checkout --` (production file) immediately after use; the committed
+migration keeps the test's original preceding assertions unchanged.
+
+¹⁸ **Finding — site 34 is NOT FR-TRIAGE-4, contrary to the task-9 brief's
+prediction.** The brief names this as "the last remaining candidate
+FR-TRIAGE-4 site" and prescribes making `handleCreate`'s catch swallow the
+error and close the dialog, framing the guard as "the dialog's
+stay-open-on-error behaviour." Applied literally
+(`VehiclesPage.tsx`'s `catch (err) { ...; setOpen(false); }`): run against
+the full, unmodified `it.each` test, none of the three parameterized cases
+(Escape, the close button, Cancel) regress — all three still pass, 0 calls
+recorded. This is a structural no-op for this assertion, not merely a guard
+in the wrong spot: none of the three dismiss paths this test exercises ever
+invokes `handleCreate` in the first place (Escape and the close button close
+via Radix's `onOpenChange`, which only calls `setOpen(next)`; Cancel calls
+`setOpen(false)` directly via `VehicleForm`'s `onCancel` prop), so a change
+confined to `handleCreate`'s catch block has nothing to run. (The edit does
+affect a *different*, unrelated test — "keeps the dialog open with the typed
+values when the request fails" — which is not one of this task's assigned
+sites and was left unmigrated by this edit's presence.)
+
+The task's own instructions license searching for the real guard before
+concluding unconstructible, the same as footnotes 7, 9, and 12 in earlier
+tasks. Since the code truly never calls the create handler on any of these
+three paths, "defeating the guard" here necessarily means adding a new call,
+the same technique site 35's own prescribed edit already uses for the
+outside-pointer-down path. Applied analogously: `onOpenChange` in
+`VehiclesPage.tsx` changed to also call
+`createVehicle.mutateAsync(toCreateAttributes({} as VehicleFormInput))`
+whenever `!next` (closes via Escape and the close button, both routed
+through `onOpenChange`), and `VehicleForm`'s `onCancel` prop changed the same
+way (closes via Cancel, which bypasses `onOpenChange` entirely). Run against
+the full, unmodified test: all three parameterized cases now fail directly
+on the target `not.toHaveBeenCalled()` line, no earlier-line interference —
+`waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())`
+still passes on its own (the dialog does close), and each case's call is
+recorded as one call with every attribute `undefined` (the dummy values
+passed to the direct `mutateAsync` call). This is the same shape as site 35
+(a plausible "the close path was wired to also submit" regression), just
+applied to the dialog's built-in Escape/close-button/Cancel routes instead
+of outside-pointer-down. Disposition: Stage 1 was independently red (see
+table), so per the combining table this is **falsifiable** (red/red), the
+same correction pattern as site 3 in Task 4 (see the FR-TRIAGE-4 section
+below) and sites 15/20/28 in earlier tasks (footnotes 7, 9, 12) — a
+prescribed guard that doesn't bite is not the same as unconstructible; the
+real guard, once found, did bite. All edits (the brief's literal one and the
+corrected one) were probe-only explorations, reverted with `git checkout --`
+immediately after use; the committed production file carries none of them,
+and the table's Guard-defeated cell reflects the corrected edit.
+
+¹⁹ Neither `createPurgeMutate` (`AdminFleetsPage.test.tsx`, site 36) nor
+`listByIds` (`ActivityFeed.test.tsx`, site 9) needed `vi.mocked()` in their
+migration, despite both being wired into a `vi.mock(...)` factory for an
+imported module. `AdminFleetsPage.test.tsx` declares
+`const createPurgeMutate = vi.fn();` and returns it directly from the
+`useCreatePurge` mock (`useCreatePurge: () => ({ mutate: createPurgeMutate,
+isPending: false })`); the test never accesses it through a module
+namespace, only as the bare local variable, so TypeScript already types it
+as a `Mock` — no cast needed. `ActivityFeed.test.tsx` declares
+`const { listByIds } = vi.hoisted(() => ({ listByIds: vi.fn() }));` and
+wires that same reference into `userService.listByIds` inside the mock
+factory; the test likewise only ever refers to the bare `listByIds` binding,
+never `userService.listByIds`. In both cases the deciding factor is which
+reference the test body actually uses, not whether the mock backs an
+imported service module — `vi.mocked()` is needed only when the call site
+itself is the module-qualified name (as with `vehicleService.createInFleet`
+in sites 33–35, which the test does reference that way).
+
+²⁰ Sites 36 and 9 are both design combining-table row 2 (green/red —
+"falsifiable only because the defeated guard fires synchronously"), the same
+shape as sites 1/2, 4–6, 19, and 21/22 from earlier tasks, not vacuous. In
+both cases the call that the guard-defeat produces is dispatched
+synchronously from a plain event handler (site 36's button `onClick` calls
+`createPurge.mutate(...)` directly, not through a promise continuation; site
+9's `renderWithProviders` mounts synchronously and React Query's `enabled`
+gate is evaluated during that same synchronous render), so nothing yields
+between the trigger and the bare assertion for Stage 1 to observe — but
+Stage 2's edit still reaches the target assertion directly with no
+earlier-line interference, unlike the confounded sites in footnotes 8/17.
+Both were migrated to `expectNoCall` per FR-HELPER-3 regardless, the same
+reasoning as every other fragile site in this record.
+
 ## FR-TRIAGE-4 sites (unprobeable)
 
 Task 4 attempted its one predicted FR-TRIAGE-4 candidate (site 3,
@@ -466,6 +570,14 @@ mint a token") — `useUpdateMemberRole` never calls `mintAccessToken` under
 any code path, so no production edit to an existing conditional can make the
 spy fire from this function. See footnote ¹⁶ on the site 30 row above for
 the full investigation and disposition.
+
+Task 9 attempted its own predicted FR-TRIAGE-4 candidate (site 34,
+`VehiclesPage.test.tsx` — `it.each` "closes on %s without creating a
+vehicle") and, like Task 4's site 3, found it **is** constructible — wiring
+`onOpenChange` and `onCancel` to also invoke the create handler makes all
+three parameterized cases fail directly on the target assertion. See
+footnote ¹⁸ on the site 34 row above for the full investigation and
+disposition.
 
 ## Lint rule demonstration (FR-LINT-4)
 

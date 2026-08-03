@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { ActivityFeed } from './ActivityFeed';
 import { renderWithProviders } from '../../../test/renderWithProviders';
+import { expectNoCall } from '../../../test/expectNoCall';
 import type { ActivityEvent } from '../../../types/models/activity';
 
 const { listByIds } = vi.hoisted(() => ({ listByIds: vi.fn() }));
@@ -131,6 +132,6 @@ describe('ActivityFeed', () => {
     renderWithProviders(<ActivityFeed {...feedProps} events={[]} />);
 
     expect(screen.getByText(/no activity yet/i)).toBeInTheDocument();
-    expect(listByIds).not.toHaveBeenCalled();
+    await expectNoCall(listByIds, 'userService.listByIds');
   });
 });

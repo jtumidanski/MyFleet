@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/renderWithProviders';
+import { expectNoCall } from '../test/expectNoCall';
 import { vehicleService } from '../services/api/VehicleService';
 import { toast } from 'sonner';
 import type { AuthContextValue } from '../context/AuthContext';
@@ -185,7 +186,7 @@ describe('VehiclesPage — submitting', () => {
     expect(await screen.findByText('Make is required')).toBeInTheDocument();
     expect(screen.getByText('Model is required')).toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(vehicleService.createInFleet).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(vehicleService.createInFleet), 'vehicleService.createInFleet');
   });
 
   it('keeps the dialog open with the typed values when the request fails', async () => {
@@ -221,7 +222,7 @@ describe('VehiclesPage — dismissing', () => {
     await dismiss();
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(vehicleService.createInFleet).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(vehicleService.createInFleet), 'vehicleService.createInFleet');
   });
 
   it('closes on an outside pointer-down without creating a vehicle', async () => {
@@ -232,7 +233,7 @@ describe('VehiclesPage — dismissing', () => {
     fireEvent.pointerDown(document.body);
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(vehicleService.createInFleet).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(vehicleService.createInFleet), 'vehicleService.createInFleet');
   });
 
   it('presents a blank form on reopen', async () => {
