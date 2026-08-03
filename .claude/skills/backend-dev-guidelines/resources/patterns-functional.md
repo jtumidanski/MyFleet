@@ -41,7 +41,10 @@ m, err := NewBuilder().
   SetYear(2020).
   Build()
 ```
-- Validation occurs in `Build()` (`apps/fleet-service/internal/vehicle/builder.go:26-31`).
+- Where a domain has construction invariants, they are checked in `Build()`,
+  which then returns `(Model, error)` (`apps/fleet-service/internal/vehicle/builder.go:26-31`).
+  Six of seventeen domains have none and return a bare `Model` — see
+  [file-responsibilities.md](file-responsibilities.md).
 - Builders are fluent and chainable.
 - `NewBuilder()` takes no ID parameter — the ID is generated inside the
   constructor (`uuid.NewString()`, `apps/fleet-service/internal/vehicle/builder.go:13`),

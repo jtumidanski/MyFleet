@@ -160,7 +160,7 @@ After extracting code to a shared library, review every modified service file fo
 
 Before reporting any domain package as complete, verify **every item** below. These are the items most frequently missed across all service audits:
 
-- [ ] **`builder.go` exists** for every domain with a model — with `NewBuilder()`, fluent setters, and `Build()` that validates invariants (`DOM-01`)
+- [ ] **`builder.go` exists** for every domain with a model — with `NewBuilder()`, fluent setters, and a `Build()` that returns `(Model, error)` and checks the invariants **if the domain has any**; a bare `Build() Model` is correct for the six domains that do not (`DOM-01`)
 - [ ] **`ToEntity()` method** exists on the Model type in `entity.go` — `func (m Model) ToEntity() Entity`, present in 17 of the 20 domain packages with an `entity.go`, e.g. `apps/fleet-service/internal/vehicle/entity.go:63`. Three exceptions, all structural rather than oversights: `platformadmin` has no `model.go` at all (`administrator.go`, `entity.go`, `provider.go`, `resource.go`, `seed.go`), so there is no `Model` to convert; `dashboard` declares `Dashboard`/`Widget` instead of `Model` and converts one-way from entity via `MakeDashboard` (`entity.go:68`), with writes building entity literals directly in `processor.go` rather than through a reverse method; `admin` declares two domain types instead of one — `Operation` and `AuditEvent` — each with its own `Make*`/`ToEntity()` pair in `model.go` (`model.go:82` `MakeOperation`, `model.go:114` `Operation.ToEntity()`, `model.go:141` `MakeAudit`, `model.go:169` `AuditEvent.ToEntity()`) (`DOM-02`)
 - [ ] **`Make` constructor** in `entity.go` returns `Model` with no error and is not uniform: 16 of 17 domains are `func Make(e Entity) Model`; the exception is `maintenancerecord`, whose model needs its child rows too — `func Make(e Entity, docs []DocumentEntity) Model` (`apps/fleet-service/internal/maintenancerecord/entity.go:44`) (`DOM-03`)
 - [ ] **`TransformSlice`** exists in `rest.go` alongside `Transform` — list handlers use it, not an inline loop, unless the loop is decorating each element with a per-row derived value via `TransformDerived` (e.g. `apps/fleet-service/internal/vehicle/resource.go:50-53`) rather than rebuilding the `server.Resource` literal by hand (`DOM-05`)
@@ -179,7 +179,7 @@ Before reporting any domain package as complete, verify **every item** below. Th
 1. **Validate dependencies** - Verify all types/operations you plan to use exist
 2. Create `model.go` - Immutable domain model with accessors
 3. Map `entity.go` to DB - GORM entities with migrations, including `Make()` and `ToEntity()`
-4. Implement `builder.go` - Fluent API for model construction with `Build()` validation
+4. Implement `builder.go` - Fluent API for model construction; `Build()` validates only if there is an invariant to check
 5. Define `provider.go` (reads) and `administrator.go` (writes) - each an interface with a `db`-backed implementation and a `New*` constructor
 6. Define `processor.go` - Pure business logic, `logrus.FieldLogger` in the constructor
 7. Add `rest.go` - JSON:API DTOs with `Transform` AND `TransformSlice` functions

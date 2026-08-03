@@ -27,13 +27,22 @@ Both directions are mandatory. `Make` is used after reads; `ToEntity()` is used 
 
 ## `builder.go`
 
-Fluent API for constructing validated domain models. `Build()` enforces invariants.
+Fluent API for constructing domain models. Two signatures exist, and which one a
+domain uses is determined by whether it has invariants to enforce:
 
-`Build()` returns `server.ErrValidation` when an invariant fails
-(`apps/fleet-service/internal/vehicle/builder.go:26-30`) — that sentinel is
-what makes the 422 mapping in
-[patterns-rest-jsonapi.md](patterns-rest-jsonapi.md#validation-guidelines)
-work end to end.
+- **`Build() (Model, error)`** — 11 of 17 domains. `Build()` returns
+  `server.ErrValidation` when an invariant fails
+  (`apps/fleet-service/internal/vehicle/builder.go:26-30`) — that sentinel is
+  what makes the 422 mapping in
+  [patterns-rest-jsonapi.md](patterns-rest-jsonapi.md#validation-guidelines)
+  work end to end.
+- **`Build() Model`** — 6 of 17 (`membership`, `activity`, `vehiclemedia`,
+  `mileage`, `auth/session`, `auth/user`). These domains have no construction
+  invariant beyond "the setters were called", so a `(Model, error)` signature
+  would force every caller to handle an error that can never be non-nil.
+
+Adding an error return to a builder with nothing to validate is not an
+improvement; it is an unreachable branch at every call site.
 
 ## `processor.go`
 Business logic orchestration.
