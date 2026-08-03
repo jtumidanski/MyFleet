@@ -7,11 +7,11 @@ description: Handler and transport conventions for JSON:API endpoints — chi ro
 
 ## Principles
 
-- Routes are registered on a **chi router**. Each domain exports one route
-  entry point returning `func(chi.Router)`
-  (`apps/fleet-service/internal/vehicle/resource.go:28`). All 23 `resource.go`
-  files use that return type: 19 name it `InitializeRoutes`, three
-  `InitializeInternalRoutes`, one `InitializePublicRoutes`.
+- Routes are registered on a **chi router**. Every route entry point in the tree
+  returns `func(chi.Router)` (`apps/fleet-service/internal/vehicle/resource.go:28`)
+  — 27 of them across 24 files: 19 `InitializeRoutes`, 7
+  `InitializeInternalRoutes` (network-restricted endpoints; a domain may declare
+  both), 1 `InitializePublicRoutes`.
 - **Body-less routes** — GET, DELETE, and actions whose only input is the URL
   path — are a plain `func(w http.ResponseWriter, req *http.Request)` handed
   straight to `r.Get` / `r.Delete` / `r.Post`.
@@ -102,20 +102,28 @@ All four steps are in the block above: `server.ParsePage(req)` (reads
 `packages/shared-go/server/pagination.go:20-33`) → `proc.ListByFleet(fleetID,
 page)`, which returns `(models, total, error)` → `page.Meta(total)`, giving
 `{total, totalPages, number, size}` → `server.Document{Data: ..., Meta: ...}`.
-Never compute an offset in the handler; `page.Offset()` belongs to the provider
-query.
+On a domain JSON:API route, do not compute the offset in the handler —
+`page.Offset()` belongs to the provider query. Both handler-level
+`page.Offset()` call sites in the tree are internal routes that query the
+database directly (`maintenanceschedule/resource.go:302`,
+`platformadmin/resource.go:124`); see [Anti-Patterns](#anti-patterns-to-avoid).
 
 ---
 
 ## Handler Choice Is a Frontend API Contract
 
-**Switching a handler between a plain `http.HandlerFunc` and
-`server.RegisterInputHandler` (in either direction) is a breaking change for
-every caller of that endpoint, even if the URL and HTTP method are unchanged.**
+**Wrapping an existing plain `http.HandlerFunc` in
+`server.RegisterInputHandler` is a breaking change for every caller of that
+endpoint, even if the URL and HTTP method are unchanged.** The reverse —
+unwrapping — is not: a body sent to a handler that no longer reads it is simply
+ignored. `POST /vehicles/{id}/restore` is exactly that case today
+(`vehicle/resource.go:178` is a plain handler; `VehicleService.ts:40-49` still
+sends it a full envelope, and it works). Only plain →
+`server.RegisterInputHandler` needs a same-commit frontend change.
 
-`server.RegisterInputHandler` reads the whole request body and rejects anything
-that is not a JSON object *before* the handler runs
-(`packages/shared-go/server/handler.go:46-60`, verbatim):
+`server.RegisterInputHandler` reads the whole request body *before* the handler
+runs and rejects it if it is not valid JSON, or is valid JSON that is neither an
+object nor `null` (`packages/shared-go/server/handler.go:46-60`, verbatim):
 
 ```go
 // RegisterInputHandler decodes a typed JSON:API attributes payload {data:{attributes:T}}.
@@ -135,16 +143,29 @@ func RegisterInputHandler[T any](fn func(http.ResponseWriter, *http.Request, T))
 }
 ```
 
-A decode failure — an empty body, `null`, truncated JSON — writes
-`server.ErrValidation`, which `server.StatusFor` maps to **422** with title
-`"validation"`, and `fn` is never invoked
+A decode failure writes `server.ErrValidation`, which `server.StatusFor` maps to
+**422** with title `"validation"`, and `fn` is never invoked
 (`apps/auth-service/internal/user/resource_test.go:180,190` asserts exactly
-this for the body `{"data":`).
+this for the body `{"data":`). What fails is narrower than it looks — verified
+by running `encoding/json` against the anonymous struct at `handler.go:49-53`:
+
+| Body | Result |
+| --- | --- |
+| *(empty)* | rejected — `EOF` |
+| `{"data":` | rejected — `unexpected EOF` |
+| `[1,2]`, `123`, `"x"`, `true` | rejected — cannot unmarshal into struct |
+| `null`, `{"data":null}`, `{"data":{"attributes":null}}` | **accepted**, `fn` runs with a zero-valued `T` |
+| `{}`, or any object without the expected keys | **accepted**, `fn` runs with a zero-valued `T` |
+
+So a missing or `null` attribute is *not* a 422 from the decoder — it arrives as
+a Go zero value. Required-field checks belong to the builder or the processor
+(see [Validation Guidelines](#validation-guidelines)), never to the decoder.
 
 This trips up "action" endpoints that have no real attributes (restore,
 complete, set-primary). It is tempting to give them a typed attributes struct
-just to satisfy a "every POST has a typed body" habit — that is fine, but it
-means callers must change too.
+just to satisfy a "every POST has a typed body" habit — that is fine, but a
+caller that sends no body at all will start getting a 422, so callers must
+change too.
 
 **When you wire a new handler with `server.RegisterInputHandler`, or convert an
 existing one:**
@@ -178,9 +199,10 @@ without a matching frontend update is the most likely source of a sudden 422 on
 a previously working endpoint. **Backend tests will usually not catch it**: the
 processor tests call `proc.Create` directly and never reach the decoder, and 13
 of the 23 `resource.go` files — `vehicle` among them — have no router-level
-`resource_test.go` at all. Where one does exist it does catch this
-(`apps/auth-service/internal/user/resource_test.go`), but do not rely on that.
-Make the frontend change part of the same commit.
+`resource_test.go` at all. A sibling `resource_test.go` is not proof of cover
+either; it has to drive a malformed body through the router, which only
+`apps/auth-service/internal/user/resource_test.go:180,190` is verified here to
+do. Make the frontend change part of the same commit.
 
 ---
 
@@ -549,13 +571,34 @@ r.Get("/vehicles/{id}", func(w http.ResponseWriter, req *http.Request) {
 ```
 
 `vehicle/resource.go` is the reference: every data call goes through `proc.*`.
-Three domains predate this and reach a bare `prov`/`adm` from the handler for
-operations their processor does not expose — `mileage/resource.go:67,123`,
-`membership/resource.go:87,151,181`, `fuel/resource.go:211,237`. Those are
-known exceptions, not a licence; new code follows `vehicle`.
+Nine handler-level `prov`/`adm` calls exist across five domains, and each falls
+under one of two structural exceptions — check which one applies before flagging:
 
-❌ **Manual JSON decoding of the envelope** (checked as `SUB-04` — zero
-`json.NewDecoder` / `json.Unmarshal` / `io.ReadAll` in `resource.go`):
+1. **The route is an internal (network-restricted) one.** Handlers registered by
+   `InitializeInternalRoutes` go straight to the data layer as a class:
+   `platformadmin/resource.go:143`, `mediaobject/resource.go:276`,
+   `membership/resource.go:181`. (`mediaobject` has a full processor with both
+   collaborators, so it is the route class, not a missing facade, that decides
+   this.) The two handler-level `page.Offset()` uses are the same family
+   (`maintenanceschedule/resource.go:302`, `platformadmin/resource.go:124`).
+2. **The domain's `Processor` does not hold that collaborator**, so there is no
+   facade to bypass: `mileage`'s processor holds neither
+   (`mileage/processor.go:14-17` — only a `VehicleMileageUpdater`), and
+   `membership`'s and `fuel`'s hold a `Provider` and no `Administrator`
+   (`membership/processor.go:23-26`, `fuel/processor.go:36-39`). That covers
+   `mileage/resource.go:67,123`, `membership/resource.go:87,151`, and
+   `fuel/resource.go:211,237`.
+
+Neither is a licence: on a domain JSON:API route whose processor exposes the
+operation, go through `proc.*`.
+
+❌ **Manual JSON decoding of the envelope** (checked as `SUB-04`). The check is
+zero `json.NewDecoder` / `json.Unmarshal` / `io.ReadAll` **on a domain JSON:API
+route** — not in `resource.go` outright. Three deliberate occurrences exist, all
+on non-JSON:API endpoints that take a plain JSON body: the two internal admin
+routes (`media-service/internal/admin/resource.go:62`,
+`notification-service/internal/admin/resource.go:58`) and the session route
+(`auth-service/internal/session/resource.go:110`).
 
 ```go
 // DON'T DO THIS
@@ -599,9 +642,12 @@ Validation happens in three places, in this order:
 2. **Processor** — cross-field and cross-entity rules, and translation of
    provider errors to `server.*` sentinels. Return a typed error; wrap with
    `server.Detailed` when the client needs a sentence.
-3. **Handler** — authorization only, plus the single
-   `server.WriteError(w, err)`. It does not re-check field values and it does
-   not choose the status code.
+3. **Handler** — authorization, transport-format parsing, and the single
+   `server.WriteError(w, err)`. It does not duplicate the builder's invariant
+   checks and it does not choose the status code. Parsing that belongs to the
+   wire format does stay here: `mileage/resource.go:102-113` rejects a
+   non-positive mileage and parses `RecordedAt` as RFC 3339 before building, and
+   `fuel/resource.go:202-208` runs `DerivePrice` on the incoming trio.
 
 The builder is the first line, ahead of the processor
 (`apps/fleet-service/internal/vehicle/builder.go:25-31`):
