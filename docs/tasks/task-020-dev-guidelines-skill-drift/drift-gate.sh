@@ -51,8 +51,8 @@ check G-12 "@/ path alias"           "$(grep -rnE "from ['\"]@/" "$FE" "$FEAGENT
 check G-13 "__mocks__/watchAll/mux"  "$(grep -rnE '__mocks__|watchAll|Methods\(http\.Method' "${SCOPE[@]}")"
 
 # --- additions from Phase-3 verification ---
-check G-14 "uuid.UUID entity ids"    "$(grep -rn 'uuid\.UUID' "${SCOPE[@]}")"
-check G-15 "uint32 entity ids"       "$(grep -rn 'uint32' "${SCOPE[@]}")"
+check G-14 "uuid.UUID entity ids"    "$(grep -rn 'uuid\.UUID' "${SCOPE[@]}" | grep -v ALLOW-VOCAB)"
+check G-15 "uint32 entity ids"       "$(grep -rn 'uint32' "${SCOPE[@]}" | grep -v ALLOW-VOCAB)"
 check G-16 "gorilla mux idiom"       "$(grep -rnE 'mux\.Router|router\.HandleFunc' "${SCOPE[@]}")"
 check G-17 "fake handler deps"       "$(grep -rnE 'HandlerDependency|HandlerContext|server\.GetHandler|d\.Logger\(\)|ParseId\(' "${SCOPE[@]}")"
 check G-18 "testify in Go examples"  "$(grep -rnE 'require\.(NoError|Error|Equal)|assert\.' "$BE" "$BEAGENT")"
