@@ -1,14 +1,15 @@
 # Service Scaffolding Checklist
 
-When scaffolding a new MyFleet service, complete ALL of these steps. Do not skip any.
+When scaffolding a new MyFleet service, complete these steps. Do not skip any.
 
 ## 1. Service Directory
-**Directory:** `services/<service-name>/`
+**Directory:** `apps/<service-name>/`
 
-Required structure:
+Required structure, matching `apps/fleet-service/`:
 ```
-services/<service-name>/
+apps/<service-name>/
 ├── go.mod
+├── go.sum
 ├── cmd/
 │   └── main.go
 ├── internal/
@@ -21,132 +22,158 @@ services/<service-name>/
 │       ├── administrator.go
 │       ├── resource.go
 │       └── rest.go
-├── migrations/
 └── Dockerfile
+```
+
+There is no `migrations/` directory. Migrations run through GORM's
+`AutoMigrate`, driven from a `Migration` function declared alongside each
+domain's entity, e.g. `apps/auth-service/internal/user/entity.go:42`:
+```go
+func Migration(db *gorm.DB) error { return db.AutoMigrate(&Entity{}) }
 ```
 
 Add the module to `go.work` at the repo root.
 
 ## 2. Kubernetes Manifest
-**File:** `deploy/k8s/<service-name>.yaml`
+**Files:** `deploy/k8s/base/<service-name>/{configmap,deployment,service}.yaml`
+— three files, following the shape in `deploy/k8s/base/fleet-service/`.
 
-Two resources: Deployment + Service. Pattern:
-```yaml
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: <service-name>
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: <service-name>
-  template:
-    metadata:
-      labels:
-        app: <service-name>
-    spec:
-      containers:
-      - name: <service-name>
-        image: ghcr.io/<owner>/myfleet-<service-name>:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: DB_HOST
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: DB_HOST
-        - name: DB_USER
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: DB_USER
-        - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: db-credentials
-              key: DB_PASSWORD
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: <service-name>
-spec:
-  selector:
-    app: <service-name>
-  ports:
-  - protocol: TCP
-    port: 8080
-```
+Register all three in `deploy/k8s/base/kustomization.yaml`'s `resources:`
+list (see the `fleet-service/*.yaml` block at lines 17-19 for the pattern) —
+a service left out of that list is not deployed.
+
+Deployment shape, from `deploy/k8s/base/fleet-service/deployment.yaml`:
+- Pod-level `securityContext`: `runAsNonRoot: true`, a fixed `runAsUser` /
+  `fsGroup` (fleet-service uses `10001`, matching the Dockerfile's non-root
+  user — see §3)
+- Container-level `securityContext`: `allowPrivilegeEscalation: false`,
+  `readOnlyRootFilesystem: true`, `capabilities.drop: ["ALL"]`
+- `envFrom` a `<service-name>-config` ConfigMap and a `<service-name>-secret`
+  Secret
+- `readinessProbe` on `/readyz`, `livenessProbe` on `/healthz`
+- `resources.requests` / `resources.limits` for memory and cpu
+
+Service shape: `type: ClusterIP`, one port block matching the container port.
+
+Per CLAUDE.md, the `main` overlay must still render with no
+PersistentVolumeClaims, no Secrets, and no ClusterRole. The base Deployment's
+`secretRef` is filled out-of-band by the overlay-level secret process — do not
+add a Secret manifest under `deploy/k8s/base/` or `deploy/k8s/overlays/main/`.
+
+`deploy/k8s/base/routing/middlewares.yaml` holds the Traefik `Middleware`
+objects (one stripprefix per service) referenced by the IngressRoutes in §5.
 
 ## 3. Dockerfile
-**File:** `services/<service-name>/Dockerfile`
+**File:** `apps/<service-name>/Dockerfile`
 
-Multi-stage Go build. Key points:
-- Builder: `golang:1.24-alpine`
-- Runtime: `alpine`
-- Copy shared modules first (dependency caching), then service code
-- Output binary: `/server`, expose 8080
+Multi-stage Go build, following `apps/fleet-service/Dockerfile`:
+- Builder stage: `FROM golang:1.25-alpine AS build`; copy `go.work`,
+  `go.work.sum`, and every module's `go.mod`/`go.sum` first for layer
+  caching, then `go build -o /out/<service-name> ./cmd`
+- Runtime stage: `FROM alpine:3.20`; create and switch to a non-root user
+  (`adduser -D -u 10001 app` / `USER app`)
+- Copy the built binary to `/<service-name>` (not `/server`) and set it as
+  `ENTRYPOINT`
+- `EXPOSE 8080`
+
+Build context is the repo root for every service, including `apps/web`
+(CLAUDE.md):
+```sh
+docker build -f apps/<service-name>/Dockerfile .
+```
 
 ## 4. Docker Compose Entry
 **File:** `deploy/compose/docker-compose.yml`
 
-Add service entry with:
-- Build context pointing to service directory
-- Port mapping
-- Environment variables from `.env`
-- Depends on database
+Add a service block alongside the existing ones (`fleet-service:` starts at
+line 142). Following that block's shape, a new entry needs:
+- `build.context: ../..`, `build.dockerfile: apps/<service-name>/Dockerfile`
+- `environment:` (or `env_file: .env`) with the service's config — the other
+  four service blocks all set `DATABASE_URL`, `JWKS_URL`, and `LOG_LEVEL`
+  the same way
+- `depends_on` with `condition: service_healthy` for whatever the service
+  needs at boot (`postgres`, `redpanda`, `auth-service`, ...)
+- `healthcheck` — the existing blocks use
+  `wget -qO- http://localhost:8080/healthz || exit 1`
+- `labels` starting with `traefik.enable=true`, plus
+  `traefik.http.routers.<name>.*` entries so the compose Traefik container
+  picks the service up (`deploy/compose/traefik/traefik.yml` sets
+  `providers.docker.exposedByDefault: false`, so an unlabeled service gets no
+  route). Mirror the routing decision made in §5 below.
 
-## 5. Nginx Routing
-**File:** `deploy/compose/nginx.conf` (or equivalent)
+Bring the stack up with `scripts/dev-up.sh`, which `cd`s into
+`deploy/compose` and runs `docker compose --env-file .env up -d --build`.
 
-Add location block for the service's API path:
-```nginx
-location /api/v1/<resource-path> {
-  proxy_pass http://<service-name>:8080;
-}
-```
+## 5. Traefik Routing
+**Files:** `deploy/k8s/overlays/main/ingressroute.yaml` and
+`deploy/k8s/infra-local/ingressroute.yaml`
 
-## 6. Bruno Collection
-**Directory:** `bruno/<service-name>/`
+There is no nginx in the API request path. `apps/web` runs its own
+static-file server config for the SPA inside the `web` container, and it
+does no proxying. API routing to backend services is two Traefik
+`IngressRoute` objects — one per overlay — each with `:80` and `:443`
+routers inside it.
 
-Minimum files:
-```
-bruno/<service-name>/
-├── bruno.json
-└── environments/
-    └── Local.bru
-```
+Add the new service's route to **both** files with matching route sets.
+`.github/workflows/pr.yml`'s `manifests` job explains why
+(`pr.yml:131-135`):
 
-## 7. CI Configuration
-Ensure the service is included in:
-- `.github/workflows/` build and test steps
-- `scripts/build-<service-name>.sh` script
+> the `:80` and `:443` IngressRoutes must carry identical route sets. They
+> are two objects because a Traefik IngressRoute with a `tls` section is
+> TLS-only, and the route set contains the internal-deny rule guarding
+> fleet-service's unauthenticated `/internal/*` endpoints — so drift between
+> them is a security hole.
 
-## 8. Post-Scaffold Verification
+If the new service exposes an unauthenticated `/internal/*` surface of its
+own (the pattern fleet-service, media-service, auth-service, and
+notification-service all follow), give it the same priority-200 deny router
+ahead of the priority-100 proxy router, in both files.
+
+## 6. CI Configuration
+Add the service to:
+- `strategy.matrix.service` in the `containers` job of
+  `.github/workflows/pr.yml` (currently
+  `[auth-service, fleet-service, media-service, notification-service]`)
+- `strategy.matrix.service` in `.github/workflows/main.yml` — the same list
+  appears in its build, scan, and push jobs, each currently
+  `[auth-service, fleet-service, media-service, notification-service, web]`
+
+A service missing from these lists is not built or scanned in CI.
+
+## 7. Post-Scaffold Verification
 After scaffolding is complete, audit the work against the MyFleet backend
 developer guidelines by dispatching the `backend-guidelines-reviewer` agent
 (or run `/audit-plan` if this scaffolding was driven by a task plan).
 
-## 9. Compliance Checklist (Commonly Missed Items)
+Also render both kustomize overlays and, against a reachable cluster, run
+both server dry-runs (CLAUDE.md). `make manifests` (`Makefile:45`) runs the
+local render and its assertions — skipping the *local* dry-run and only ever
+checking `main` previously let a missing `namespace:` reach ten reviews.
+```sh
+kustomize build deploy/k8s/overlays/local
+kustomize build deploy/k8s/overlays/main
+```
 
-Before marking scaffolding complete, verify each domain package against these items that are frequently missed during initial implementation:
+## 8. Compliance Checklist (Commonly Missed Items)
+
+Verify each domain package against these items, which are frequently missed
+during initial implementation:
 
 | Check | File | Requirement |
 |-------|------|-------------|
-| `builder.go` exists | `builder.go` | Every domain with a model must have a fluent builder with `Build()` validation |
-| `ToEntity()` method | `entity.go` | Model must have `ToEntity() Entity` method (not just `Make(Entity) Model`) |
-| `TransformSlice` function | `rest.go` | Must exist alongside `Transform` — list handlers must not inline loops |
-| `logrus.FieldLogger` | `processor.go` | Constructor must accept `logrus.FieldLogger`, not `*logrus.Logger` |
-| `d.Logger()` in handlers | `resource.go` | Handlers must pass `d.Logger()` to processors, not `logrus.StandardLogger()` |
-| `RegisterInputHandler[T]` | `resource.go` | POST/PATCH routes must use `RegisterInputHandler[T]`, not `RegisterHandler` |
-| Transform error handling | `resource.go` | Never discard Transform errors with `_` — check and log them |
-| Lazy providers | `provider.go` | Use `database.Query`/`database.SliceQuery`, not eager execution with `FixedProvider` |
-| No `os.Getenv()` in handlers | `resource.go` | Read env vars in config at startup, inject via constructors |
+| `builder.go` exists | `builder.go` | Fluent builder — `NewBuilder()`, setters, `Build()` that validates invariants (`DOM-01`) |
+| `Make` constructor | `entity.go` | `func Make(e Entity) Model`; a domain whose model needs child rows too takes them as extra args, e.g. `maintenancerecord` (`DOM-02`) |
+| `TransformSlice` function | `rest.go` | List handlers use `TransformSlice`, not an inline loop — unless decorating each row with a per-row derived value via `TransformDerived` (`DOM-05`) |
+| `logrus.FieldLogger` | `processor.go` | Constructor takes `logrus.FieldLogger`, not `*logrus.Logger` (`DOM-06`) |
+| `log` parameter in handlers | `resource.go` | Handlers use the `log` parameter `InitializeRoutes` receives — never `logrus.StandardLogger()`, which is reserved for the shared error-logger fallback (`packages/shared-go/server/jsonapi.go:70`) (`DOM-07`) |
+| `server.RegisterInputHandler[T]` | `resource.go` | Bodied routes (`r.Post`, `r.Patch`, `r.Put`) wrap their handler in `RegisterInputHandler[T]`; body-less routes (GET, DELETE, path-only actions) register a plain `func(w, r)` (`DOM-08`) |
+| Errors via `server.WriteError` | `resource.go` | Domain errors go out through `server.WriteError(w, err)`, not a hand-built envelope (`DOM-09`) |
+| `Provider` interface | `provider.go` | `Provider` interface plus a `NewProvider(db)` constructor; a method that fetches a single record translates `gorm.ErrRecordNotFound` to a domain sentinel (or a bool/zero-value, where the caller doesn't need it as an error) (`DOM-10`) |
+| No `os.Getenv()` in handlers | `resource.go` | Env vars are read once in config at startup and injected via constructors (`DOM-11`) |
 
 ## Database Notes
 - Each service owns its own database schema
-- All tables use UUID primary keys generated in the application
-- Migrations run on service startup
+- UUID primary keys are generated in the application (`uuid.NewString()`,
+  e.g. `apps/fleet-service/internal/vehicle/builder.go:13`)
+- Migrations run on service startup via each domain's `Migration(db)`
+  function
