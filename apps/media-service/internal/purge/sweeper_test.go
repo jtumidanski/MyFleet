@@ -159,6 +159,54 @@ func TestRunOnce_aFailedOriginalRemovalOffersNoVariantKeys(t *testing.T) {
 	}
 }
 
+// FR-PURGE-9, second clause. The bytes can go cleanly and the ROW deletion
+// still fail — a lock timeout, a migration mid-flight, a table that is not
+// there. That failure must log at WARN and the sweep must continue, and the
+// object it happened to must stay whole: the transaction rolls back, so every
+// row survives together and the next tick retries the object rather than
+// finding a half-deleted one it can no longer reason about.
+//
+// Dropping the ledger table is the cheapest way to make the transaction fail
+// AFTER its first statement has already deleted the variant rows, so this also
+// asserts the rollback and not merely that nothing was attempted.
+func TestRunOnce_aFailedRowDeletionKeepsEveryRowAndContinues(t *testing.T) {
+	db := newTestDB(t)
+	seedMediaObject(t, db, "mo-1", hourAgo(), nil)
+	seedVariant(t, db, "mv-c", "mo-1", "card", "k/mo-1-card", nil)
+	// A second object that must still be reached: one object's row-deletion
+	// failure must not abort the sweep.
+	seedMediaObject(t, db, "mo-2", hourAgo(), nil)
+
+	if err := db.Exec("DROP TABLE media.media_variant_failures").Error; err != nil {
+		t.Fatalf("drop ledger table: %v", err)
+	}
+
+	store := newRemover()
+	if err := newSweeper(t, db, store, Config{}).RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce must not return a row-deletion failure: %v", err)
+	}
+
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`); n != 1 {
+		t.Errorf("%d of 1 media rows left; a failed transaction must delete nothing", n)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_variants WHERE media_object_id = 'mo-1'`); n != 1 {
+		t.Error("the variant rows were deleted even though the transaction failed — " +
+			"the rollback is the only thing keeping the object retryable as a unit")
+	}
+	if !store.didRemove("k/mo-2") {
+		t.Error("the sweep stopped at the failing object; the remaining objects must still be processed")
+	}
+
+	// Both objects are still retryable: nothing was consumed by the failure.
+	objs, err := mediaobject.ListPurgeable(db)
+	if err != nil {
+		t.Fatalf("ListPurgeable: %v", err)
+	}
+	if len(objs) != 2 {
+		t.Errorf("ListPurgeable returned %d objects, want both still awaiting retry: %+v", len(objs), objs)
+	}
+}
+
 // T4 / FR-PURGE-8. Retry safety, asserted rather than assumed. A crash between
 // the byte removals and the transaction leaves rows pointing at absent objects;
 // the next sweep re-issues removal for keys that are already gone. S3 DELETE is
