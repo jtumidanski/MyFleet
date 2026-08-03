@@ -28,9 +28,14 @@
         ]
       },
       "fileTriggers": {
-
-        "pathPatterns": [],
-        "pathExclusions": [],
+        "pathPatterns": [
+          "apps/*/internal/**/*.go",
+          "packages/shared-go/**/*.go",
+          "packages/dto-go/**/*.go"
+        ],
+        "pathExclusions": [
+          "**/*_test.go"
+        ],
         "contentPatterns": []
       }
     },
@@ -63,8 +68,6 @@
       },
       "fileTriggers": {
         "pathPatterns": [
-          "frontend/**/*.ts",
-          "frontend/**/*.tsx",
           "**/components/**/*.tsx",
           "**/pages/**/*.tsx",
           "**/lib/hooks/**/*.ts",
@@ -92,7 +95,7 @@
       "low": "Optional - Trigger only for explicit matches"
     },
     "customization": {
-      "pathPatterns": "Adjust to match your project structure (blog-api, auth-service, etc.)",
+      "pathPatterns": "Adjust to match your project structure (apps/fleet-service, apps/web, etc.)",
 
       "keywords": "Add domain-specific terms relevant to your project",
 
