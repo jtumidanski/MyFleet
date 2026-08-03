@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -293,5 +294,89 @@ func TestDeleteMember_notFoundWhenTheTargetIsNotAMember(t *testing.T) {
 	rec := deleteMember(r, "f1", "u-stranger", identity("u-owner", "owner", "f1"))
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("DELETE against a non-member = %d, want 404", rec.Code)
+	}
+}
+
+// --- internal routes ------------------------------------------------------
+
+// The /internal/* routes are network-restricted and carry no JWT, so they mount
+// on their own router with no identity on context.
+func newInternalRouter(t *testing.T) (chi.Router, *gorm.DB) {
+	t.Helper()
+	db := newMembershipDB(t)
+
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+
+	r := chi.NewRouter()
+	r.Group(InitializeInternalRoutes(log, db))
+	return r, db
+}
+
+func getInternal(r chi.Router, path string) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+	return rec
+}
+
+func TestInternalActive_returnsTheFleetAndRoleForAnActiveMember(t *testing.T) {
+	r, db := newInternalRouter(t)
+	seedMembership(t, db, "u1", "owner")
+
+	rec := getInternal(r, "/internal/memberships/active?user_id=u1")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var got ActiveResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.FleetID != "f1" || got.Role != "owner" {
+		t.Fatalf("want fleet f1 role owner, got %+v", got)
+	}
+}
+
+// A user with no membership is a 404, not a 500 — auth-service's client treats
+// 404 as "no fleet yet" and any other non-2xx as a hard failure, so collapsing
+// these would break onboarding for every fleetless user.
+func TestInternalActive_notFoundWhenTheUserHasNoActiveMembership(t *testing.T) {
+	r, _ := newInternalRouter(t)
+
+	rec := getInternal(r, "/internal/memberships/active?user_id=nobody")
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("want 404, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestInternalActive_rejectsAMissingUserID(t *testing.T) {
+	r, _ := newInternalRouter(t)
+
+	rec := getInternal(r, "/internal/memberships/active")
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422 for a missing user_id, got %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+// A user_id carrying URL-significant characters must reach the handler intact.
+// The value is server-generated today, so this pins the decoding rather than
+// guarding a live injection.
+func TestInternalActive_readsAnEscapedUserID(t *testing.T) {
+	r, db := newInternalRouter(t)
+	seedMembership(t, db, "u1&role=owner", "viewer")
+
+	rec := getInternal(r, "/internal/memberships/active?user_id="+url.QueryEscape("u1&role=owner"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var got ActiveResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Role != "viewer" {
+		t.Fatalf("the escaped user_id resolved to the wrong row: %+v", got)
 	}
 }

@@ -14,9 +14,19 @@ type stubProvider struct {
 	owners int
 	// byFleetAndUser is keyed by fleetID+":"+userID
 	byFleetAndUser map[string]Model
+	// activeByUser is keyed by userID; absent means ErrNotFound.
+	activeByUser map[string]Model
+	// activeErr, when set, is returned by GetActiveByUserID ahead of any lookup.
+	activeErr error
 }
 
 func (s stubProvider) GetActiveByUserID(userID string) (Model, error) {
+	if s.activeErr != nil {
+		return Model{}, s.activeErr
+	}
+	if m, ok := s.activeByUser[userID]; ok {
+		return m, nil
+	}
 	return Model{}, ErrNotFound
 }
 func (s stubProvider) ListByFleetID(fleetID string) ([]Model, error)       { return nil, nil }
@@ -210,5 +220,47 @@ func TestWithRole_returnsANewModelAndLeavesTheOriginalAlone(t *testing.T) {
 	if updated.ID() != original.ID() || updated.FleetID() != original.FleetID() ||
 		updated.UserID() != original.UserID() || updated.Status() != original.Status() {
 		t.Fatalf("WithRole changed a field other than role: %+v vs %+v", updated, original)
+	}
+}
+
+// GetActiveByUserID is the processor seam for the internal
+// /internal/memberships/active route. It exists so the handler does not reach
+// past the processor into the provider (DOM-13) and so the ErrNotFound ->
+// server.ErrNotFound translation lives beside GetMember's, which already owns
+// exactly that mapping.
+func TestGetActiveByUserID_returnsTheActiveMembership(t *testing.T) {
+	want := NewBuilder().SetFleetID("f1").SetUserID("u1").SetRole("owner").Build()
+	p := NewProcessor(logrus.New(), stubProvider{activeByUser: map[string]Model{"u1": want}})
+
+	got, err := p.GetActiveByUserID("u1")
+	if err != nil {
+		t.Fatalf("expected the active membership, got err %v", err)
+	}
+	if got.FleetID() != "f1" || got.Role() != "owner" {
+		t.Fatalf("wrong membership: fleet %q role %q", got.FleetID(), got.Role())
+	}
+}
+
+func TestGetActiveByUserID_translatesNotFoundToTheServerSentinel(t *testing.T) {
+	p := NewProcessor(logrus.New(), stubProvider{})
+
+	_, err := p.GetActiveByUserID("nobody")
+	if !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("a user with no active membership must map to server.ErrNotFound, got %v", err)
+	}
+}
+
+// A provider failure that is NOT ErrNotFound must surface unchanged, so the
+// handler renders a 500 rather than a misleading 404.
+func TestGetActiveByUserID_passesThroughOtherProviderErrors(t *testing.T) {
+	boom := errors.New("connection refused")
+	p := NewProcessor(logrus.New(), stubProvider{activeErr: boom})
+
+	_, err := p.GetActiveByUserID("u1")
+	if !errors.Is(err, boom) {
+		t.Fatalf("provider failure must pass through, got %v", err)
+	}
+	if errors.Is(err, server.ErrNotFound) {
+		t.Fatal("a connection failure must not be reported as 404")
 	}
 }
