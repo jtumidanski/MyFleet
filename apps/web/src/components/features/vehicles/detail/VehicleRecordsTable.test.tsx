@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VehicleRecordsTable } from './VehicleRecordsTable';
 import type { VehicleRecordRow } from '../../../../lib/vehicleRecords';
+import { expectNoCall } from '../../../../test/expectNoCall';
 
 const rows: VehicleRecordRow[] = [
   {
@@ -108,6 +109,6 @@ describe('VehicleRecordsTable', () => {
     expect(button).toBeDisabled();
 
     await user.click(button);
-    expect(onLoadMore).not.toHaveBeenCalled();
+    await expectNoCall(onLoadMore, 'onLoadMore');
   });
 });

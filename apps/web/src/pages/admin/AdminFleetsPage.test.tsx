@@ -3,6 +3,7 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Routes, Route } from 'react-router-dom';
 import { renderWithProviders } from '../../test/renderWithProviders';
+import { expectNoCall } from '../../test/expectNoCall';
 import { AdminFleetsPage } from './AdminFleetsPage';
 import type {
   AdminFleetAttributes,
@@ -156,7 +157,7 @@ describe('AdminFleetsPage', () => {
     const user = userEvent.setup();
     renderAt('/admin/fleets/f1');
     await user.click(await screen.findByRole('button', { name: /purge this fleet/i }));
-    expect(createPurgeMutate).not.toHaveBeenCalled();
+    await expectNoCall(createPurgeMutate, 'createPurgeMutate');
     expect(await screen.findByLabelText(/type the fleet name/i)).toBeInTheDocument();
   });
 

@@ -13,6 +13,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { dashboardService } from '../../../services/api/DashboardService';
 import { useDashboardWidgets } from './useDashboardWidgets';
 import type { Dashboard, WidgetResource } from '../../../types/models/dashboard';
+import { expectNoCall } from '../../../test/expectNoCall';
 
 vi.mock('../../../services/api/DashboardService', () => ({
   dashboardService: { getLayout: vi.fn(), saveLayout: vi.fn() },
@@ -119,7 +120,7 @@ describe('useDashboardWidgets', () => {
     act(() => result.current.addWidget('recent-activity'));
 
     expect(result.current.widgets).toEqual([]);
-    expect(dashboardService.saveLayout).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(dashboardService.saveLayout), 'dashboardService.saveLayout');
   });
 
   it('removes a widget by id and persists', async () => {
@@ -168,6 +169,6 @@ describe('useDashboardWidgets', () => {
     act(() => result.current.moveDown(1));
 
     expect(result.current.widgets.map((w) => w.id)).toEqual(['w1', 'w2']);
-    expect(dashboardService.saveLayout).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(dashboardService.saveLayout), 'dashboardService.saveLayout');
   });
 });

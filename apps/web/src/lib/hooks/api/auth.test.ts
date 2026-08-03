@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ApiError } from '@myfleet/shared-ts';
 import { logoutRequest, updateThemePreference, useMe } from './auth';
 import { setAccessToken, clearAccessToken } from '../../api/token';
+import { expectNoCall } from '../../../test/expectNoCall';
 
 function meDocument(meta: Record<string, unknown>) {
   return {
@@ -90,7 +91,7 @@ describe('updateThemePreference', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(updateThemePreference('dark')).resolves.toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    await expectNoCall(fetchMock, 'fetch');
   });
 
   it('PATCHes the JSON:API envelope to /api/auth/me', async () => {
@@ -196,7 +197,7 @@ describe('logoutRequest', () => {
 
     await expect(logoutRequest()).resolves.toBeUndefined();
 
-    expect(json).not.toHaveBeenCalled();
+    await expectNoCall(json, 'json');
     const [path, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(path).toBe('/api/auth/logout');
     expect(init.method).toBe('POST');

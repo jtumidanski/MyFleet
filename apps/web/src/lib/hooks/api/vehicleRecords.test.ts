@@ -17,6 +17,7 @@ import type { MaintenanceRecord } from '../../../types/models/maintenanceRecord'
 import type { FuelLog } from '../../../types/models/fuelLog';
 import type { MileageRecord } from '../../../types/models/mileage';
 import type { MaintenanceCategory } from '../../../types/models/maintenanceCategory';
+import { expectNoCall } from '../../../test/expectNoCall';
 
 vi.mock('./maintenance', () => ({ useMaintenanceRecords: vi.fn() }));
 vi.mock('./fuel', () => ({ useFuelLogs: vi.fn() }));
@@ -309,7 +310,7 @@ describe('useVehicleRecords', () => {
     expect(result.current.isLoading).toBe(true);
   });
 
-  it('loadMore calls fetchNextPage only on sources that still have a next page', () => {
+  it('loadMore calls fetchNextPage only on sources that still have a next page', async () => {
     const { maintenance, fuel, mileage } = setupSources({
       maintenance: stub([maintenanceRecord('m1', 'c1', '2026-01-01T00:00:00Z')], {
         hasNextPage: true,
@@ -322,7 +323,7 @@ describe('useVehicleRecords', () => {
     result.current.loadMore();
 
     expect(maintenance.fetchNextPage).toHaveBeenCalledTimes(1);
-    expect(fuel.fetchNextPage).not.toHaveBeenCalled();
+    await expectNoCall(fuel.fetchNextPage, 'fuel.fetchNextPage');
     expect(mileage.fetchNextPage).toHaveBeenCalledTimes(1);
   });
 

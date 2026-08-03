@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { ProfileMenu } from './ProfileMenu';
 import type { AuthContextValue } from '../../context/AuthContext';
 import type { User } from '../../types/models/user';
+import { expectNoCall } from '../../test/expectNoCall';
 
 const mockAuth = vi.fn<() => AuthContextValue>();
 vi.mock('../../context/AuthContext', () => ({
@@ -155,9 +156,11 @@ describe('ProfileMenu', () => {
     await userEvents.click(screen.getByRole('button', { name: 'Account menu' }));
     await userEvents.click(screen.getByRole('menuitem', { name: 'Sign out' }));
 
-    // Let the resolved promise's continuation run first — otherwise the
-    // absence of a toast is only true because nothing has happened yet.
-    await Promise.resolve();
-    expect(toast.error).not.toHaveBeenCalled();
+    // This is a negative assertion, so it needs a flush it can rely on rather
+    // than a hand-rolled one: the helper's flush (a full microtask-queue
+    // drain plus a macrotask tick) strictly dominates the single
+    // `Promise.resolve()` tick it replaces. The absence of a toast must not
+    // be an artifact of nothing having happened yet.
+    await expectNoCall(vi.mocked(toast.error), 'toast.error');
   });
 });

@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MaintenanceRecordForm } from './MaintenanceRecordForm';
 import { mediaService } from '../../../../services/api/MediaService';
 import type { MaintenanceCategory } from '../../../../types/models/maintenanceCategory';
+import { expectNoCall } from '../../../../test/expectNoCall';
 
 // Mocked the same way usePendingAttachments.test.ts does, so the third test can
 // make initUpload hang forever and observe the submit button staying disabled.
@@ -89,7 +90,7 @@ describe('MaintenanceRecordForm', () => {
     await user.click(screen.getByRole('button', { name: /log record/i }));
 
     await waitFor(() => expect(screen.getByText(/200 characters or fewer/i)).toBeInTheDocument());
-    expect(onSubmit).not.toHaveBeenCalled();
+    await expectNoCall(onSubmit, 'onSubmit');
   });
 
   // A record must never be saved referencing a media object that has not been

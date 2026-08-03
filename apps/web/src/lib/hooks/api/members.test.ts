@@ -35,6 +35,7 @@ import { userKeys } from './users';
 import { memberService } from '../../../services/api/MemberService';
 import { inviteService } from '../../../services/api/InviteService';
 import { ApiError, createErrorFromUnknown } from '@myfleet/shared-ts';
+import { expectNoCall } from '../../../test/expectNoCall';
 
 // ---------------------------------------------------------------------------
 // Key factory hierarchy
@@ -192,7 +193,7 @@ describe('mutation invalidation contracts — real hooks', () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mintAccessToken).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(mintAccessToken), 'mintAccessToken');
 
     const calls = invalidateSpy.mock.calls.map((c) => c[0]);
     expect(calls).not.toContainEqual(expect.objectContaining({ queryKey: authKeys.all }));
@@ -267,7 +268,7 @@ describe('mutation invalidation contracts — real hooks', () => {
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mintAccessToken).not.toHaveBeenCalled();
+    await expectNoCall(vi.mocked(mintAccessToken), 'mintAccessToken');
   });
 
   // 409 = demoting the sole owner. The custom message is the one thing this
