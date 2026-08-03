@@ -95,11 +95,10 @@ Gates 1–3 originally ran with the plan's docs-only constraint intact, and pass
 `internal/membership` and one in `internal/user` — and the decision was to fix
 them on this branch rather than defer them to a follow-up task.
 
-Current state — 44 files:
+Current state after merging origin/main — 43 files:
 
 ```
-$ git diff --name-only main...HEAD | grep -E '^(apps|packages|deploy|\.github)/'
-apps/auth-service/internal/membership/client.go
+$ git diff --name-only origin/main...HEAD | grep -E '^(apps|packages|deploy|\.github)/'
 apps/auth-service/internal/membership/client_test.go
 apps/auth-service/internal/user/resource.go
 apps/auth-service/internal/user/users_resource_test.go
@@ -114,7 +113,7 @@ $ git diff --name-only main...HEAD | grep -E '^\.claude/settings'
 settings untouched
 ```
 
-The ten source files are the four fixes described below, in commits `c646643`,
+The nine source files are the four fixes described below, in commits `c646643`,
 `838293f`, `ca70c30` and `306e175`. Everything else remains under `.claude/skills/**`,
 `.claude/agents/{backend,frontend}-guidelines-reviewer.md` and
 `docs/tasks/task-020-dev-guidelines-skill-drift/**`.
@@ -348,14 +347,22 @@ non-2xx as a hard failure, so collapsing them would break onboarding for every
 fleetless user. Removing the translation turns that 404 into a 500, which is how
 the test was confirmed meaningful.
 
-**2. Query-string injection — `auth-service/internal/membership/client.go:27`**
-(commit `838293f`). `Active` built its query by raw concatenation. The test
-demonstrates the consequence: `"u1&role=owner"` arrived as `user_id="u1"` plus an
-injected `role="owner"`. Not reachable today — the only caller passes a
-server-generated UUID — so this is defence in depth. Worth doing because the file
-already named the habit: the fleet-roster call below used `url.PathEscape`
-specifically to avoid "inheriting Active's raw-concatenation habit". Both calls now
-escape and that comment is updated.
+**2. Query-string injection — `auth-service/internal/membership/client.go`**
+(commit `838293f`, **since superseded by main**). `Active` built its query by raw
+concatenation; the test demonstrates the consequence — `"u1&role=owner"` arrived as
+`user_id="u1"` plus an injected `role="owner"`.
+
+Independently found and fixed on main in `03da0f9`, which landed before this branch
+merged and goes further: a 5s timeout bounding the auth→fleet hop, transient
+classification via `server.ErrServiceUnavailable`, and unwrapping `*url.Error` so
+the request URL — which carries the user id — stays out of the error text. The
+merge took main's `client.go` wholesale; this branch's one-line change is gone.
+
+What survives is the **test**. main added the escaping without a test that fails if
+it is removed: every other case in that file passes a plain UUID, for which
+`QueryEscape` is a no-op. `TestActive_escapesTheUserIDIntoTheQueryString` is kept on
+top of main's file for that reason. Two independent reviews reaching the same defect
+is worth noting; so is the fact that only one of them left a guard behind.
 
 **3. Lossy `ToEntity()` round-trip — `fleet-service/internal/membership/entity.go`**
 (commit `ca70c30`). `ToEntity()` carries five columns, so a `db.Save` built from it
