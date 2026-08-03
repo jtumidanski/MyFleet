@@ -1,10 +1,10 @@
 ---
-name: golang-microservice
-description: Skill for creating and modifying Golang microservices using DDD, immutable models, functional composition, GORM entities, and JSON:API transport.
+name: backend-dev-guidelines
+description: Skill for creating and modifying MyFleet Go services — immutable domain models with fluent builders, Provider/Administrator data access over GORM, chi routing, and the hand-rolled JSON:API transport in packages/shared-go/server.
 ---
 
 
-# Golang Microservice Skill
+# Backend Dev Guidelines
 
 ## Purpose
 Provide a composable entry point that activates when working on any Golang service. This skill aligns development and AI generation with architecture patterns and conventions.
@@ -12,7 +12,7 @@ Provide a composable entry point that activates when working on any Golang servi
 ## When to Use
 Activate when working on:
 - Any Go microservice
-- Files: `model.go`, `entity.go`, `builder.go`, `processor.go`, `provider.go`, `resource.go`, `rest.go`
+- Files: `model.go`, `entity.go`, `builder.go`, `processor.go`, `provider.go`, `administrator.go`, `resource.go`, `rest.go`
 - REST JSON:API endpoints
 - Testing domain logic, providers, or emission paths
 
@@ -22,10 +22,9 @@ Activate when working on:
 - [ ] Immutable **Model** with accessors
 - [ ] **Entity** with GORM tags and migrations
 - [ ] Fluent **Builder** enforcing invariants
-- [ ] Pure **Processor** functions
-- [ ] Lazy **Provider** for data access
+- [ ] **Processor** orchestrating a Provider and an Administrator
+- [ ] **Provider** interface for reads and **Administrator** interface for writes, each with a `New*(db)` constructor
 - [ ] **Resource** file for route registration and handlers
-- [ ] **Service README** updated if API contracts changed
 - [ ] Table-driven **tests** for all logic layers
 
 
@@ -40,19 +39,18 @@ Activate when working on:
 When modifying any service code:
 
 1. **Implement changes** to primary files (model.go, processor.go, etc.)
-2. **Update mocks immediately** if any interfaces changed
-   - Add corresponding function fields to mock struct
-   - Implement new methods with nil-check and default behavior
-   - See [Testing Conventions](resources/testing-guide.md#interface-change-workflow) for details
+2. **Update the in-package `fake*`/`stub*` doubles immediately** if any interface changed
+   - Add the corresponding method to the double, declared in the `_test.go` file that uses it
+   - There is no `mock/` directory convention — see [Testing Conventions](resources/testing-guide.md#interface-change-workflow) for details
 3. **Verify each domain against the Commonly Missed Items Checklist** in [ai-guidance.md](resources/ai-guidance.md#commonly-missed-items-checklist) before moving to the next domain. Do not batch — check domain 1 fully, then domain 2, etc.
 4. **Run tests BEFORE claiming completion**:
    ```bash
-   go test ./... -count=1
+   make test
    ```
 5. **Fix any failures** - Do NOT skip or ignore test failures
 6. **Verify build**:
    ```bash
-   go build ./...
+   make build
    ```
 7. **Report test results** with actual command output, not assumptions
 
@@ -60,18 +58,16 @@ When modifying any service code:
 
 - **Never skip test execution** - Running tests is mandatory, not optional
 - **Never assume tests will pass** - Always verify with actual execution
-- **Never update interface without updating mocks** - Causes immediate test failures
-- **Always run full test suite** (`go test ./...`) not just modified packages
-- **Always use `-count=1` flag** to disable test caching
+- **Always run the full test suite** (`make test`, `Makefile:11-12`) not just modified packages — a bare `go test ./...` from the repo root skips the other modules `go.work` lists
 - **Always verify test output** before marking work complete
 
 ### When Tests Fail
 
-If `go test ./... -count=1` reports failures:
+If `make test` reports failures:
 
 1. **Read the error message completely** - Understand what broke
-2. **Check for missing mock methods** - Most common cause of failures
-3. **Update mocks to match interface** - Add/modify methods as needed
+2. **Check for a missing method on the `fake*`/`stub*` double** - most common cause of failures after an interface change
+3. **Update the double to match the interface** - Add/modify methods as needed
 4. **Re-run tests** - Verify the fix didn't break other tests
 5. **Do not proceed** until all tests pass
 
@@ -80,11 +76,10 @@ See [Testing Conventions](resources/testing-guide.md) for comprehensive testing 
 ---
 
 ## Key Principles
-1. **Immutability** — Models never mutate; all state changes yield new instances.
-2. **Functional Composition** — Use curried functions and providers for composition.
-3. **Context Propagation** — Request context (trace, logger, cancellation) is always passed explicitly, not stashed in globals.
-4. **Layer Separation** — Each file type has a clear single responsibility.
-5. **Pure Logic First** — Business logic runs without side effects.
+1. **Immutability** — Models never mutate; all state changes yield new instances via `With*` methods that return a copy.
+2. **Context Propagation** — `req.Context()` carries request-scoped identity and correlation ID (`auth.IdentityFromContext`, `telemetry.CorrelationIDFromContext`), not stashed in globals. Processors hold no `ctx` field — but that isn't a hard cap on processor state: `maintenanceschedule.Processor` also holds a `*gorm.DB`, an `ActivityRecorder`, and an `OverdueEmitter` for its overdue-transition hooks (`apps/fleet-service/internal/maintenanceschedule/processor.go:25-32`).
+3. **Layer Separation** — Each file type has a clear single responsibility.
+4. **Business Rules in the Processor, I/O in Injected Collaborators** — a processor enforces invariants and orchestrates a Provider (reads) and Administrator (writes); the I/O itself happens inside those injected collaborators, not inline in the processor.
 
 
 ---
@@ -96,8 +91,9 @@ See [Testing Conventions](resources/testing-guide.md) for comprehensive testing 
 | `model.go` | Domain model definition | None |
 | `entity.go` | Database schema and migrations | GORM |
 | `builder.go` | Fluent construction of valid models | Model |
-| `processor.go` | Core business logic | Model, Provider |
-| `provider.go` | Lazy database access | GORM, Entity |
+| `processor.go` | Core business logic orchestration | Model, Provider, Administrator |
+| `provider.go` | Read-only data access | GORM, Entity |
+| `administrator.go` | Write operations (insert, update, soft-delete, restore) | GORM, Entity |
 | `resource.go` | Route registration and handlers | REST, Processor |
 | `rest.go` | JSON:API resource mappings | Model |
 
@@ -110,7 +106,7 @@ See [Testing Conventions](resources/testing-guide.md) for comprehensive testing 
 |-------|------------|
 | Architecture Overview | [resources/architecture-overview.md](resources/architecture-overview.md) |
 | File Responsibilities | [resources/file-responsibilities.md](resources/file-responsibilities.md) |
-| Functional & Builder Patterns | [resources/patterns-functional.md](resources/patterns-functional.md) |
+| Model, Builder and Processor Patterns | [resources/patterns-functional.md](resources/patterns-functional.md) |
 | Provider Pattern | [resources/patterns-provider.md](resources/patterns-provider.md) |
 | REST JSON:API | [resources/patterns-rest-jsonapi.md](resources/patterns-rest-jsonapi.md) |
 | Testing Conventions | [resources/testing-guide.md](resources/testing-guide.md) |
