@@ -1,444 +1,621 @@
-
 ---
-title: REST and JSON:API Pattern
-description: Handler and transport conventions for JSON:API-compliant endpoints using server.RegisterHandler and api2go integration.
+title: REST and JSON:API Transport
+description: Handler and transport conventions for JSON:API endpoints — chi routing, server.RegisterInputHandler for typed bodies, and the hand-rolled envelope in packages/shared-go/server.
 ---
 
 # REST and JSON:API Pattern
 
 ## Principles
-- Use `server.RegisterHandler` and `server.RegisterInputHandler` for automatic tracing and JSON:API deserialization
-- REST models implement JSON:API interface methods (`GetName()`, `GetID()`, `SetID()`)
-- **Handlers are thin - delegate ALL business logic to processors**
-- **NEVER call provider functions directly from handlers** - always go through processor layer
-- Use `server.MarshalResponse` for success responses
-- Map domain errors to HTTP status codes explicitly
+
+- Routes are registered on a **chi router**. Each domain exports one route
+  entry point returning `func(chi.Router)`
+  (`apps/fleet-service/internal/vehicle/resource.go:28`). All 23 `resource.go`
+  files use that return type: 19 name it `InitializeRoutes`, three
+  `InitializeInternalRoutes`, one `InitializePublicRoutes`.
+- **Body-less routes** — GET, DELETE, and actions whose only input is the URL
+  path — are a plain `func(w http.ResponseWriter, req *http.Request)` handed
+  straight to `r.Get` / `r.Delete` / `r.Post`.
+- **Bodied routes** — POST, PATCH, PUT — wrap that same func in
+  `server.RegisterInputHandler`, which decodes `{"data":{"attributes":T}}` into
+  a typed `T` before the handler runs
+  (`packages/shared-go/server/handler.go:46-60`). It is a plain generic
+  function, not a curried registrar, and it does no tracing or logging.
+- **Handlers are thin — delegate business logic to the processor.**
+- **Handlers call the processor, not the provider or administrator.**
+- Success responses go out through
+  `server.WriteJSON(w, status, server.Document{...})`.
+- Errors go out through a single `server.WriteError(w, err)`;
+  `server.StatusFor` maps the sentinel to a status. An explicit per-error
+  `errors.Is` + `w.WriteHeader` ladder inside the handler is the anti-pattern
+  this replaced.
+
+The data-access vocabulary these handlers sit on — `Provider`,
+`Administrator`, `NewProvider`, `NewAdministrator`, `server.Page`, the
+per-domain `ErrNotFound` — is defined in
+[patterns-provider.md](patterns-provider.md).
 
 ---
 
 ## Resource File Structure
 
-
 ### Route Registration
-Use `InitializeRoutes` to register all domain routes with the shared handler registration functions:
+
+`apps/fleet-service/internal/vehicle/resource.go:28-58`, verbatim — the route
+entry point plus one body-less handler:
 
 ```go
-func InitializeRoutes(si jsonapi.ServerInformation) func(db *gorm.DB) server.RouteInitializer {
-	return func(db *gorm.DB) server.RouteInitializer {
-		return func(router *mux.Router, l logrus.FieldLogger) {
-			// CRUD endpoints
-			router.HandleFunc("/users", server.RegisterHandler(l)(si)("get-users", listUsersHandler(db))).Methods(http.MethodGet)
-			router.HandleFunc("/users", server.RegisterInputHandler[CreateRequest](l)(si)("create-user", createUserHandler(db))).Methods(http.MethodPost)
-			router.HandleFunc("/users/{id}", server.RegisterHandler(l)(si)("get-user", getUserHandler(db))).Methods(http.MethodGet)
-			router.HandleFunc("/users/{id}", server.RegisterInputHandler[UpdateRequest](l)(si)("update-user", updateUserHandler(db))).Methods(http.MethodPatch)
-			router.HandleFunc("/users/{id}", server.RegisterHandler(l)(si)("delete-user", deleteUserHandler(db))).Methods(http.MethodDelete)
-
-			// Relationship endpoints
-			router.HandleFunc("/users/{id}/relationships/policy", server.RegisterInputHandler[AssociatePolicyRequest](l)(si)("associate-policy", associatePolicyHandler(db))).Methods(http.MethodPost)
-		}
-
-	}
-}
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, ownerCheck OwnerChecker, primaryImage PrimaryImageSetter, statusDeps StatusDeps, record ActivityRecorder, emit EventEmitter) func(chi.Router) {
+	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db)).
+		WithActivityRecorder(record).
+		WithEventEmitter(emit)
+	return func(r chi.Router) {
+		// GET /fleets/{id}/vehicles — list vehicles (fleet-paged)
+		r.Get("/fleets/{id}/vehicles", func(w http.ResponseWriter, req *http.Request) {
+			identity := auth.IdentityFromContext(req.Context())
+			fleetID := chi.URLParam(req, "id")
+			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			page := server.ParsePage(req)
+			ms, total, err := proc.ListByFleet(fleetID, page)
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			// Status is derived on read (design §10.2). Per-vehicle gathering is
+			// acceptable at household scale.
+			now := time.Now().UTC()
+			resources := make([]server.Resource, 0, len(ms))
+			for _, m := range ms {
+				resources = append(resources, TransformDerived(m, statusDeps.Derive(m, now)))
+			}
+			server.WriteJSON(w, http.StatusOK, server.Document{
+				Data: resources,
+				Meta: page.Meta(total),
+			})
+		})
 ```
 
-**Key Points:**
-- Return a curried function `func(db *gorm.DB) server.RouteInitializer` for dependency injection
+**Key points:**
 
-- Use `server.RegisterHandler` for GET/DELETE (no request body)
+- Collaborators are **explicit parameters**, one interface per cross-domain
+  dependency. There is no curried `func(db *gorm.DB) ...` wrapper for DI.
+  Optional processor collaborators arrive by `With*` chaining on the processor
+  (`resource.go:29-31`).
+- The processor closure is built **once**, outside `return func(r chi.Router)`,
+  and closed over by every handler in the domain. The logger is likewise
+  captured from the `log` parameter — there is no per-request dependency object
+  to ask for one.
+- Path params are `chi.URLParam(req, "id")`; caller identity is
+  `auth.IdentityFromContext(req.Context())`.
+- **No handler-name string is registered anywhere.** Correlating a log line to a
+  request is `telemetry.CorrelationIDFromContext(req.Context())`
+  (`resource.go:87`), which reads the context and needs no name.
+- Authorization runs in the handler, before the processor call, and its failure
+  goes out through the same `server.WriteError`.
 
-- Use `server.RegisterInputHandler[T]` for POST/PATCH (with typed request model)
-- Handler names (e.g., "get-users") are used for tracing and logging
+### Pagination round trip
+
+All four steps are in the block above: `server.ParsePage(req)` (reads
+`page[number]`/`page[size]`, defaults 1/25, caps size at 100 —
+`packages/shared-go/server/pagination.go:20-33`) → `proc.ListByFleet(fleetID,
+page)`, which returns `(models, total, error)` → `page.Meta(total)`, giving
+`{total, totalPages, number, size}` → `server.Document{Data: ..., Meta: ...}`.
+Never compute an offset in the handler; `page.Offset()` belongs to the provider
+query.
 
 ---
 
 ## Handler Choice Is a Frontend API Contract
 
-**Switching a handler from `server.RegisterHandler` to `server.RegisterInputHandler[T]` (or vice versa) is a breaking change for every caller of that endpoint, even if the URL and HTTP method are unchanged.** `RegisterInputHandler[T]` parses the request body as a JSON:API resource envelope matching `T.GetName()` *before* the handler runs. A request without that envelope — including a bare `{}` — is rejected with `400 "Could not parse request body"` and the handler is never invoked.
+**Switching a handler between a plain `http.HandlerFunc` and
+`server.RegisterInputHandler` (in either direction) is a breaking change for
+every caller of that endpoint, even if the URL and HTTP method are unchanged.**
 
-This trips up "action" endpoints that don't have any real attributes (archive, unarchive, sync, renormalize, uncheck-all, etc.). It is tempting to introduce a typed `XxxRequest` for them just to satisfy a "every POST has a typed request" guideline — and that's fine — but doing so means callers must also change.
+`server.RegisterInputHandler` reads the whole request body and rejects anything
+that is not a JSON object *before* the handler runs
+(`packages/shared-go/server/handler.go:46-60`, verbatim):
 
-**When you wire a new handler with `RegisterInputHandler[T]`, or convert an existing one:**
+```go
+// RegisterInputHandler decodes a typed JSON:API attributes payload {data:{attributes:T}}.
+func RegisterInputHandler[T any](fn func(http.ResponseWriter, *http.Request, T)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var doc struct {
+			Data struct {
+				Attributes T `json:"attributes"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&doc); err != nil {
+			WriteError(w, ErrValidation)
+			return
+		}
+		fn(w, r, doc.Data.Attributes)
+	}
+}
+```
 
-1. Define the request type in `rest.go` with `GetName()` / `GetID()` / `SetID()`. For action endpoints with no attributes, the type can be a single `Id uuid.UUID` field.
-2. Update **every** frontend service wrapper that calls the endpoint, in the **same commit**, to send the JSON:API envelope:
+A decode failure — an empty body, `null`, truncated JSON — writes
+`server.ErrValidation`, which `server.StatusFor` maps to **422** with title
+`"validation"`, and `fn` is never invoked
+(`apps/auth-service/internal/user/resource_test.go:180,190` asserts exactly
+this for the body `{"data":`).
+
+This trips up "action" endpoints that have no real attributes (restore,
+complete, set-primary). It is tempting to give them a typed attributes struct
+just to satisfy a "every POST has a typed body" habit — that is fine, but it
+means callers must change too.
+
+**When you wire a new handler with `server.RegisterInputHandler`, or convert an
+existing one:**
+
+1. Define a narrow unexported attributes struct in `rest.go` —
+   `createAttributes` / `patchAttributes`. For an action endpoint with no
+   attributes, an inline anonymous struct is the local convention
+   (`apps/fleet-service/internal/vehicle/resource.go:212-214`).
+2. Update **every** frontend service wrapper that calls the endpoint, in the
+   **same commit**, to send the JSON:API envelope:
    ```json
-   { "data": { "type": "<T.GetName()>", "id": "<resource id>", "attributes": {} } }
+   { "data": { "type": "vehicles", "id": "<resource id>", "attributes": {} } }
    ```
-3. Run the frontend type-check and any service-layer tests as part of the same change.
+   The `type` is the service's own `resourceType` literal — on the backend it is
+   the string in the `server.Resource` literal (`vehicle/rest.go:75`), on the
+   frontend the `resourceType` field
+   (`apps/web/src/services/api/VehicleService.ts:26,40-49`). Nothing derives it
+   from a Go method.
+3. Run the frontend type-check and any service-layer tests as part of the same
+   change.
 
-**Conversely**, if you're keeping a handler body-less, use `server.RegisterHandler` (not `RegisterInputHandler`). It's the right choice for:
-- Pure action endpoints with no parameters beyond the URL path (`/lock`, `/unlock`, `/refresh`, `/accept`, `/decline`).
+**Conversely**, if you are keeping a handler body-less, register the plain
+`func(w, r)` directly on chi and do not wrap it. That is the right choice for:
+
+- Pure action endpoints with no parameters beyond the URL path
+  (`POST /vehicles/{id}/restore`, `resource.go:178`).
 - Endpoints whose only input comes from path or query parameters.
 
-A backend-only audit pattern that flips handlers to `RegisterInputHandler[T]` without a frontend update is the single most likely source of `400 "Could not parse request body"` regressions in production. Backend tests will not catch it because they invoke the handler directly without exercising the framework's body-parsing layer. Make the frontend change part of the same commit.
+A backend-only change that wraps a handler in `server.RegisterInputHandler`
+without a matching frontend update is the most likely source of a sudden 422 on
+a previously working endpoint. **Backend tests will usually not catch it**: the
+processor tests call `proc.Create` directly and never reach the decoder, and 13
+of the 23 `resource.go` files — `vehicle` among them — have no router-level
+`resource_test.go` at all. Where one does exist it does catch this
+(`apps/auth-service/internal/user/resource_test.go`), but do not rely on that.
+Make the frontend change part of the same commit.
 
 ---
 
 ## Handler Patterns
 
+### Body-less handler
 
-### GET Handler (No Request Body)
+The `GET /fleets/{id}/vehicles` block under
+[Route Registration](#route-registration) is the shape: resolve identity →
+resolve path params → authorize → call the processor → `server.WriteError` on
+failure → `server.WriteJSON` on success. Every early return is a bare
+`server.WriteError(w, err); return`.
+
+### Bodied handler
+
+`apps/fleet-service/internal/vehicle/resource.go:60-94`, verbatim:
+
 ```go
-
-func getUserHandler(db *gorm.DB) server.GetHandler {
-	return func(d *server.HandlerDependency, c *server.HandlerContext) http.HandlerFunc {
-		return ParseId(d.Logger(), func(userId uuid.UUID) http.HandlerFunc {
-			return func(w http.ResponseWriter, r *http.Request) {
-				model, err := NewProcessor(d.Logger(), r.Context(), db).GetById(userId)()
-				if err != nil {
-					if errors.Is(err, ErrUserNotFound) {
-						d.Logger().WithError(err).Error("User not found")
-						w.WriteHeader(http.StatusNotFound)
-
-						return
-					}
-					d.Logger().WithError(err).Error("Failed to fetch user")
-					w.WriteHeader(http.StatusInternalServerError)
-					return
-
-				}
-
-				res, err := ops.Map(Transform)(ops.FixedProvider(model))()
-				if err != nil {
-					d.Logger().WithError(err).Errorf("Creating REST model.")
-					w.WriteHeader(http.StatusInternalServerError)
-
-					return
-				}
-
-				server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
-			}
-		})
-	}
-}
-```
-
-### POST/PATCH Handler (With Request Body)
-```go
-func createUserHandler(db *gorm.DB) server.InputHandler[CreateRequest] {
-	return func(d *server.HandlerDependency, c *server.HandlerContext, req CreateRequest) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-
-			input := CreateInput{
-				Email:       req.Email,
-				DisplayName: req.DisplayName,
-			}
-
-			model, err := NewProcessor(d.Logger(), r.Context(), db).Create(input)()
-			if err != nil {
-				if errors.Is(err, ErrEmailAlreadyExists) {
-					d.Logger().WithError(err).Errorf("Email already exists.")
-
-					w.WriteHeader(http.StatusConflict)
-
-					return
-				}
-				if errors.Is(err, ErrEmailRequired) || errors.Is(err, ErrEmailInvalid) ||
-					errors.Is(err, ErrDisplayNameRequired) || errors.Is(err, ErrDisplayNameEmpty) {
-					d.Logger().WithError(err).Errorf("Validation failed.")
-					w.WriteHeader(http.StatusBadRequest)
-					return
-				}
-				d.Logger().WithError(err).Errorf("Failed to create user.")
-				w.WriteHeader(http.StatusInternalServerError)
+		// POST /fleets/{id}/vehicles — create a vehicle
+		r.Post("/fleets/{id}/vehicles", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs createAttributes) {
+			identity := auth.IdentityFromContext(req.Context())
+			fleetID := chi.URLParam(req, "id")
+			if err := authz.RequireSameFleet(identity, fleetID); err != nil {
+				server.WriteError(w, err)
 				return
 			}
-
-			res, err := ops.Map(Transform)(ops.FixedProvider(model))()
-			if err != nil {
-				d.Logger().WithError(err).Errorf("Creating REST model.")
-				w.WriteHeader(http.StatusInternalServerError)
+			if err := authz.RequireWrite(identity); err != nil {
+				server.WriteError(w, err)
 				return
 			}
-
-			server.MarshalResponse[RestModel](d.Logger())(w)(c.ServerInformation())(map[string][]string{})(res)
-		}
-	}
-}
-
+			m, err := NewBuilder().
+				SetFleetID(fleetID).
+				SetNickname(attrs.Nickname).
+				SetMake(attrs.Make).
+				SetModel(attrs.Model).
+				SetTrim(attrs.Trim).
+				SetYear(attrs.Year).
+				SetVIN(attrs.VIN).
+				SetCurrentMileage(attrs.CurrentMileage).
+				SetNotes(attrs.Notes).
+				Build()
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			traceID := telemetry.CorrelationIDFromContext(req.Context())
+			created, err := proc.Create(m, identity.UserID, traceID)
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			server.WriteJSON(w, http.StatusCreated, server.Document{Data: Transform(created)})
+		}))
 ```
 
-**Handler Dependency Benefits:**
-- `d.Logger()` - Pre-configured logger with trace context
-- `d.Context()` - Request context
-- `c.ServerInformation()` - JSON:API server configuration
+**Key points:**
+
+- The type parameter is **inferred** from the callback's third argument.
+  `server.RegisterInputHandler(func(w, req, attrs createAttributes) {...})` —
+  no explicit `[T]`, no separate handler type.
+- The handler maps `attrs` onto the domain **builder**, not onto the entity.
+  `Build()` is where the invariants are checked.
+- `201 Created` for a create; `200 OK` for update/restore; `204 No Content` with
+  a bare `w.WriteHeader(http.StatusNoContent)` for a delete (`resource.go:174`).
 
 ---
 
 ## REST Model Structure
 
-### Response Models
-Implement JSON:API interface methods for all response models:
+### Response attributes
+
+There is no `Attributes`-implementing interface and no marshaling library. A
+domain declares a plain `Attributes` struct and puts it inside a
+`server.Resource` literal. `apps/fleet-service/internal/vehicle/rest.go:9-29`,
+verbatim:
 
 ```go
-type RestModel struct {
-	Id          uuid.UUID `json:"-"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name"`
-	PolicyId    *string   `json:"policy_id,omitempty"`
-	CreatedAt   string    `json:"created_at"`
-	UpdatedAt   string    `json:"updated_at"`
-}
-
-// GetName uses value receiver - required by api2go interface
-func (r RestModel) GetName() string {
-	return "users"
-}
-
-// GetID uses value receiver - read-only operation
-func (r RestModel) GetID() string {
-	return r.Id.String()
-}
-
-// SetID uses pointer receiver - mutates the model
-func (r *RestModel) SetID(idStr string) error {
-
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		return err
-	}
-	r.Id = id
-	return nil
-}
-
-```
-
-**Critical Receiver Type Requirements:**
-- `GetName()` **MUST** use value receiver `(r RestModel)` - required by api2go interface
-- `GetID()` **SHOULD** use value receiver `(r RestModel)` - read-only operation
-- `SetID()` **MUST** use pointer receiver `(r *RestModel)` - mutates the model
-
-### Request Models
-Request models also implement the JSON:API interface:
-
-```go
-type CreateRequest struct {
-	Id          uuid.UUID  `json:"-"`
-
-	Email       string     `json:"email"`
-	DisplayName string     `json:"display_name"`
-	PolicyId    *uuid.UUID `json:"policy_id,omitempty"`
-}
-
-
-// GetName uses value receiver - required by api2go interface
-func (r CreateRequest) GetName() string {
-	return "users"
-}
-
-
-// GetID uses value receiver - read-only operation
-func (r CreateRequest) GetID() string {
-	return r.Id.String()
-}
-
-
-// SetID uses pointer receiver - mutates the model
-func (r *CreateRequest) SetID(idStr string) error {
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		return err
-	}
-	r.Id = id
-	return nil
+// Attributes is the JSON:API attributes payload for a vehicle.
+//
+// Status, LastActivityAt, and NextDue are all DERIVED ON READ (design §10.2) and
+// never stored on the entity. They are computed from the vehicle's active
+// maintenance-schedule due detail and its last activity time, and are exposed
+// read-only here.
+type Attributes struct {
+	FleetID             string   `json:"fleetId"`
+	Nickname            string   `json:"nickname,omitempty"`
+	Make                string   `json:"make"`
+	Model               string   `json:"model"`
+	Trim                string   `json:"trim,omitempty"`
+	Year                int      `json:"year"`
+	VIN                 string   `json:"vin,omitempty"`
+	CurrentMileage      int      `json:"currentMileage,omitempty"`
+	PrimaryImageMediaID string   `json:"primaryImageMediaId,omitempty"`
+	Notes               string   `json:"notes,omitempty"`
+	Status              string   `json:"status,omitempty"`
+	LastActivityAt      string   `json:"lastActivityAt,omitempty"` // RFC 3339, UTC
+	NextDue             *NextDue `json:"nextDue,omitempty"`
 }
 ```
 
-**Key Points:**
-- ID field tagged with `json:"-"` (set via SetID)
-- Pointer fields for optional attributes (omitempty)
-- Flat structure (no nested Data/Type/Attributes)
-- `jsonapi.Unmarshal` handles JSON:API envelope automatically
+`server.Resource` carries `Type`, `ID`, `Attributes any` and optional
+`Relationships` (`packages/shared-go/server/jsonapi.go:12-18`). The `type` is a
+**string literal** in the `Transform` body (`rest.go:75`) and the `ID` is a
+separate field — never an attribute, and never tagged `json:"-"` inside the
+attributes struct.
+
+### Request attributes — narrow named structs
+
+Requests do **not** reuse `Attributes`. Each write endpoint gets its own
+unexported struct naming the exact fields it accepts.
+`rest.go:31-52`, verbatim — the comments are the rule:
+
+```go
+// createAttributes is the exact set of fields POST /fleets/{id}/vehicles accepts.
+// Named rather than anonymous so a test can assert that no derived attribute is
+// bindable — this narrow shape IS the read-only enforcement (FR-8.3, NFR-7): an
+// unknown lastActivityAt or nextDue in a request body has nowhere to land.
+type createAttributes struct {
+	Nickname       string `json:"nickname"`
+	Make           string `json:"make"`
+	Model          string `json:"model"`
+	Trim           string `json:"trim"`
+	Year           int    `json:"year"`
+	VIN            string `json:"vin"`
+	CurrentMileage int    `json:"currentMileage"`
+	Notes          string `json:"notes"`
+}
+
+// patchAttributes is the exact set of fields PATCH /vehicles/{id} accepts.
+// Pointers distinguish "absent" from "set to zero" on a partial update.
+type patchAttributes struct {
+	Nickname       *string `json:"nickname"`
+	CurrentMileage *int    `json:"currentMileage"`
+	Notes          *string `json:"notes"`
+}
+```
+
+**Key points:**
+
+- **Pointer fields for optional attributes.** On a patch struct this is
+  load-bearing: `*string` distinguishes "field absent" from "set to empty"
+  (`rest.go:46-52`, and the nil checks at `resource.go:134-145`).
+- **Flat structure** — no nested `Data` / `Type` / `Attributes` fields.
+  `server.RegisterInputHandler` has already stripped the envelope, so the typed
+  struct *is* the attributes object.
+- The envelope is decoded by `encoding/json` inside
+  `server.RegisterInputHandler` (`handler.go:47-58`). There is no unmarshal
+  hook to implement.
+- Prefer a **named** struct over an inline anonymous one when a test should be
+  able to assert the accepted field set. Inline anonymous structs are used for
+  single-field action bodies (`vehicle/resource.go:212-214`).
 
 ---
 
 ## Transform Functions
 
-Convert domain models to REST representations:
-
+`Transform` and `TransformDerived` return a `server.Resource` and **cannot
+fail** — there is no error to propagate. `rest.go:54-103`, verbatim:
 
 ```go
-
-func Transform(m Model) (RestModel, error) {
-
-	var policyId *string
-	if m.PolicyId() != nil {
-		pid := m.PolicyId().String()
-		policyId = &pid
-	}
-
-
-	return RestModel{
-
-		Id:          m.Id(),
-		Email:       m.Email(),
-		DisplayName: m.DisplayName(),
-
-		PolicyId:    policyId,
-		CreatedAt:   m.CreatedAt().Format("2006-01-02T15:04:05Z07:00"),
-		UpdatedAt:   m.UpdatedAt().Format("2006-01-02T15:04:05Z07:00"),
-	}, nil
+// Transform converts a Model to a JSON:API Resource carrying no derived
+// attributes. Used by the write paths (create, update, restore, primary-image):
+// those responses echo a write, and none of the derived values is a property of
+// the write.
+func Transform(m Model) server.Resource {
+	return TransformDerived(m, Derived{})
 }
 
-func TransformSlice(models []Model) ([]RestModel, error) {
-	restModels := make([]RestModel, len(models))
-	for i, model := range models {
-		restModel, err := Transform(model)
-		if err != nil {
-			return nil, err
-		}
-
-		restModels[i] = restModel
-
+// TransformDerived converts a Model to a JSON:API Resource, attaching the
+// read-only values derived on read.
+//
+// LastActivityAt is carried as a string rather than a time.Time because
+// encoding/json's omitempty has no effect on a struct: a time.Time field would
+// emit "0001-01-01T00:00:00Z" for the absent case and defeat FR-8.4's
+// "omitted, not zero-valued" contract.
+func TransformDerived(m Model, d Derived) server.Resource {
+	lastActivity := ""
+	if !d.LastActivityAt.IsZero() {
+		lastActivity = d.LastActivityAt.UTC().Format(time.RFC3339)
 	}
-	return restModels, nil
+	return server.Resource{
+		Type: "vehicles",
+		ID:   m.ID(),
+		Attributes: Attributes{
+			FleetID:             m.FleetID(),
+			Nickname:            m.Nickname(),
+			Make:                m.Make(),
+			Model:               m.Model(),
+			Trim:                m.Trim(),
+			Year:                m.Year(),
+			VIN:                 m.VIN(),
+			CurrentMileage:      m.CurrentMileage(),
+			PrimaryImageMediaID: m.PrimaryImageMediaID(),
+			Notes:               m.Notes(),
+			Status:              d.Status,
+			LastActivityAt:      lastActivity,
+			NextDue:             d.NextDue,
+		},
+	}
+}
+
+// TransformSlice converts a slice of Models to JSON:API Resources (no derived
+// attributes).
+func TransformSlice(ms []Model) []server.Resource {
+	out := make([]server.Resource, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, Transform(m))
+	}
+	return out
 }
 ```
+
+**Both `Transform` and `TransformSlice` are mandatory** (checked as `DOM-04` /
+`DOM-05`). A list handler must call `TransformSlice`, not re-implement the
+conversion inline — see `membership/resource.go:48` for the plain form:
+
+```go
+server.WriteJSON(w, http.StatusOK, server.Document{Data: TransformSlice(ms)})
+```
+
+**Caveat — decorating is not re-implementing.** `vehicle`'s list handler
+legitimately writes its own loop (`resource.go:50-53`) because each row needs a
+per-row derived value:
+
+```go
+resources := make([]server.Resource, 0, len(ms))
+for _, m := range ms {
+	resources = append(resources, TransformDerived(m, statusDeps.Derive(m, now)))
+}
+```
+
+`TransformSlice` cannot express this — it has no per-element second argument.
+A loop that calls `Transform`/`TransformDerived` per element and adds
+per-element data is fine; a loop that rebuilds the `server.Resource` literal by
+hand is not. `DOM-05` false-positives on `vehicle` without this distinction.
 
 ---
 
 ## Error Handling
 
-
-Map domain errors to HTTP status codes explicitly:
+Handlers do **not** map errors. They call `server.WriteError(w, err)` once per
+failure path and return:
 
 ```go
+current, err := proc.GetByID(id)
 if err != nil {
-	// Specific domain errors
-	if errors.Is(err, ErrUserNotFound) {
-		d.Logger().WithError(err).Error("User not found")
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	if errors.Is(err, ErrEmailAlreadyExists) {
-		d.Logger().WithError(err).Error("Email already exists")
-		w.WriteHeader(http.StatusConflict)
-		return
-	}
-	if errors.Is(err, ErrEmailRequired) || errors.Is(err, ErrEmailInvalid) {
-		d.Logger().WithError(err).Error("Validation failed")
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-
-	// Generic error
-	d.Logger().WithError(err).Error("Internal error")
-	w.WriteHeader(http.StatusInternalServerError)
+	server.WriteError(w, err)
 	return
 }
 ```
 
-**Status Code Guidelines:**
-- `400 Bad Request` - Validation errors, malformed input
-- `404 Not Found` - Resource not found
-- `409 Conflict` - Business rule violations (e.g., duplicate email)
-- `500 Internal Server Error` - Unexpected errors
+`server.StatusFor` does the mapping from the sentinel
+(`packages/shared-go/server/errors.go:5-43`):
+
+| Sentinel | Status | Message (`title` on 4xx) |
+| --- | --- | --- |
+| `server.ErrBadRequest` | 400 | `bad request` |
+| `server.ErrUnauthorized` | 401 | `unauthorized` |
+| `server.ErrForbidden` | 403 | `forbidden` |
+| `server.ErrNotFound` | 404 | `not found` |
+| `server.ErrConflict` | 409 | `conflict` |
+| `server.ErrGone` | 410 | `gone` |
+| `server.ErrRequestEntityTooLarge` | 413 | `request entity too large` |
+| `server.ErrUnsupportedMediaType` | 415 | `unsupported media type` |
+| `server.ErrValidation` | 422 | `validation` |
+| `server.ErrTooManyRequests` | 429 | `too many requests` |
+| *anything else* | **500** | redacted — see below |
+
+`StatusFor` uses `errors.Is`, so a wrapped sentinel still maps. **Anything it
+does not recognise becomes a 500** — including a raw `gorm.ErrRecordNotFound`
+and a domain's own `ErrNotFound`. Translate at the boundary: the provider turns
+`gorm.ErrRecordNotFound` into the domain `ErrNotFound`
+([patterns-provider.md](patterns-provider.md#translate-gormerrrecordnotfound-at-the-boundary)),
+and the processor turns that into `server.ErrNotFound`
+(`apps/fleet-service/internal/vehicle/processor.go:58-59`).
+
+### Client-facing detail
+
+`server.Detailed(base, detail)` wraps a sentinel with a human-readable
+`detail` while leaving `title` as the base sentinel's message, so the response
+shape does not change for existing callers (`errors.go:45-66`):
+
+```go
+return Operation{}, server.Detailed(server.ErrValidation, "unsupported scope")
+```
+
+The `detail` is rendered on 4xx only.
+
+### 5xx bodies are redacted
+
+`server.WriteError` replaces the title of any 5xx with the fixed
+`server.InternalErrorTitle` (`"internal server error"`) and writes the real
+error to the server-side error logger instead
+(`packages/shared-go/server/jsonapi.go:73-116`). Callers pass raw repository
+errors straight in, so `err.Error()` on a 500 is whatever GORM or the driver
+produced — table names, column names, SQLSTATE codes, sometimes parameter
+values. None of that goes to the client.
+
+Consequences for handler code:
+
+- Do **not** add `w.Write` of an error message alongside `server.WriteError`.
+- Do **not** log 4xx separately. They are routine client mistakes;
+  `WriteError` deliberately logs nothing below 500.
+- The logger is installed once by `server.New` (`handler.go:21-24`), so no
+  per-service wiring is needed. Call `server.SetErrorLogger` directly only for a
+  handler mounted outside the shared bootstrap.
 
 ---
 
-## Relationship Endpoints
+## Nested and Cross-Domain Routes
 
+There are no `/relationships/` endpoints in this tree. Two shapes cover the
+cases:
 
-For relationship endpoints (e.g., `/users/{id}/relationships/policy`):
+**Nested under the parent resource.** Collection routes live under their owner
+(`GET`/`POST /fleets/{id}/vehicles`); item routes are flat (`GET
+/vehicles/{id}`). Both are registered by the child's own domain. The path param
+is always `{id}` for the resource owning the segment before it, so a nested
+handler reads `chi.URLParam(req, "id")` as the *parent* id (`resource.go:34-36`
+vs `resource.go:97-99`).
+
+**Cross-domain delegation through an injected interface.** When a route on one
+domain must mutate another, the owning domain declares a narrow interface and
+takes it as an `InitializeRoutes` parameter — it never imports the other
+package's provider or administrator (`resource.go:18-23`):
 
 ```go
-type AssociatePolicyRequest struct {
-	Id uuid.UUID `json:"-"`
-}
-
-// GetName uses value receiver - required by api2go interface
-func (r AssociatePolicyRequest) GetName() string {
-	return "policies"  // Related resource type
-}
-
-// GetID uses value receiver - read-only operation
-func (r AssociatePolicyRequest) GetID() string {
-	return r.Id.String()
-}
-
-
-// SetID uses pointer receiver - mutates the model
-func (r *AssociatePolicyRequest) SetID(idStr string) error {
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		return err
-	}
-	r.Id = id
-	return nil
+// PrimaryImageSetter handles setting the primary image for a vehicle, updating
+// both the vehiclemedia rows and mirroring into vehicles.primary_image_media_id.
+// Satisfied by *vehiclemedia.Processor.
+type PrimaryImageSetter interface {
+	SetPrimary(vehicleID, mediaID string) error
 }
 ```
 
-
-**Key Points:**
-- `GetName()` returns the related resource type (e.g., "policies")
-- JSON:API request body contains the related resource ID
-
-- Handler receives the parent resource ID from URL path
-
+`PUT /vehicles/{id}/primary-image` then authorizes locally, calls
+`primaryImage.SetPrimary(id, attrs.MediaID)`, re-fetches, and responds
+(`resource.go:209-242`). Wiring the concrete implementation together is
+`cmd/main.go`'s job, not the domain's.
 
 ---
 
 ## Anti-Patterns to Avoid
 
-❌ **Calling provider functions directly from handlers:**
+❌ **Calling provider or administrator functions directly from a handler:**
+
 ```go
 // DON'T DO THIS
-func handleGetUserRequest(db *gorm.DB) server.GetHandler {
-	return func(d *server.HandlerDependency, c *server.HandlerContext) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			// ❌ WRONG - bypassing processor layer
-			user, err := GetById(d.Logger(), db)(userId)
-			// ...
-		}
-	}
-}
+r.Get("/vehicles/{id}", func(w http.ResponseWriter, req *http.Request) {
+	// ❌ WRONG — bypasses the processor layer
+	m, err := NewProvider(db).GetByID(chi.URLParam(req, "id"))
+	// ...
+})
 ```
 
-✅ **Use processor for all business logic:**
+✅ **Go through the processor closure built in `InitializeRoutes`:**
+
 ```go
 // DO THIS
-func handleGetUserRequest(db *gorm.DB) server.GetHandler {
-	return func(d *server.HandlerDependency, c *server.HandlerContext) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			// ✅ CORRECT - calling through processor
-			user, err := NewProcessor(d.Logger(), d.Context(), db).GetById(userId)()
-			// ...
-		}
-	}
-}
+proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
+r.Get("/vehicles/{id}", func(w http.ResponseWriter, req *http.Request) {
+	// ✅ CORRECT — the processor owns error translation and business rules
+	m, err := proc.GetByID(chi.URLParam(req, "id"))
+	// ...
+})
 ```
 
-❌ **Manual JSON encoding/decoding:**
+`vehicle/resource.go` is the reference: every data call goes through `proc.*`.
+Three domains predate this and reach a bare `prov`/`adm` from the handler for
+operations their processor does not expose — `mileage/resource.go:67,123`,
+`membership/resource.go:87,151,181`, `fuel/resource.go:211,237`. Those are
+known exceptions, not a licence; new code follows `vehicle`.
+
+❌ **Manual JSON decoding of the envelope** (checked as `SUB-04` — zero
+`json.NewDecoder` / `json.Unmarshal` / `io.ReadAll` in `resource.go`):
+
 ```go
 // DON'T DO THIS
 var req struct {
 	Data struct {
 		Type       string `json:"type"`
 		Attributes struct {
-			Name string `json:"name"`
+			Nickname string `json:"nickname"`
 		} `json:"attributes"`
-
 	} `json:"data"`
 }
 json.NewDecoder(r.Body).Decode(&req)
 ```
 
-✅ **Use server.RegisterInputHandler with flat request models:**
+✅ **Use `server.RegisterInputHandler` with a flat named attributes struct:**
+
 ```go
 // DO THIS
-type CreateRequest struct {
-	Id   uuid.UUID `json:"-"`
-	Name string    `json:"name"`
+type createAttributes struct {
+	Nickname string `json:"nickname"`
+	Make     string `json:"make"`
+	Model    string `json:"model"`
 }
-// server.RegisterInputHandler automatically unmarshals JSON:API envelope
+
+r.Post("/fleets/{id}/vehicles", server.RegisterInputHandler(
+	func(w http.ResponseWriter, req *http.Request, attrs createAttributes) { /* ... */ }))
 ```
+
+❌ **A per-error `w.WriteHeader` ladder in the handler** — that is
+`server.StatusFor`'s job, and hand-rolling it is how a 404 becomes a 500.
 
 ---
 
 ## Validation Guidelines
 
+Validation happens in three places, in this order:
 
-- Validate required fields in processor layer, not handlers
-- Return typed domain errors (e.g., `ErrEmailRequired`)
-- Map domain errors to HTTP status in handler
-- Log errors with context using `d.Logger().WithError(err)`
+1. **Builder** — construction invariants. `Build()` returns
+   `server.ErrValidation` when a required field is missing, so a bad create is
+   rejected before the processor is reached (shown below).
+2. **Processor** — cross-field and cross-entity rules, and translation of
+   provider errors to `server.*` sentinels. Return a typed error; wrap with
+   `server.Detailed` when the client needs a sentence.
+3. **Handler** — authorization only, plus the single
+   `server.WriteError(w, err)`. It does not re-check field values and it does
+   not choose the status code.
+
+The builder is the first line, ahead of the processor
+(`apps/fleet-service/internal/vehicle/builder.go:25-31`):
+
+```go
+// Build validates invariants and returns the model or a validation error.
+func (b *Builder) Build() (Model, error) {
+	if b.m.make == "" || b.m.model == "" || b.m.year == 0 {
+		return Model{}, server.ErrValidation
+	}
+	return b.m, nil
+}
+```
+
+Do not log the error again in the handler: `server.WriteError` logs every 5xx
+with the real text and deliberately logs nothing below 500
+(`packages/shared-go/server/jsonapi.go:102-105`).
