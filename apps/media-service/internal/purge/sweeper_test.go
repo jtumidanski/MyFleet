@@ -2,6 +2,7 @@ package purge
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 
@@ -156,6 +157,34 @@ func TestRunOnce_aFailedOriginalRemovalOffersNoVariantKeys(t *testing.T) {
 	}
 	if n := countRows(t, db, `SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`); n != 1 {
 		t.Errorf("%d of 1 media rows left", n)
+	}
+}
+
+// The tick's context has to reach the DATABASE calls, not only the MinIO ones.
+// Without WithContext a cancelled tick keeps querying and deleting against a
+// bare connection, so shutdown blocks on work nobody will use — and every
+// assertion in this file would still pass, which is why this one exists.
+//
+// database/sql checks the context before it takes a connection, so an
+// already-cancelled context fails deterministically rather than racing.
+func TestRunOnce_aCancelledTickStopsAtTheFirstQuery(t *testing.T) {
+	db := newTestDB(t)
+	seedMediaObject(t, db, "mo-1", hourAgo(), nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	store := newRemover()
+	err := newSweeper(t, db, store, Config{}).RunOnce(ctx)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunOnce on a cancelled tick = %v, want context.Canceled — "+
+			"the database calls are not bound to the tick's context", err)
+	}
+	if len(store.asked) != 0 {
+		t.Errorf("a cancelled tick still removed bytes: %v", store.asked)
+	}
+	if n := countRows(t, db, `SELECT count(*) FROM media.media_objects WHERE id = 'mo-1'`); n != 1 {
+		t.Errorf("a cancelled tick still deleted rows: %d of 1 left", n)
 	}
 }
 

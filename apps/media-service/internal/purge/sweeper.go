@@ -131,7 +131,14 @@ func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error {
 		return nil
 	}
 
-	orphans, err := mediavariant.ListOrphaned(s.db, s.cfg.ReconcileLimit)
+	// One context-bound handle for the whole pass. Without it a cancelled tick
+	// cancels only the MinIO calls and leaves every query running against a bare
+	// connection, so shutdown waits on work nobody is going to use. It is derived
+	// once rather than repeated per call site: the query helpers take a *gorm.DB
+	// and a context-bound handle is still one, so their signatures are unchanged.
+	db := s.db.WithContext(ctx)
+
+	orphans, err := mediavariant.ListOrphaned(db, s.cfg.ReconcileLimit)
 	if err != nil {
 		return fmt.Errorf("list orphaned variants: %w", err)
 	}
@@ -147,7 +154,7 @@ func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error {
 			}).Warn("remove orphaned variant object failed")
 			continue
 		}
-		if derr := mediavariant.DeleteByID(s.db, v.ID); derr != nil {
+		if derr := mediavariant.DeleteByID(db, v.ID); derr != nil {
 			s.log.WithError(derr).WithField("variant_id", v.ID).
 				Warn("delete orphaned variant row failed")
 			continue
@@ -158,7 +165,7 @@ func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error {
 
 	// The ledger carries no object_key, so orphans there are deleted directly
 	// (FR-RECON-4).
-	n, err := variantfailures.DeleteOrphaned(s.db, s.cfg.ReconcileLimit)
+	n, err := variantfailures.DeleteOrphaned(db, s.cfg.ReconcileLimit)
 	if err != nil {
 		return fmt.Errorf("delete orphaned variant failures: %w", err)
 	}
@@ -170,12 +177,17 @@ func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error {
 // window has elapsed, remove every byte it owns and then every row that
 // describes it.
 func (s *Sweeper) purgeExpired(ctx context.Context, sum *summary) error {
-	objs, err := mediaobject.ListPurgeable(s.db)
+	// Context-bound for the whole pass, including the per-object transaction —
+	// see reconcile. Cancelling the tick must stop the database work too, not
+	// only the MinIO calls.
+	db := s.db.WithContext(ctx)
+
+	objs, err := mediaobject.ListPurgeable(db)
 	if err != nil {
 		return fmt.Errorf("list purgeable media objects: %w", err)
 	}
 	for _, o := range objs {
-		variantKeys, err := mediavariant.ObjectKeysForMediaObject(s.db, o.ID())
+		variantKeys, err := mediavariant.ObjectKeysForMediaObject(db, o.ID())
 		if err != nil {
 			s.log.WithError(err).WithField("media_id", o.ID()).
 				Warn("list variant object keys during purge failed")
@@ -212,7 +224,7 @@ func (s *Sweeper) purgeExpired(ctx context.Context, sum *summary) error {
 		// FR-PURGE-9 both require the sweep to log one object's failure and
 		// CONTINUE, and a tick-wide transaction would roll the successful
 		// objects back with the failed one. Everything inside uses tx.
-		if terr := s.db.Transaction(func(tx *gorm.DB) error {
+		if terr := db.Transaction(func(tx *gorm.DB) error {
 			if err := mediavariant.DeleteForMediaObject(tx, o.ID()); err != nil {
 				return err
 			}
