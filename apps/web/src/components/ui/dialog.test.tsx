@@ -1,7 +1,8 @@
 import * as React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { clickOutside } from '../../test/outsideClick';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './dialog';
 
 /**
@@ -127,12 +128,12 @@ describe('Dialog — dismissal', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('closes on a pointer-down outside the content', async () => {
+  it('closes on a click outside the content', async () => {
     // This is the path a real overlay click takes through DismissableLayer.
     // userEvent cannot drive the overlay itself under jsdom.
     render(<Harness />);
     await open();
-    fireEvent.pointerDown(document.body);
+    clickOutside();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -154,10 +155,10 @@ describe('Dialog — dismissible={false}', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('ignores a pointer-down outside the content', async () => {
+  it('ignores a click outside the content', async () => {
     render(<Harness dismissible={false} />);
     await open();
-    fireEvent.pointerDown(document.body);
+    clickOutside();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 

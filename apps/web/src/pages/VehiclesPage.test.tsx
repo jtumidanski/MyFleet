@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/renderWithProviders';
 import { expectNoCall } from '../test/expectNoCall';
+import { clickOutside } from '../test/outsideClick';
 import { vehicleService } from '../services/api/VehicleService';
 import { toast } from 'sonner';
 import type { AuthContextValue } from '../context/AuthContext';
@@ -225,12 +226,12 @@ describe('VehiclesPage — dismissing', () => {
     await expectNoCall(vi.mocked(vehicleService.createInFleet), 'vehicleService.createInFleet');
   });
 
-  it('closes on an outside pointer-down without creating a vehicle', async () => {
+  it('closes on an outside click without creating a vehicle', async () => {
     // The path a real overlay click takes; userEvent cannot drive the overlay.
     renderWithProviders(<VehiclesPage />);
     await userEvent.click(headerTrigger());
 
-    fireEvent.pointerDown(document.body);
+    clickOutside();
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     await expectNoCall(vi.mocked(vehicleService.createInFleet), 'vehicleService.createInFleet');
@@ -280,9 +281,9 @@ describe('VehiclesPage — locked while the create request is in flight', () => 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
-  it('ignores an outside pointer-down', async () => {
+  it('ignores an outside click', async () => {
     await submitAndHang();
-    fireEvent.pointerDown(document.body);
+    clickOutside();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
