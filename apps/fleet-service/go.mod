@@ -6,7 +6,7 @@ require (
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/jtumidanski/myfleet/packages/dto-go v0.0.0-20260729130335-a5bfa151d5e4
+	github.com/jtumidanski/myfleet/packages/dto-go v0.0.0-20260804184258-f77b697a2f09
 	github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55
 	github.com/sirupsen/logrus v1.9.4
 	gorm.io/driver/sqlite v1.6.0
