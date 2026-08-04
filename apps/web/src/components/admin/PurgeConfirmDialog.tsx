@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '../ui/button';
 import {
   Dialog,
@@ -100,9 +100,16 @@ export function PurgeConfirmDialog({
   // Clear the box whenever the dialog opens. Leaving a previously-correct
   // phrase in place would mean the second purge of a session starts with the
   // confirm button already live.
-  useEffect(() => {
+  //
+  // Adjusted during render off a remembered `open` rather than from an effect
+  // (react-hooks/set-state-in-effect): React re-runs this component before
+  // committing, so the empty box is what the user's first frame shows — an
+  // effect would paint the stale phrase, and its live confirm button, once.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (wasOpen !== open) {
+    setWasOpen(open);
     if (open) setTyped('');
-  }, [open]);
+  }
 
   // Exact comparison, deliberately. Trimming or case folding here would make the
   // phrase a formality and put the client out of step with the server, which

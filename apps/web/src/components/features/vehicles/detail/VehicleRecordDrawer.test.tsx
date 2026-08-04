@@ -170,6 +170,32 @@ describe('VehicleRecordDrawer', () => {
     expect(attributes).toHaveProperty('categoryId', 'c1');
   });
 
+  // Selecting a different row while mid-edit must land on the new row's view
+  // pane. The reset runs during render off a remembered row id rather than from
+  // an effect, so the new row's FIRST frame is already the view pane — an
+  // effect would paint the previous row's edit form for one frame, with its
+  // save button live over a record the user did not choose.
+  it('returns to view mode when a different row is selected mid-edit', async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const drawer = (row: VehicleRecordRow) => (
+      <QueryClientProvider client={client}>
+        <VehicleRecordDrawer row={row} onClose={vi.fn()} vehicleId="v1" canWrite />
+      </QueryClientProvider>
+    );
+
+    const { rerender } = render(drawer(maintenanceRow));
+    await user.click(await screen.findByRole('button', { name: /^edit$/i }));
+    expect(
+      await screen.findByRole('button', { name: /log record|log modification/i }),
+    ).toBeInTheDocument();
+
+    rerender(drawer(fuelRow));
+
+    expect(screen.queryByRole('button', { name: /log record|log modification/i })).toBeNull();
+    expect(await screen.findByRole('button', { name: /^edit$/i })).toBeInTheDocument();
+  });
+
   it('renders nothing open when row is null', () => {
     renderDrawer(null, true);
     expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();

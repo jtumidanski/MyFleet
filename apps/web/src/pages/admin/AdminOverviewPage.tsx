@@ -18,6 +18,18 @@ const SYSTEM_CONFIRMATION = 'PURGE EVERYTHING';
 const RECOVERY_WINDOW_DAYS = 5;
 
 /**
+ * Stamps the deadline the dialog displays.
+ *
+ * Called from the click handler and parked in state rather than computed in the
+ * render body: `Date.now()` during render is impure (react-hooks/purity) and
+ * would re-date the deadline on every incidental re-render. The operator should
+ * see the deadline as of the moment they opened the dialog.
+ */
+function purgeDeadline(): string {
+  return new Date(Date.now() + RECOVERY_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/**
  * Platform overview — solution-wide counts (FR-ADMIN-STATS-1).
  *
  * The one rule that is easy to get wrong: a null count renders as an em dash
@@ -83,6 +95,7 @@ function StatTile({
 export function AdminOverviewPage() {
   const { data, isLoading, isError } = useAdminStats();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [recoveryDeadline, setRecoveryDeadline] = useState('');
   const createPurge = useCreatePurge();
   const queryClient = useQueryClient();
 
@@ -207,7 +220,10 @@ export function AdminOverviewPage() {
           <Button
             type="button"
             variant="destructive"
-            onClick={() => setConfirmOpen(true)}
+            onClick={() => {
+              setRecoveryDeadline(purgeDeadline());
+              setConfirmOpen(true);
+            }}
             disabled={createPurge.isPending}
           >
             Purge everything
@@ -222,9 +238,7 @@ export function AdminOverviewPage() {
         confirmationPhrase={SYSTEM_CONFIRMATION}
         counts={systemCounts(stats)}
         peopleCount={stats.users}
-        recoveryDeadline={new Date(
-          Date.now() + RECOVERY_WINDOW_DAYS * 24 * 60 * 60 * 1000,
-        ).toISOString()}
+        recoveryDeadline={recoveryDeadline}
         isPending={createPurge.isPending}
         // The mutation already surfaces its own failure as a toast; catching here
         // stops the rejection escaping as an unhandled promise.

@@ -44,8 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const me = useMe();
 
-  // Keep `hasToken` in sync if the token query resolves/clears (e.g. refresh
-  // failure clears the token inside the API client).
+  // Whether the identity query has told us the token is dead.
+  //
+  // Derived during render rather than mirrored into state from an effect
+  // (react-hooks/set-state-in-effect): the answer is a pure function of the
+  // query result, and a copy in state would only be a frame behind it. The
+  // effect below is left with the one thing that genuinely is a side effect —
+  // clearing the stored token.
   //
   // Clearing the token IS the logout: `isAuthenticated` goes false and
   // RequireAuth navigates to /login. So a 503 must not reach it. `useMe` is the
@@ -60,12 +65,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // arrives already typed, and createErrorFromUnknown would flatten it to
   // status 0 (it only reads `status` off a raw fetch envelope), silently
   // restoring the bug.
+  const tokenRejected = me.isError && !(me.error instanceof ApiError && me.error.status === 503);
+
   useEffect(() => {
-    if (!me.isError) return;
-    if (me.error instanceof ApiError && me.error.status === 503) return;
-    clearAccessToken();
-    setHasToken(false);
-  }, [me.isError, me.error]);
+    if (tokenRejected) clearAccessToken();
+  }, [tokenRejected]);
+
+  // The session is live only while we hold a token AND nothing has rejected it.
+  const sessionLive = hasToken && !tokenRejected;
 
   const login = useCallback((returnTo?: string) => {
     // Full navigation to auth-service so the OAuth redirect chain works.
@@ -101,12 +108,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       activeFleetId: data?.activeFleetId ?? null,
       role: data?.role ?? null,
       platformAdmin: data?.platformAdmin ?? false,
-      isAuthenticated: hasToken && !!data?.user,
-      isLoading: hasToken && me.isLoading,
+      isAuthenticated: sessionLive && !!data?.user,
+      isLoading: sessionLive && me.isLoading,
       login,
       logout,
     };
-  }, [me.data, me.isLoading, hasToken, login, logout]);
+  }, [me.data, me.isLoading, sessionLive, login, logout]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

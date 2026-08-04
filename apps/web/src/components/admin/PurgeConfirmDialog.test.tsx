@@ -73,6 +73,23 @@ describe('PurgeConfirmDialog', () => {
     render(<PurgeConfirmDialog {...props({ scope: 'fleet' })} />);
     expect(screen.queryByText(/what survives/i)).not.toBeInTheDocument();
   });
+
+  // The second purge of a session must not start with the confirm button
+  // already live. The reset is done during render off a remembered `open`
+  // rather than from an effect, so the reopened dialog's FIRST frame is the
+  // empty box — this asserts on the frame the operator actually sees.
+  it('clears a previously matching phrase when reopened', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<PurgeConfirmDialog {...props()} />);
+    await user.type(screen.getByLabelText(/type the fleet name/i), 'The Tumidanski Fleet');
+    expect(screen.getByRole('button', { name: /purge this fleet/i })).toBeEnabled();
+
+    rerender(<PurgeConfirmDialog {...props({ open: false })} />);
+    rerender(<PurgeConfirmDialog {...props({ open: true })} />);
+
+    expect(screen.getByLabelText(/type the fleet name/i)).toHaveValue('');
+    expect(screen.getByRole('button', { name: /purge this fleet/i })).toBeDisabled();
+  });
 });
 
 describe('PurgeConfirmDialog transmission', () => {

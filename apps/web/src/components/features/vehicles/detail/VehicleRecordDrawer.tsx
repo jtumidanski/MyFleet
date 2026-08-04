@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { formatMileage, formatMoney } from '@myfleet/ui-components';
@@ -69,9 +69,16 @@ export function VehicleRecordDrawer({
 
   // A newly selected row always starts in view mode, even if the previous
   // row was left mid-edit.
-  useEffect(() => {
+  //
+  // Adjusted during render off a remembered row id rather than from an effect
+  // (react-hooks/set-state-in-effect): React re-runs this component before
+  // committing, so the drawer's first frame for the new row is already the view
+  // pane. From an effect it would paint the previous row's edit form once.
+  const [lastRowId, setLastRowId] = useState(row?.id);
+  if (lastRowId !== row?.id) {
+    setLastRowId(row?.id);
     setMode('view');
-  }, [row?.id]);
+  }
 
   const isMaintenanceKind = row?.kind === 'maintenance' || row?.kind === 'modification';
   const isFuelKind = row?.kind === 'fuel';

@@ -162,6 +162,16 @@ export function useMediaContentUrl(
 
   const [entry, setEntry] = useState<{ blob: Blob; url: string } | null>(null);
 
+  // react-hooks/set-state-in-effect is disabled deliberately, not worked
+  // around. The effect owns a browser resource whose lifetime must be bracketed
+  // by create/revoke, and the created URL has to reach render somehow. The two
+  // alternatives are both worse: creating the URL in the render body (or a
+  // useMemo) is an impure call React may re-run or discard, which leaks
+  // revoke-less URLs and trades this rule for react-hooks/purity; and a ref
+  // would not re-render when the URL appears. The one-frame lag this costs is
+  // the tradeoff documented above, and it is what holds MediaThumbnail's
+  // skeleton instead of flashing "No image".
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!data) {
       setEntry(null);
@@ -171,6 +181,7 @@ export function useMediaContentUrl(
     setEntry({ blob: data, url: objectUrl });
     return () => URL.revokeObjectURL(objectUrl);
   }, [data]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // `entry` is one render behind `data` right after a change (state set in
   // the effect hasn't committed yet); only trust it once it matches the blob
