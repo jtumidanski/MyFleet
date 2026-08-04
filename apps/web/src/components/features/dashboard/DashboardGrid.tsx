@@ -63,7 +63,7 @@ export function DashboardGrid({
           <div key={widget.id} className="relative group">
             <WidgetComponent fleetId={fleetId} />
             {isOwner && (
-              <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1 bg-background rounded border shadow-sm p-0.5">
+              <div className="absolute top-2 right-2 hidden group-hover:flex items-center gap-1 bg-background rounded-sm border shadow-xs p-0.5">
                 <Button
                   variant="ghost"
                   size="icon"

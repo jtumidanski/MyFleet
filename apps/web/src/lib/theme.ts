@@ -61,8 +61,8 @@ export function resolveTheme(preference: ThemePreference, prefersDark: boolean):
 }
 
 /**
- * FR-THEME-4: the `dark` class on <html>, and nothing else — tailwind.config.ts
- * is already set to `darkMode: ['class']`. The class name is a literal; the
+ * FR-THEME-4: the `dark` class on <html>, and nothing else — index.css already
+ * declares `@custom-variant dark (&:is(.dark *))`. The class name is a literal; the
  * stored preference is never concatenated into it (FR-SEC-4).
  */
 export function applyThemeClass(resolved: ResolvedTheme): void {

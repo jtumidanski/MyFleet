@@ -169,7 +169,7 @@ export function VehicleRecordsTable({
                     key={row.id}
                     role="button"
                     tabIndex={0}
-                    className="cursor-pointer border-b last:border-b-0 hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="cursor-pointer border-b last:border-b-0 hover:bg-accent/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={() => onSelectRow(row)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === ' ') {

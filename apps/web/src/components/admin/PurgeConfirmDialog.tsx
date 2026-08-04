@@ -184,7 +184,7 @@ export function PurgeConfirmDialog({
           </div>
 
           {scope === 'system' ? (
-            <div className="rounded border border-border p-3">
+            <div className="rounded-sm border border-border p-3">
               <p className="font-medium">What survives</p>
               <ul className="mt-1 list-inside list-disc text-muted-foreground">
                 <li>User accounts</li>

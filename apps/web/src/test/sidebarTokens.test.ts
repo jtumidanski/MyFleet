@@ -6,7 +6,6 @@ import { describe, it, expect } from 'vitest';
 // src/test -> apps/web
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const CSS = readFileSync(resolve(WEB_ROOT, 'src/index.css'), 'utf8');
-const TAILWIND = readFileSync(resolve(WEB_ROOT, 'tailwind.config.ts'), 'utf8');
 
 /**
  * The eight properties the shadcn sidebar primitive consumes (FR-TOKEN-1), and
@@ -74,17 +73,37 @@ describe('--sidebar-* tokens', () => {
   }
 });
 
-describe('tailwind.config.ts', () => {
+/**
+ * Tailwind v4 is configured from CSS: the palette lives in index.css's
+ * `@theme inline` block, not a tailwind.config.ts. Scoped to that block rather
+ * than the whole file — the `:root` and `.dark` blocks above also mention every
+ * --sidebar-* token, so a whole-file search would pass even with the family
+ * unregistered with Tailwind, which is the exact failure this guards.
+ */
+const THEME = (() => {
+  const start = CSS.indexOf('@theme inline {');
+  if (start === -1) throw new Error('index.css has no @theme inline block');
+  const end = CSS.indexOf('}', start);
+  if (end === -1) throw new Error('index.css @theme inline block is unterminated');
+  return CSS.slice(start, end);
+})();
+
+describe('index.css @theme', () => {
   // Without registration the vendored component's bg-sidebar / border-sidebar-border
   // classes resolve to nothing and the sidebar renders transparent.
   it('registers every --sidebar-* token', () => {
-    const missing = SIDEBAR_TOKENS.filter((token) => !TAILWIND.includes(`hsl(var(${token}))`));
+    const missing = SIDEBAR_TOKENS.filter(
+      // '--sidebar-border' -> '--color-sidebar-border: hsl(var(--sidebar-border));'
+      (token) => !THEME.includes(`--color-${token.slice(2)}: hsl(var(${token}));`),
+    );
     expect(missing).toEqual([]);
   });
 
-  // The shadcn source references `bg-sidebar`, not `bg-sidebar-background`,
-  // which only resolves via a DEFAULT key on the nested colour family.
-  it('exposes the bare `sidebar` colour via a DEFAULT key', () => {
-    expect(TAILWIND).toContain("DEFAULT: 'hsl(var(--sidebar))'");
+  // The shadcn source references `bg-sidebar`, not `bg-sidebar-background`. In
+  // v4 the bare name is just its own --color-* entry (v3 needed a DEFAULT key on
+  // a nested colour family); it is listed in MIRRORS, so the assertion above
+  // already covers it — this pins the class name the primitive actually uses.
+  it('exposes the bare `sidebar` colour', () => {
+    expect(THEME).toContain('--color-sidebar: hsl(var(--sidebar));');
   });
 });
