@@ -58,7 +58,7 @@ jobs:
       # one. Shares a prefix with pr.yml's backend job on purpose: they do the
       # same work, so a PR run should restore what main last built.
       - name: Cache Go build and module caches
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/go-build

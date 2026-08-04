@@ -18,7 +18,7 @@ jobs:
       # Same key prefix as main.yml's backend job, deliberately: a PR run should
       # restore the cache main last built for identical work.
       - name: Cache Go build and module caches
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/go-build
@@ -55,7 +55,7 @@ jobs:
       # jobs means whichever finishes first decides whether the cache holds
       # -race objects or lint objects.
       - name: Cache Go build and module caches
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/go-build
@@ -65,7 +65,7 @@ jobs:
             go-lint-${{ runner.os }}-
 
       - name: Cache lint tooling
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/golangci-lint
