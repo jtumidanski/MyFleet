@@ -14,14 +14,11 @@ export const maintenanceRecordSchema = z.object({
   // user logging an oil change with no cost cannot submit: zodResolver reports
   // "Cost must be a number" on an untouched field (design D22).
   mileage: z
-    .number({ invalid_type_error: 'Mileage must be a number' })
+    .number({ error: 'Mileage must be a number' })
     .int('Mileage must be a whole number')
     .min(0, 'Mileage cannot be negative')
     .optional(),
-  cost: z
-    .number({ invalid_type_error: 'Cost must be a number' })
-    .min(0, 'Cost cannot be negative')
-    .optional(),
+  cost: z.number({ error: 'Cost must be a number' }).min(0, 'Cost cannot be negative').optional(),
   vendor: z.string().trim().max(200).optional().or(z.literal('')),
   notes: z.string().trim().max(2000).optional().or(z.literal('')),
   // Kept on the schema for shape compatibility, but populated from

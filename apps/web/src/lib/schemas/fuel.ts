@@ -11,18 +11,18 @@ export const fuelSchema = z
   .object({
     date: z.string().min(1, 'Date is required'),
     mileage: z
-      .number({ invalid_type_error: 'Mileage must be a number' })
+      .number({ error: 'Mileage must be a number' })
       .int('Mileage must be a whole number')
       .min(0, 'Mileage cannot be negative'),
     gallons: z
-      .number({ invalid_type_error: 'Gallons must be a number' })
+      .number({ error: 'Gallons must be a number' })
       .positive('Gallons must be greater than 0'),
     totalCost: z
-      .number({ invalid_type_error: 'Total cost must be a number' })
+      .number({ error: 'Total cost must be a number' })
       .positive('Total cost must be greater than 0')
       .optional(),
     pricePerGallon: z
-      .number({ invalid_type_error: 'Price per gallon must be a number' })
+      .number({ error: 'Price per gallon must be a number' })
       .positive('Price per gallon must be greater than 0')
       .optional(),
   })
