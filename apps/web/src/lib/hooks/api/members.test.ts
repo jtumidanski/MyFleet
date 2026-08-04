@@ -15,6 +15,7 @@
  * removing an invalidation call from the hook source WILL break the test.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -122,8 +123,13 @@ function makeWrapper(queryClient: QueryClient) {
 
 describe('mutation invalidation contracts — real hooks', () => {
   let queryClient: QueryClient;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let invalidateSpy: ReturnType<typeof vi.spyOn<any, any>>;
+  // Typed off the method itself rather than `ReturnType<typeof vi.spyOn<...>>`.
+  // As of Vitest 4, `Mock<any>` widens its parameters to `unknown[]` (so the
+  // concretely-typed spy is not assignable to it), and passing explicit type
+  // arguments to `vi.spyOn` binds to its first overload — the `accessor: 'get'`
+  // one, whose key parameter excludes methods. Naming the method sidesteps both
+  // and keeps `.mock.calls` exact.
+  let invalidateSpy: MockInstance<QueryClient['invalidateQueries']>;
 
   beforeEach(() => {
     vi.clearAllMocks();
