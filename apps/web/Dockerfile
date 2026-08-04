@@ -3,7 +3,7 @@
 # workspace lives there). Only the JS/TS workspace is needed — no go.work.
 
 # --- Stage 1: build the SPA -------------------------------------------------
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 
 # Copy the workspace manifests first so `npm ci` is cached independently of
