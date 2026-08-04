@@ -43,6 +43,18 @@
       "matchUpdateTypes": ["major"],
       "automerge": false,
       "labels": ["dependencies", "major"]
+    },
+    {
+      "description": "Hold TypeScript below v7 until typescript-eslint supports the native port. Minor and patch updates keep flowing; lift this ceiling once typescript-eslint declares v7 compatibility.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "In-repo Go modules resolve through go.work, never the network. Their go.mod pseudo-versions are inert, and because the dependency repo is this repo, every commit to main would otherwise spawn a fresh digest PR that can never satisfy minimumReleaseAge.",
+      "matchManagers": ["gomod"],
+      "matchPackageNames": ["github.com/jtumidanski/myfleet/packages/**"],
+      "enabled": false
     }
   ],
   "postUpdateOptions": [
