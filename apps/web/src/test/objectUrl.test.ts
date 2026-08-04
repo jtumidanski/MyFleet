@@ -11,18 +11,24 @@ import { stubObjectUrl, unstubObjectUrl } from './objectUrl';
 describe('stubObjectUrl', () => {
   it('leaves the real URL class untouched, so the unstub genuinely restores it', () => {
     const realUrl = globalThis.URL;
-    expect('createObjectURL' in realUrl).toBe(false);
+    // Vitest 4's jsdom environment installs its own `URL` carrying static
+    // createObjectURL/revokeObjectURL that delegate to Node's, so the ambient
+    // class now HAS those methods and mere presence proves nothing. What the
+    // helper must guarantee is that they are not *our mocks* — checked by
+    // identity below.
+    const realCreate = realUrl.createObjectURL;
 
     const { createObjectURL } = stubObjectUrl();
     expect(globalThis.URL.createObjectURL).toBe(createObjectURL);
-    // The mutation-in-place bug shows up right here: the real class must not
-    // have grown the method.
-    expect('createObjectURL' in realUrl).toBe(false);
+    // The mutation-in-place bug shows up right here: the real class must still
+    // carry the environment's implementation, not the mock.
+    expect(realUrl.createObjectURL).toBe(realCreate);
+    expect(realUrl.createObjectURL).not.toBe(createObjectURL);
 
     unstubObjectUrl();
 
     expect(globalThis.URL).toBe(realUrl);
-    expect('createObjectURL' in globalThis.URL).toBe(false);
+    expect(globalThis.URL.createObjectURL).toBe(realCreate);
   });
 
   it('still parses URLs normally while stubbed', () => {

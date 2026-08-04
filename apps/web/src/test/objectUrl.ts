@@ -2,10 +2,13 @@ import { vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
 /**
- * jsdom implements neither createObjectURL nor revokeObjectURL, so anything
- * going through useMediaContentUrl needs them stubbed. Returns the mocks so a
- * test can assert on call counts and arguments (the hook's create/revoke pairing
- * is what keeps it from leaking allocations under StrictMode).
+ * Anything going through useMediaContentUrl needs createObjectURL and
+ * revokeObjectURL stubbed. Vitest 4's jsdom environment does supply both (as
+ * statics on its own `URL`, delegating to Node's), but they mint real blob URLs
+ * and record nothing — so tests still need these mocks for the deterministic
+ * `blob:mock-N` values and to assert on call counts and arguments (the hook's
+ * create/revoke pairing is what keeps it from leaking allocations under
+ * StrictMode).
  *
  * The stub is a SUBCLASS of URL rather than `Object.assign(URL, ...)`. Assigning
  * onto the real class mutates it before `vi.stubGlobal` snapshots the original,
@@ -39,9 +42,10 @@ export function stubObjectUrl(): {
  * and Testing Library registers its auto-cleanup when it is imported — i.e.
  * before a test file's own `afterEach` — so the file's hook runs first and
  * `vi.unstubAllGlobals()` would restore the real `URL` while components are
- * still mounted. Their effect cleanups then call `URL.revokeObjectURL`, which
- * jsdom does not implement. That crash was invisible while the old stub mutated
- * the real `URL` in place and the mutation outlived the "restore".
+ * still mounted. Their effect cleanups then call `URL.revokeObjectURL` on the
+ * restored class, so the revokes land on the environment's implementation
+ * instead of the mock and the create/revoke pairing a test just asserted on
+ * silently comes up short.
  */
 export function unstubObjectUrl(): void {
   cleanup();

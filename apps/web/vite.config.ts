@@ -1,5 +1,8 @@
-/// <reference types="vitest/config" />
-import { defineConfig } from 'vite';
+// `defineConfig` comes from vitest/config, not vite: as of Vite 8 the `test`
+// key is no longer part of vite's own `UserConfig`, so importing it from 'vite'
+// fails to typecheck. vitest/config re-exports vite's defineConfig widened with
+// the `test` block.
+import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // Dev proxy: the SPA calls full `/api/<service>/...` paths; in dev we forward
