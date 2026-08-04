@@ -28,7 +28,7 @@ COPY packages/shared-go ./packages/shared-go
 COPY apps/media-service ./apps/media-service
 RUN cd apps/media-service && go build -o /out/media-service ./cmd
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN adduser -D -u 10001 app
 USER app
 COPY --from=build /out/media-service /media-service

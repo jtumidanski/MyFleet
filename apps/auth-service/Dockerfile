@@ -28,7 +28,7 @@ COPY packages/shared-go ./packages/shared-go
 COPY apps/auth-service ./apps/auth-service
 RUN cd apps/auth-service && go build -o /out/auth-service ./cmd
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN adduser -D -u 10001 app
 USER app
 COPY --from=build /out/auth-service /auth-service

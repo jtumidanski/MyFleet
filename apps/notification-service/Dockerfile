@@ -28,7 +28,7 @@ COPY packages/shared-go ./packages/shared-go
 COPY apps/notification-service ./apps/notification-service
 RUN cd apps/notification-service && go build -o /out/notification-service ./cmd
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN adduser -D -u 10001 app
 USER app
 COPY --from=build /out/notification-service /notification-service
