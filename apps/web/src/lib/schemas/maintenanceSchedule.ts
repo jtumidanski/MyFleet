@@ -14,15 +14,15 @@ export const maintenanceScheduleSchema = z
   .object({
     categoryId: z.string().min(1, 'Category is required'),
     recurrenceType: z.enum(recurrenceTypes, {
-      required_error: 'Recurrence type is required',
+      error: 'Recurrence type is required',
     }),
     intervalMonths: z
-      .number({ invalid_type_error: 'Interval months must be a number' })
+      .number({ error: 'Interval months must be a number' })
       .int('Interval months must be a whole number')
       .positive('Interval months must be greater than 0')
       .optional(),
     intervalMiles: z
-      .number({ invalid_type_error: 'Interval miles must be a number' })
+      .number({ error: 'Interval miles must be a number' })
       .int('Interval miles must be a whole number')
       .positive('Interval miles must be greater than 0')
       .optional(),
@@ -56,7 +56,7 @@ export type MaintenanceScheduleFormInput = z.infer<typeof maintenanceScheduleSch
 export const completeScheduleSchema = z.object({
   date: z.string().min(1, 'Date is required'),
   latestMileage: z
-    .number({ invalid_type_error: 'Odometer must be a number' })
+    .number({ error: 'Odometer must be a number' })
     .int('Odometer must be a whole number')
     .min(0, 'Odometer cannot be negative')
     .optional(),
