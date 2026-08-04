@@ -225,6 +225,18 @@ jobs:
   tag:
     needs: [backend, frontend, manifests, publish]
     runs-on: ubuntu-latest
+    # Serialize tagging across overlapping runs. The next version is derived from
+    # the tag list this job's own checkout fetched, so two runs whose checkouts
+    # both predate the other's push compute the *same* version and the loser's
+    # push is rejected as already-existing — near-miss observed on PRs #52/#53,
+    # merged 14s apart. Queueing the whole job (not just the push) is what fixes
+    # it: the waiting run checks out after the leader's tag lands and so computes
+    # the next number up. Never cancel a queued run — the stale-workflow guard
+    # below already makes a superseded one a no-op, and cancelling would drop a
+    # taggable commit instead.
+    concurrency:
+      group: tag
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v7
         with:
@@ -242,6 +254,34 @@ jobs:
 
       - name: Push version tag
         run: |
+          set -euo pipefail
+          # Stale-run guard, workflow-file flavour. GITHUB_TOKEN is a GitHub App
+          # token, and GitHub refuses a ref push from one whose
+          # .github/workflows content differs from the default branch's. There is
+          # nothing to grant in the `permissions:` block above to allow it — the
+          # `workflows` scope exists only for PATs and App installations, never
+          # for GITHUB_TOKEN. So when a commit touching a workflow file lands on
+          # main while this run is still in the gate, tagging this run's (now
+          # older) SHA is rejected outright:
+          #
+          #   ! [remote rejected] v0.0.46 -> v0.0.46 (refusing to allow a GitHub
+          #     App to create or update workflow `.github/workflows/main.yml`
+          #     without `workflows` permission)
+          #
+          # Six runs died this way in the 2026-08-04 renovate batch, all of them
+          # superseded by a merge that bumped an action version. Skip rather than
+          # fail: the newer commit's own run tags an equivalent tree a minute
+          # later. Compare workflow files, not SHAs — main moving forward for any
+          # other reason (a sibling merge, bump-overlay's own push) does not
+          # trigger the rejection, and those runs should still tag as they do
+          # today. Skipping also means only one run can hold a given version, so
+          # two runs cannot race to push the same computed tag.
+          git fetch --quiet origin main
+          if ! git diff --quiet "${{ github.sha }}" origin/main -- .github/workflows; then
+            echo "main's workflow files have moved past this run's ${{ github.sha }} — a workflow-touching commit landed while this run was in the gate. Skipping: this push would be rejected, and that commit's own run will tag instead."
+            exit 0
+          fi
+
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${{ steps.semver.outputs.tag }}"
