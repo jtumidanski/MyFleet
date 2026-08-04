@@ -14,7 +14,7 @@ description: |
   user: "What TODOs are left in the IAM service?"
   assistant: "Let me dispatch todo-scanner to give you a current inventory."
   </example>
-model: inherit
+model: haiku
 ---
 
 You are a codebase analyst performing a comprehensive review of the MyFleet project to identify incomplete work.
