@@ -47,7 +47,7 @@ function InviteLink({ token }: { token: string }) {
 
   return (
     <div className="flex items-center gap-2">
-      <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1 text-xs">{url}</code>
+      <code className="min-w-0 flex-1 truncate rounded-sm bg-muted px-2 py-1 text-xs">{url}</code>
       <Button
         type="button"
         variant="ghost"

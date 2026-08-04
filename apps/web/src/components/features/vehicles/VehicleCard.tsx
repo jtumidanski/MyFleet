@@ -126,7 +126,7 @@ export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
         <Link
           to={`/vehicles/${vehicle.id}`}
           data-card-link
-          className="block truncate font-medium text-foreground after:absolute after:inset-0 after:content-[''] focus-visible:outline-none"
+          className="block truncate font-medium text-foreground after:absolute after:inset-0 after:content-[''] focus-visible:outline-hidden"
         >
           {title}
         </Link>

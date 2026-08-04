@@ -43,7 +43,7 @@ export function MediaThumbnail({ mediaId, isPrimary, className }: MediaThumbnail
   const { data: meta } = useMediaObject(mediaId);
 
   if (isLoading) {
-    return <Skeleton className={cn('h-24 w-24 rounded', className)} />;
+    return <Skeleton className={cn('h-24 w-24 rounded-sm', className)} />;
   }
 
   if (isError) {
@@ -54,7 +54,7 @@ export function MediaThumbnail({ mediaId, isPrimary, className }: MediaThumbnail
         aria-label={label}
         title={label}
         className={cn(
-          'flex h-24 w-24 flex-col items-center justify-center gap-1 rounded border border-destructive/40 bg-destructive/10 px-1 text-center text-[10px] text-destructive',
+          'flex h-24 w-24 flex-col items-center justify-center gap-1 rounded-sm border border-destructive/40 bg-destructive/10 px-1 text-center text-[10px] text-destructive',
           className,
         )}
       >
@@ -68,7 +68,7 @@ export function MediaThumbnail({ mediaId, isPrimary, className }: MediaThumbnail
     return (
       <div
         className={cn(
-          'flex h-24 w-24 items-center justify-center rounded bg-muted text-xs text-muted-foreground',
+          'flex h-24 w-24 items-center justify-center rounded-sm bg-muted text-xs text-muted-foreground',
           className,
         )}
       >
@@ -82,10 +82,10 @@ export function MediaThumbnail({ mediaId, isPrimary, className }: MediaThumbnail
       <img
         src={url}
         alt={meta?.attributes.originalFilename ?? 'Vehicle photo'}
-        className={cn('h-24 w-24 rounded object-cover', className)}
+        className={cn('h-24 w-24 rounded-sm object-cover', className)}
       />
       {isPrimary && (
-        <span className="absolute bottom-1 left-1 rounded bg-primary px-1 py-0.5 text-[10px] font-medium text-primary-foreground">
+        <span className="absolute bottom-1 left-1 rounded-sm bg-primary px-1 py-0.5 text-[10px] font-medium text-primary-foreground">
           Primary
         </span>
       )}

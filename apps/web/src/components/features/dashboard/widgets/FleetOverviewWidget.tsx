@@ -28,19 +28,19 @@ export function FleetOverviewWidget({ fleetId }: FleetOverviewWidgetProps) {
             beneath, so colour is never the only signal (FR-A11Y-2). */}
         {data ? (
           <div className="grid grid-cols-2 gap-2 text-sm">
-            <div className="rounded border p-2 text-center">
+            <div className="rounded-sm border p-2 text-center">
               <div className="text-2xl font-bold text-success">{data.healthy}</div>
               <div className="text-xs text-muted-foreground">Healthy</div>
             </div>
-            <div className="rounded border p-2 text-center">
+            <div className="rounded-sm border p-2 text-center">
               <div className="text-2xl font-bold text-warning">{data.upcomingMaintenance}</div>
               <div className="text-xs text-muted-foreground">Upcoming</div>
             </div>
-            <div className="rounded border p-2 text-center">
+            <div className="rounded-sm border p-2 text-center">
               <div className="text-2xl font-bold text-danger">{data.overdue}</div>
               <div className="text-xs text-muted-foreground">Overdue</div>
             </div>
-            <div className="rounded border p-2 text-center">
+            <div className="rounded-sm border p-2 text-center">
               <div className="text-2xl font-bold text-muted-foreground">{data.inactive}</div>
               <div className="text-xs text-muted-foreground">Inactive</div>
             </div>

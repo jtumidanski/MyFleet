@@ -141,7 +141,7 @@ function FleetList({
               <Link
                 to={`/admin/fleets/${f.id}`}
                 className={cn(
-                  'block rounded px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground',
+                  'block rounded-sm px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground',
                   selectedId === f.id && 'bg-accent text-accent-foreground',
                 )}
               >

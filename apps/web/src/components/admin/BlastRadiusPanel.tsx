@@ -89,7 +89,7 @@ export function BlastRadiusPanel({
         <h2 className="text-lg font-semibold">Delete this fleet</h2>
         <div
           role="alert"
-          className="mt-2 rounded border border-danger-border bg-danger-subtle p-3 text-sm text-danger-subtle-foreground"
+          className="mt-2 rounded-sm border border-danger-border bg-danger-subtle p-3 text-sm text-danger-subtle-foreground"
         >
           We could not work out what deleting this fleet would remove, so the purge control is
           unavailable. Reload to try again.

@@ -100,7 +100,7 @@ export function ActivityFeed({
                   <span className="absolute -left-4 flex items-center justify-center">
                     <ActivityEventIcon type={event.attributes.type} />
                   </span>
-                  <div className="rounded-md border border-border bg-card p-3 shadow-sm">
+                  <div className="rounded-md border border-border bg-card p-3 shadow-xs">
                     <p className="text-sm font-medium text-foreground">
                       {getActivityEventLabel(event.attributes.type)}
                     </p>
