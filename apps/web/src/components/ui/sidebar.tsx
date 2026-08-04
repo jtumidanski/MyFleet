@@ -639,8 +639,20 @@ const SidebarMenuSkeleton = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<'div'> & { showIcon?: boolean }
 >(({ className, showIcon = false, ...props }, ref) => {
-  // Random width between 50 and 90%.
-  const width = React.useMemo(() => `${Math.floor(Math.random() * 40) + 50}%`, []);
+  // Varied width between 50 and 90%, so a column of skeletons reads as text
+  // rather than as identical bars.
+  //
+  // Derived from useId rather than shadcn's Math.random(): calling an impure
+  // function during render (useMemo bodies included) produces a width that can
+  // change on any incidental re-render, which is what react-hooks/purity
+  // objects to. The id is stable per instance and distinct between siblings,
+  // which is exactly the property the randomness was standing in for.
+  const id = React.useId();
+  const width = React.useMemo(() => {
+    let hash = 0;
+    for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+    return `${(hash % 41) + 50}%`;
+  }, [id]);
 
   return (
     <div
