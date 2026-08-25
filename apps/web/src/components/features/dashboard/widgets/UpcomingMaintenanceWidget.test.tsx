@@ -93,7 +93,9 @@ describe('UpcomingMaintenanceWidget', () => {
 
     render(<UpcomingMaintenanceWidget fleetId="f1" />);
 
-    expect(screen.getByText(`Due ${new Date(nextDueDate).toLocaleDateString()}`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`Due ${new Date(nextDueDate).toLocaleDateString()}`),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Was due/)).not.toBeInTheDocument();
   });
 

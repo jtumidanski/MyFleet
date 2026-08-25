@@ -62,8 +62,16 @@ describe('useCategoryNameMap', () => {
   it('maps id to name for every kind, and asks for no kind filter', () => {
     mockUseMaintenanceCategories.mockReturnValue({
       data: [
-        { id: 'c1', type: 'maintenanceCategories', attributes: { name: 'Oil Change', kind: 'maintenance', systemDefined: true } },
-        { id: 'c2', type: 'maintenanceCategories', attributes: { name: 'Cold Air Intake', kind: 'modification', systemDefined: false } },
+        {
+          id: 'c1',
+          type: 'maintenanceCategories',
+          attributes: { name: 'Oil Change', kind: 'maintenance', systemDefined: true },
+        },
+        {
+          id: 'c2',
+          type: 'maintenanceCategories',
+          attributes: { name: 'Cold Air Intake', kind: 'modification', systemDefined: false },
+        },
       ],
       isLoading: false,
     });
@@ -110,8 +118,22 @@ describe('useVehicleTitleMap', () => {
     mockUseVehicles.mockReturnValue({
       data: {
         data: [
-          { id: 'v1', type: 'vehicles', attributes: { fleetId: 'f1', nickname: 'Weekend Truck', make: 'Ford', model: 'F-150', year: 2019 } },
-          { id: 'v2', type: 'vehicles', attributes: { fleetId: 'f1', make: 'Honda', model: 'Civic', year: 2021 } },
+          {
+            id: 'v1',
+            type: 'vehicles',
+            attributes: {
+              fleetId: 'f1',
+              nickname: 'Weekend Truck',
+              make: 'Ford',
+              model: 'F-150',
+              year: 2019,
+            },
+          },
+          {
+            id: 'v2',
+            type: 'vehicles',
+            attributes: { fleetId: 'f1', make: 'Honda', model: 'Civic', year: 2021 },
+          },
         ],
       },
       isLoading: false,

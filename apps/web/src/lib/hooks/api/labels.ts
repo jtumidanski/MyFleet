@@ -61,7 +61,8 @@ export function useVehicleTitleMap(fleetId: string | null | undefined): {
 } {
   const { data, isLoading } = useVehicles(fleetId);
   const titles = useMemo(
-    () => new Map((data?.data ?? []).map((vehicle) => [vehicle.id, vehicleTitle(vehicle.attributes)])),
+    () =>
+      new Map((data?.data ?? []).map((vehicle) => [vehicle.id, vehicleTitle(vehicle.attributes)])),
     [data],
   );
   return { titles, isLoading };
