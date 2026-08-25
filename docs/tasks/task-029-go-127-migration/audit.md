@@ -61,7 +61,7 @@ executed by design (P-4). No blocking issues found.
 | `kustomize build` (local + main) | PASS | Byte-identical to Task 1 pre-change baselines |
 | `kubectl apply --dry-run=server` (main) | PASS | 23 resources, 0 errors, only benign pre-existing annotation warnings |
 | `kubectl apply --dry-run=server` (local) | PASS | 34 resources, 0 errors, only benign pre-existing annotation warnings |
-| `go.work.sum` post-`make ci` dirtying | KNOWN, NOT COMMITTED | golangci-lint v2.13.1 workspace-mode side effect; restored via `git checkout -- go.work.sum`; parked out of scope per P-7 |
+| `go.work.sum` post-`make ci` dirtying | KNOWN, NOT COMMITTED | Any Go workspace command (build/test/vet/lint) side effect, not lint-specific; reproduces on unmodified `main`, so pre-existing and not introduced by this branch; restored via `git checkout -- go.work.sum`; parked out of scope per P-7 (amended) |
 
 Live spot-checks performed independently during this audit (not re-running the full gate):
 - `git status --short` on current HEAD: clean.
