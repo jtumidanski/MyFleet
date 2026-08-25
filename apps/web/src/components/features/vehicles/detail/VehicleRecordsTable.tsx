@@ -82,8 +82,10 @@ function TypeBadge({ kind }: { kind: VehicleRecordKind }) {
  *
  * Both the icon and the visible digit are aria-hidden, with exactly one
  * sr-only string carrying the whole message — otherwise a screen reader
- * announces "3, 3 attachments" (the bare number plus the label). Same pattern
- * as PhotoGalleryDialog.tsx:138-141.
+ * announces "3, 3 attachments" (the bare number plus the label). Uses the
+ * same sr-only + aria-hidden vocabulary as PhotoGalleryDialog.tsx, though
+ * that site takes a different approach (it appends an sr-only suffix to
+ * visible label text rather than hiding the visible text).
  *
  * Spans only: no button, no handler, no tabIndex. Clicks bubble to the
  * enclosing <tr role="button">, so this adds no second affordance and no

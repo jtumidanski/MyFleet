@@ -517,6 +517,11 @@ describe('useVehicleRecords documentCount', () => {
     const { result } = renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
 
     const byId = new Map(result.current.rows.map((r) => [r.id, r]));
+    // Without these presence checks, a Map.get miss (e.g. the id prefix no
+    // longer matching) would return undefined too, satisfying the
+    // toBeUndefined() assertions below for the wrong reason.
+    expect(byId.has('fuel:f1')).toBe(true);
+    expect(byId.has('mileage:mi1')).toBe(true);
     expect(byId.get('fuel:f1')?.documentCount).toBeUndefined();
     expect(byId.get('mileage:mi1')?.documentCount).toBeUndefined();
   });
