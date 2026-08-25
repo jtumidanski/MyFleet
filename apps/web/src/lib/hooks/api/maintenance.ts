@@ -2,6 +2,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { maintenanceRecordService } from '../../../services/api/MaintenanceRecordService';
 import { maintenanceScheduleService } from '../../../services/api/MaintenanceScheduleService';
 import { maintenanceCategoryService } from '../../../services/api/MaintenanceCategoryService';
+import { mediaService } from '../../../services/api/MediaService';
 import { vehicleKeys } from './vehicles';
 import { RECORD_PAGE_SIZE } from './pageSize';
 import type {
@@ -208,6 +209,48 @@ export function useAppendMaintenanceRecordDocument(vehicleId: string) {
     mutationFn: ({ id, mediaId }: { id: string; mediaId: string }) =>
       maintenanceRecordService.appendDocumentMedia(id, mediaId),
     onSettled: (_data, _error, variables) => {
+      // lists() matters as much as detail(): the records table renders its
+      // attachment-count affordance from the list payload's documentMediaIds,
+      // so omitting it leaves that count stale after an edit-time attach.
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(variables.id) });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+    },
+  });
+}
+
+/**
+ * DELETE /api/fleet/maintenance-records/{id}/document-media/{mediaId}, then
+ * DELETE /api/media/{mediaId}.
+ *
+ * Two services own half of this each, and both halves are required:
+ *   1. fleet-service holds the join row the drawer lists.
+ *   2. media-service holds the object the bytes come from.
+ *
+ * Order matters. The reference goes first because it is the one the user can
+ * see; if the object delete then fails, the drawer is still correct and the
+ * orphan is media-service's purge_after sweep to reap. Doing it the other way
+ * round would leave a listed reference pointing at bytes that are already
+ * gone. That is also why the object delete is best-effort: a failure there is
+ * invisible to the user and must not report the removal as failed. This is
+ * useRemoveVehiclePhoto's shape, and the reasoning transfers verbatim.
+ *
+ * The swallowed error is logged rather than discarded — it is not worth a
+ * toast, but it should not be invisible either.
+ */
+export function useRemoveMaintenanceRecordDocument(vehicleId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, mediaId }: { id: string; mediaId: string }) => {
+      await maintenanceRecordService.removeDocumentMedia(id, mediaId);
+      try {
+        await mediaService.remove(mediaId);
+      } catch (err) {
+        console.warn('[attachments] detached reference removed, media delete failed:', err);
+      }
+    },
+    onSettled: (_data, _error, variables) => {
+      void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(variables.id) });
       void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
     },

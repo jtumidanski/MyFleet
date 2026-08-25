@@ -61,6 +61,19 @@ class MaintenanceRecordService extends BaseService<
     });
     return doc.data;
   }
+
+  /**
+   * DELETE /api/fleet/maintenance-records/{id}/document-media/{mediaId}
+   *
+   * Removes the REFERENCE only. The media object itself is deleted separately
+   * by the caller against media-service; fleet-service has no authority to do
+   * it (PRD D3).
+   */
+  async removeDocumentMedia(id: string, mediaId: string): Promise<void> {
+    await apiClient.request<null>(`${this.basePath}/${id}/document-media/${mediaId}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const maintenanceRecordService = new MaintenanceRecordService();
