@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { MockInstance } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
@@ -33,10 +34,8 @@ function makeWrapper() {
 }
 
 /** The keys invalidateQueries was called with, flattened for easy matching. */
-function invalidatedKeys(spy: ReturnType<typeof vi.spyOn>): string[] {
-  return spy.mock.calls.map((call) =>
-    JSON.stringify((call[0] as { queryKey: unknown }).queryKey),
-  );
+function invalidatedKeys(spy: MockInstance<QueryClient['invalidateQueries']>): string[] {
+  return spy.mock.calls.map((call) => JSON.stringify((call[0] as { queryKey: unknown }).queryKey));
 }
 
 describe('useRemoveMaintenanceRecordDocument', () => {
@@ -84,10 +83,8 @@ describe('useRemoveMaintenanceRecordDocument', () => {
 
     const { result } = renderHook(() => useRemoveMaintenanceRecordDocument('veh-1'), { wrapper });
 
-    await expect(
-      result.current.mutateAsync({ id: 'rec-1', mediaId: 'media-1' }),
-    ).rejects.toThrow();
-    await expectNoCall(mediaService.remove);
+    await expect(result.current.mutateAsync({ id: 'rec-1', mediaId: 'media-1' })).rejects.toThrow();
+    await expectNoCall(vi.mocked(mediaService.remove));
   });
 
   it('invalidates the record detail and the record lists', async () => {

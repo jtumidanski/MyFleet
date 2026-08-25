@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { AttachmentPicker } from './AttachmentPicker';
-import { MAX_ATTACHMENTS, type PendingAttachment } from '../../../../lib/hooks/usePendingAttachments';
+import {
+  MAX_ATTACHMENTS,
+  type PendingAttachment,
+} from '../../../../lib/hooks/usePendingAttachments';
 
 function pending(name: string): PendingAttachment {
   return {
@@ -27,7 +30,9 @@ describe('AttachmentPicker', () => {
   it('reports remaining capacity against the existing attachments', () => {
     render(<AttachmentPicker items={[]} onAdd={noop} onRemove={noop} existingCount={3} />);
 
-    expect(screen.getByText(`3 of ${MAX_ATTACHMENTS} attached. You can add 7 more.`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`3 of ${MAX_ATTACHMENTS} attached. You can add 7 more.`),
+    ).toBeInTheDocument();
   });
 
   it('counts pending files against the same capacity', () => {
@@ -40,7 +45,9 @@ describe('AttachmentPicker', () => {
       />,
     );
 
-    expect(screen.getByText(`3 of ${MAX_ATTACHMENTS} attached. You can add 5 more.`)).toBeInTheDocument();
+    expect(
+      screen.getByText(`3 of ${MAX_ATTACHMENTS} attached. You can add 5 more.`),
+    ).toBeInTheDocument();
   });
 
   it('disables adding and says the record is at the limit when existing plus pending fills it', () => {
