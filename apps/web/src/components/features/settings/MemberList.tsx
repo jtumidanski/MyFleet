@@ -24,6 +24,7 @@ import {
   AlertDialogTitle,
 } from '../../ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/select';
+import { RequiredMarker } from '../../ui/required';
 import { useMembers, useRemoveMember, useUpdateMemberRole } from '../../../lib/hooks/api/members';
 import { useUsers } from '../../../lib/hooks/api/users';
 import { useAuth } from '../../../context/AuthContext';
@@ -273,9 +274,10 @@ export function MemberList({ fleetId }: MemberListProps) {
                 <div className="space-y-2">
                   <label className="text-sm font-medium" htmlFor="successor">
                     New owner
+                    <RequiredMarker />
                   </label>
                   <Select value={successorId} onValueChange={setSuccessorId}>
-                    <SelectTrigger id="successor">
+                    <SelectTrigger id="successor" aria-required="true">
                       <SelectValue placeholder="Select a member" />
                     </SelectTrigger>
                     <SelectContent>
