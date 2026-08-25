@@ -111,4 +111,36 @@ describe('MaintenanceRecordForm', () => {
 
     await waitFor(() => expect(submit).toBeDisabled());
   });
+
+  // The category control is a button, not an input — this is the case that
+  // proves aria-required survives the Radix Slot hop onto a custom trigger.
+  it('marks the category combobox required', () => {
+    renderForm(
+      <MaintenanceRecordForm categories={categories} kind="maintenance" onSubmit={vi.fn()} />,
+    );
+
+    expect(screen.getByRole('combobox', { name: /category/i })).toHaveAttribute(
+      'aria-required',
+      'true',
+    );
+  });
+
+  it('leaves the optional fields unmarked', () => {
+    renderForm(
+      <MaintenanceRecordForm categories={categories} kind="maintenance" onSubmit={vi.fn()} />,
+    );
+
+    expect(screen.getByLabelText(/description/i)).not.toHaveAttribute('aria-required');
+    expect(screen.getByRole('spinbutton', { name: 'Cost ($)' })).not.toHaveAttribute(
+      'aria-required',
+    );
+  });
+
+  it('renders the required legend', () => {
+    renderForm(
+      <MaintenanceRecordForm categories={categories} kind="maintenance" onSubmit={vi.fn()} />,
+    );
+
+    expect(screen.getByText('Required')).toBeInTheDocument();
+  });
 });

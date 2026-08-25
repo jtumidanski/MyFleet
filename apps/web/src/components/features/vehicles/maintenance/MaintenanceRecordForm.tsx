@@ -10,6 +10,7 @@ import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Textarea } from '../../../ui/textarea';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
+import { RequiredLegend } from '../../../ui/required';
 import { CategoryCombobox } from '../CategoryCombobox';
 import { AttachmentPicker } from './AttachmentPicker';
 import type {
@@ -89,7 +90,7 @@ export function MaintenanceRecordForm({
           control={form.control}
           name="categoryId"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Category</FormLabel>
               <FormControl>
                 <CategoryCombobox
@@ -109,7 +110,7 @@ export function MaintenanceRecordForm({
           control={form.control}
           name="performedAt"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Date Performed</FormLabel>
               <FormControl>
                 <Input type="datetime-local" {...field} />
@@ -220,6 +221,8 @@ export function MaintenanceRecordForm({
           onAdd={attachments.add}
           onRemove={attachments.remove}
         />
+
+        <RequiredLegend />
 
         <div className="flex justify-end gap-2">
           {onCancel && (
