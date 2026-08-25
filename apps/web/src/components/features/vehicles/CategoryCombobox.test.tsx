@@ -185,4 +185,24 @@ describe('CategoryCombobox', () => {
     const createItem = screen.getByText(/create "Skid Plate"/i).closest('[cmdk-item]');
     expect(createItem).toHaveAttribute('aria-disabled', 'true');
   });
+
+  // FormControl injects a11y props through Radix Slot; this component
+  // destructures its props rather than spreading them, so each one has to be
+  // forwarded to the trigger by hand.
+  it('forwards aria-required to the trigger button', () => {
+    renderCombobox({ 'aria-required': true });
+
+    expect(screen.getByRole('combobox', { name: 'Category' })).toHaveAttribute(
+      'aria-required',
+      'true',
+    );
+  });
+
+  it('leaves the trigger without aria-required when the prop is absent', () => {
+    renderCombobox();
+
+    expect(screen.getByRole('combobox', { name: 'Category' })).not.toHaveAttribute(
+      'aria-required',
+    );
+  });
 });

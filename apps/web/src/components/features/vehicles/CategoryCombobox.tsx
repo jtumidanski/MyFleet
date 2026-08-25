@@ -32,13 +32,14 @@ interface CategoryComboboxProps {
   /**
    * Injected by FormControl (via Radix Slot) when this is used as a form
    * field: the id FormLabel's htmlFor points at, the ids of the description
-   * and message nodes, and the error flag. They land on the trigger button —
-   * the element that actually takes focus — rather than on the Popover root,
-   * which renders no DOM node of its own.
+   * and message nodes, the error flag, and the required flag. They land on the
+   * trigger button — the element that actually takes focus — rather than on
+   * the Popover root, which renders no DOM node of its own.
    */
   id?: string;
   'aria-describedby'?: string;
   'aria-invalid'?: boolean;
+  'aria-required'?: boolean;
 }
 
 /**
@@ -63,6 +64,7 @@ export const CategoryCombobox = forwardRef<HTMLButtonElement, CategoryComboboxPr
       id,
       'aria-describedby': ariaDescribedBy,
       'aria-invalid': ariaInvalid,
+      'aria-required': ariaRequired,
     },
     ref,
   ) {
@@ -147,6 +149,7 @@ export const CategoryCombobox = forwardRef<HTMLButtonElement, CategoryComboboxPr
             aria-label={ariaLabel}
             aria-describedby={ariaDescribedBy}
             aria-invalid={ariaInvalid}
+            aria-required={ariaRequired}
             disabled={disabled}
             className="w-full justify-between font-normal"
           >
