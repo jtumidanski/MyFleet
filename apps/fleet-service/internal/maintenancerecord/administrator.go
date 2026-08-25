@@ -133,6 +133,14 @@ func (a *dbAdministrator) SoftDelete(id string) error {
 // sqlite serializes writers at the database level, so the correctness the lock
 // buys exists for free. Branching on the dialect for a gap like this is the
 // same thing mediavariant.ApplyPartialIndexes already does.
+//
+// The post-lock Count is also only correct because Postgres defaults to READ
+// COMMITTED: a fresh statement inside an already-open transaction takes a new
+// snapshot and so observes the other transaction's commit once it releases the
+// lock. Under REPEATABLE READ the Count would instead read the snapshot taken
+// at this transaction's start, miss that commit, and reopen the eleven-
+// attachment gap this lock exists to close. Latent, not live, as long as
+// nothing changes the connection's isolation level.
 func (a *dbAdministrator) AttachDocument(recordID, mediaID string) (Model, error) {
 	var out Model
 	err := a.db.Transaction(func(tx *gorm.DB) error {
@@ -199,22 +207,46 @@ func (a *dbAdministrator) AttachDocument(recordID, mediaID string) (Model, error
 // admin/visibility_document_test already asserts that a stamped row is
 // invisible on both the detail and the list path.
 //
-// No transaction: it is one statement on one row. RowsAffected == 0 covers
-// "never attached" and "already detached" with the same answer, which is also
-// what keeps the response from confirming that a media id exists elsewhere.
+// Wrapped in a transaction that takes the same dialect-guarded FOR UPDATE
+// lock on the parent record as AttachDocument, and for the same reason:
+// without it, a concurrent attach and detach of the same media id can
+// interleave so that the attach's idempotency count sees the row live, skips
+// the insert, re-reads before the detach commits, and returns 201 with the id
+// present while the committed state already has it detached — a response
+// disagreeing with the stored row, the exact failure Update was rewritten to
+// eliminate. Locking the record serializes the two against each other.
 //
-// It deliberately does not verify the record exists — the resource layer's
-// GetByID already did, and repeating it here would be a second round-trip for
-// an invariant the handler holds.
+// RowsAffected == 0 still covers "never attached" and "already detached" with
+// the same answer, which is also what keeps the response from confirming that
+// a media id exists elsewhere.
+//
+// Locking the parent means this now reads it, unlike before, so a detach
+// against a missing or soft-deleted parent must be translated to ErrNotFound
+// explicitly (previously that check lived only in the resource layer's
+// GetByID) — observable behavior is unchanged, but it is no longer free.
 func (a *dbAdministrator) DetachDocument(recordID, mediaID string) error {
-	res := a.db.Model(&DocumentEntity{}).
-		Where("maintenance_record_id = ? AND media_id = ? AND deleted_at IS NULL", recordID, mediaID).
-		Update("deleted_at", time.Now().UTC())
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		q := tx.Where("id = ? AND deleted_at IS NULL", recordID)
+		if tx.Name() != "sqlite" {
+			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var locked Entity
+		if err := q.First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+
+		res := tx.Model(&DocumentEntity{}).
+			Where("maintenance_record_id = ? AND media_id = ? AND deleted_at IS NULL", recordID, mediaID).
+			Update("deleted_at", time.Now().UTC())
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
