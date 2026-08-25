@@ -236,6 +236,7 @@ export function VehicleDetailPage() {
         open={openDialog === 'schedule'}
         onOpenChange={(open) => !open && closeDialog()}
         vehicleId={vehicle.id}
+        currentMileage={odometer}
       />
       {completingSchedule && (
         <CompleteScheduleDialog
