@@ -67,12 +67,20 @@ func (pr *Processor) Create(m Model) (Model, error) {
 }
 
 // Update applies a partial update to an existing schedule, recomputing next-due.
+//
+// The RESULTING model is validated before anything is recomputed or written
+// (FR-UPD-2). Validation precedes the recompute so an invalid intermediate
+// never reaches NextDue, and precedes the write so a rejected PATCH leaves the
+// stored row exactly as it was.
 func (pr *Processor) Update(id string, apply func(Model) Model) (Model, error) {
 	m, err := pr.GetByID(id)
 	if err != nil {
 		return Model{}, err
 	}
 	updated := apply(m)
+	if err := validate(updated); err != nil {
+		return Model{}, err
+	}
 	// Recompute next-due + status from the (possibly changed) recurrence params.
 	nd, nm := NextDue(updated.AsSchedule())
 	updated = updated.WithNextDue(nd, nm)
