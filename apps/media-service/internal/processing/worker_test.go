@@ -36,7 +36,8 @@ func (f *fakeObjectStore) PutObject(_ context.Context, _ string, _ io.Reader, _ 
 // fakeProvider implements mediaobject.Provider; returns the configured model.
 type fakeProvider struct{ m mediaobject.Model }
 
-func (f *fakeProvider) GetByID(_ string) (mediaobject.Model, error)                 { return f.m, nil }
+func (f *fakeProvider) GetByID(_ string) (mediaobject.Model, error) { return f.m, nil }
+
 func (f *fakeProvider) GetByIDIncludingDeleted(_ string) (mediaobject.Model, error) { return f.m, nil }
 
 func (f *fakeProvider) ListActiveByFleetAndIDs(_ string, _ []string) ([]mediaobject.Model, error) {

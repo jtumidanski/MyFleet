@@ -2,4 +2,4 @@
 # both local runs and CI. gofumpt/goimports versions are embedded in the
 # golangci-lint release; Prettier is pinned exactly in the root package.json
 # (package.json + lockfile own Node tooling).
-GOLANGCI_LINT_VERSION=v2.12.2
+GOLANGCI_LINT_VERSION=v2.13.1

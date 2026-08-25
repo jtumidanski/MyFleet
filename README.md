@@ -84,7 +84,7 @@ reverse proxy. Traefik routes by path prefix; the SPA is the catch-all at `/`.
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.27+
 - Node 22 (`nvm use 22`)
 - Docker + Docker Compose
 

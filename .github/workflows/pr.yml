@@ -12,7 +12,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27'
           cache: false          # see main.yml's backend job for why
 
       # Same key prefix as main.yml's backend job, deliberately: a PR run should
@@ -47,7 +47,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27'
           cache: false          # see main.yml's backend job for why
 
       # golangci-lint type-checks every package, so it wants a Go build cache

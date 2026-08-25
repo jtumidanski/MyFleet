@@ -41,7 +41,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26'
+          go-version: '1.27'
           # Cache handled explicitly below. setup-go's built-in cache derives
           # its key from OS/arch/go-version/file-hash only, with no way to
           # namespace it and no restore-keys fallback — so every Go job in the

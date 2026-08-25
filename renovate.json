@@ -11,7 +11,19 @@
     "gomod",
     "npm",
     "dockerfile",
-    "github-actions"
+    "github-actions",
+    "custom.regex"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "actions/setup-go's go-version input is a plain YAML value the github-actions manager does not extract.",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": ["go-version:\\s*['\"](?<currentValue>[0-9.]+)['\"]"],
+      "datasourceTemplate": "golang-version",
+      "depNameTemplate": "go",
+      "versioningTemplate": "docker"
+    }
   ],
   "packageRules": [
     {
@@ -55,6 +67,12 @@
       "matchManagers": ["gomod"],
       "matchPackageNames": ["github.com/jtumidanski/myfleet/packages/**"],
       "enabled": false
+    },
+    {
+      "description": "Go toolchain surfaces — builder image, CI input, and the go.mod directive — move as one PR so they cannot drift apart the way 1.25/1.26 did.",
+      "matchDatasources": ["golang-version", "docker"],
+      "matchPackageNames": ["go", "golang"],
+      "groupName": "Go toolchain"
     }
   ],
   "postUpdateOptions": [
