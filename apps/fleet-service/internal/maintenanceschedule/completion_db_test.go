@@ -47,7 +47,8 @@ func newCompletionDB(t *testing.T) *gorm.DB {
 			deleted_at DATETIME, purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.maintenance_schedules (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, category_id TEXT, recurrence_type TEXT,
-			interval_months INTEGER, interval_miles INTEGER, last_completed_date DATETIME,
+			interval_months INTEGER, interval_miles INTEGER, one_time BOOLEAN DEFAULT 0,
+			due_date DATETIME, due_mileage INTEGER DEFAULT 0, last_completed_date DATETIME,
 			last_completed_mileage INTEGER, next_due_date DATETIME, next_due_mileage INTEGER,
 			status TEXT, severity TEXT, active INTEGER, created_at DATETIME, updated_at DATETIME,
 			deleted_at DATETIME, purge_operation_id TEXT)`,

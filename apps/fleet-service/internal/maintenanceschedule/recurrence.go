@@ -7,6 +7,9 @@ type Schedule struct {
 	RecurrenceType       string // time | mileage | hybrid
 	IntervalMonths       int
 	IntervalMiles        int
+	OneTime              bool
+	DueDate              time.Time
+	DueMileage           int
 	LastCompletedDate    time.Time
 	LastCompletedMileage int
 }
