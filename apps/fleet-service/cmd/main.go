@@ -68,6 +68,13 @@ func main() {
 		log.WithError(err).Fatal("seed maintenance categories")
 	}
 
+	// Assign a first-due anchor to maintenance schedules created before
+	// task-030 (idempotent; FR-ANCHOR-2). Without it those rows read as
+	// permanently overdue and reject every PATCH.
+	if err := maintenanceschedule.Backfill(db); err != nil {
+		log.WithError(err).Fatal("backfill maintenance schedule due points")
+	}
+
 	// Fleet-service validates auth-service JWT tokens via JWKS.
 	// Retry up to 10 times (3 s between attempts) so fleet-service waits for
 	// auth-service to be ready instead of fataling immediately.
