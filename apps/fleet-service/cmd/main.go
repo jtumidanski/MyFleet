@@ -71,7 +71,14 @@ func main() {
 	// Assign a first-due anchor to maintenance schedules created before
 	// task-030 (idempotent; FR-ANCHOR-2). Without it those rows read as
 	// permanently overdue and reject every PATCH.
-	if err := maintenanceschedule.Backfill(db); err != nil {
+	//
+	// Under the advisory lock, like every other sweep here: replicas boot
+	// together, and a replica that does not win the lock skips a scan the
+	// leader is already performing. Losing the lock is not an error, so the
+	// ignored `ran` flag is deliberate.
+	if _, err := database.WithLeaderLock(db, "maintenance-schedule-backfill", func() error {
+		return maintenanceschedule.Backfill(db)
+	}); err != nil {
 		log.WithError(err).Fatal("backfill maintenance schedule due points")
 	}
 

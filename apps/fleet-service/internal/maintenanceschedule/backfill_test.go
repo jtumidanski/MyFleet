@@ -188,3 +188,54 @@ func TestBackfill_noMatchingRows(t *testing.T) {
 		t.Fatalf("Backfill on an empty table: %v", err)
 	}
 }
+
+// The scan and the per-row write are two statements, so a completion can land
+// between them. NextDue prefers a stored anchor over the completion point per
+// axis, so writing the anchor anyway would freeze the row's next-due until the
+// NEXT completion. The write re-asserts the scan's predicate to prevent that.
+//
+// The interleaving is staged rather than raced: the test holds the scanned row
+// (exactly what backfill's loop holds), applies the completion, and only then
+// calls the per-row write. sqlite in-memory cannot schedule two writers, and the
+// point under test — the UPDATE's WHERE clause — is deterministic either way.
+func TestBackfill_skipsARowCompletedBetweenScanAndUpdate(t *testing.T) {
+	db := newCompletionDB(t)
+	vehicleID := seedVehicle(t, db, 40000)
+	createdAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	completedAt := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	insertRaw(t, db, map[string]any{
+		"id": "s-raced", "vehicle_id": vehicleID, "category_id": "c1",
+		"recurrence_type": "hybrid", "interval_months": 6, "interval_miles": 5000,
+		"one_time": false, "due_mileage": 0, "last_completed_mileage": 0,
+		"active": true, "status": "overdue", "severity": "urgent", "created_at": createdAt,
+	})
+
+	// The row as the scan would have handed it to the loop.
+	scanned := backfillRow{
+		ID: "s-raced", RecurrenceType: "hybrid", IntervalMonths: 6, IntervalMiles: 5000,
+		CreatedAt: createdAt, CurrentMileage: 40000,
+	}
+
+	// ...and the completion that lands before the loop reaches this row.
+	if err := db.Table("fleet.maintenance_schedules").Where("id = ?", "s-raced").
+		Updates(map[string]any{
+			"last_completed_date":    completedAt,
+			"last_completed_mileage": 39000,
+		}).Error; err != nil {
+		t.Fatalf("stage the concurrent completion: %v", err)
+	}
+
+	if err := anchorRow(db, scanned, now); err != nil {
+		t.Fatalf("a row that stopped qualifying is a benign skip, not an error: %v", err)
+	}
+
+	got := readSchedule(t, db, "s-raced")
+	if !got.DueDate().IsZero() || got.DueMileage() != 0 {
+		t.Fatalf("a row completed mid-backfill must not be anchored, got %v / %d", got.DueDate(), got.DueMileage())
+	}
+	if !got.LastCompletedDate().Equal(completedAt) || got.LastCompletedMileage() != 39000 {
+		t.Fatalf("the completion must survive, got %v / %d", got.LastCompletedDate(), got.LastCompletedMileage())
+	}
+}
