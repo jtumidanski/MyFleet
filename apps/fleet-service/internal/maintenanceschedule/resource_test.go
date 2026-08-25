@@ -205,3 +205,68 @@ func TestCreate_viewerIsForbidden(t *testing.T) {
 		t.Errorf("a forbidden create wrote %d schedule rows", n)
 	}
 }
+
+// patchSchedule drives a real PATCH /maintenance-schedules/{id}.
+func patchSchedule(r chi.Router, scheduleID string, attrs map[string]any, id auth.Identity) *httptest.ResponseRecorder {
+	body := map[string]any{"data": map[string]any{"attributes": attrs}}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPatch, "/maintenance-schedules/"+scheduleID, bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithIdentity(req.Context(), id))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	return rec
+}
+
+// The PATCH route must recompute status against the owning VEHICLE's odometer,
+// which it already resolves for fleet-scoping, and not against the schedule's
+// last-completed mileage.
+//
+// The vehicle sits at 59800 mi. The PATCH moves the due point to 60000, putting
+// it inside the 500 mi due-soon window, so the response must read "upcoming".
+// Judged by the (absent) completion point instead it would read "ok" — a stored
+// status the very next hourly recompute overturns.
+func TestPatch_recomputesStatusAgainstTheVehicleOdometer(t *testing.T) {
+	r, db := newScheduleRouter(t, "f1", 59800)
+	vehicleID := seedVehicle(t, db, 59800)
+
+	rec := postSchedule(r, vehicleID, map[string]any{
+		"categoryId":     "c1",
+		"recurrenceType": "mileage",
+		"intervalMiles":  5000,
+		"dueMileage":     70000,
+	}, scheduleIdentity("member", "f1"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status = %d, body = %s, want 201", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	rec = patchSchedule(r, created.Data.ID, map[string]any{"dueMileage": 60000}, scheduleIdentity("member", "f1"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch: status = %d, body = %s, want 200", rec.Code, rec.Body.String())
+	}
+	var patched struct {
+		Data struct {
+			Attributes struct {
+				Status   string `json:"status"`
+				Severity string `json:"severity"`
+			} `json:"attributes"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("decode patch response: %v", err)
+	}
+	if patched.Data.Attributes.Status != "upcoming" {
+		t.Fatalf("status = %q want upcoming (the vehicle is 200 mi from the new due point)", patched.Data.Attributes.Status)
+	}
+	if patched.Data.Attributes.Severity != "recommended" {
+		t.Fatalf("severity = %q want recommended", patched.Data.Attributes.Severity)
+	}
+}

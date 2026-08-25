@@ -34,7 +34,7 @@ func TestProcessorUpdate_rejectsZeroIntervalOnHybrid(t *testing.T) {
 	db := newCompletionDB(t)
 	proc, created := seedHybrid(t, db)
 
-	_, err := proc.Update(created.ID(), func(m Model) Model {
+	_, err := proc.Update(created.ID(), 0, func(m Model) Model {
 		return m.WithRecurrence("hybrid", 0, m.IntervalMiles())
 	})
 	if !errors.Is(err, server.ErrValidation) {
@@ -56,7 +56,7 @@ func TestProcessorUpdate_rejectsOneTimeWithIntervals(t *testing.T) {
 	db := newCompletionDB(t)
 	proc, created := seedHybrid(t, db)
 
-	_, err := proc.Update(created.ID(), func(m Model) Model { return m.WithOneTime(true) })
+	_, err := proc.Update(created.ID(), 0, func(m Model) Model { return m.WithOneTime(true) })
 	if !errors.Is(err, server.ErrValidation) {
 		t.Fatalf("want server.ErrValidation, got %v", err)
 	}
@@ -97,7 +97,7 @@ func TestProcessorUpdate_conversionDerivesFromCompletionPoint(t *testing.T) {
 	}
 
 	proc := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db))
-	updated, err := proc.Update(created.ID(), func(m Model) Model {
+	updated, err := proc.Update(created.ID(), 0, func(m Model) Model {
 		return m.WithOneTime(false).WithRecurrence("time", 12, 0).
 			WithDuePoint(time.Time{}, 0).WithActive(true)
 	})
@@ -122,7 +122,7 @@ func TestProcessorUpdate_persistsDuePoint(t *testing.T) {
 	proc, created := seedHybrid(t, db)
 
 	moved := anchor.AddDate(0, 1, 0)
-	updated, err := proc.Update(created.ID(), func(m Model) Model {
+	updated, err := proc.Update(created.ID(), 0, func(m Model) Model {
 		return m.WithDuePoint(moved, 70000)
 	})
 	if err != nil {
@@ -130,5 +130,43 @@ func TestProcessorUpdate_persistsDuePoint(t *testing.T) {
 	}
 	if !updated.DueDate().Equal(moved) || updated.DueMileage() != 70000 {
 		t.Fatalf("due point not persisted: %v / %d", updated.DueDate(), updated.DueMileage())
+	}
+}
+
+// A PATCH recomputes status against the VEHICLE's odometer, the same baseline
+// Builder.SetCurrentMileage uses on create and the recompute job uses on its
+// sweep — not against the schedule's last-completed mileage.
+//
+// The two disagree here on purpose: the vehicle is 200 mi short of a 60000 mi
+// due point, which is inside the 500 mi due-soon window, while the completion
+// point (35000) is nowhere near it. Judged by the completion point the row
+// stores "ok" and the very next hourly recompute contradicts it.
+func TestProcessorUpdate_recomputesStatusAgainstTheVehicleOdometer(t *testing.T) {
+	db := newCompletionDB(t)
+
+	m, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
+		SetRecurrenceType("mileage").SetIntervalMiles(5000).
+		SetLastCompletedDate(anchor.AddDate(-1, 0, 0)).SetLastCompletedMileage(35000).
+		SetCurrentMileage(59800).Build()
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	created, err := NewAdministrator(db).Insert(m)
+	if err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	proc := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db))
+
+	updated, err := proc.Update(created.ID(), 59800, func(m Model) Model {
+		return m.WithDuePoint(time.Time{}, 60000)
+	})
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if updated.Status() != "upcoming" {
+		t.Fatalf("status = %q want upcoming (59800 is inside the 500 mi window of 60000)", updated.Status())
+	}
+	if updated.Severity() != "recommended" {
+		t.Fatalf("severity = %q want recommended", updated.Severity())
 	}
 }

@@ -126,7 +126,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			if err := requireScheduleFleet(identity, vehicleAccessor, m); err != nil {
+			if _, err := requireScheduleFleet(identity, vehicleAccessor, m); err != nil {
 				server.WriteError(w, err)
 				return
 			}
@@ -156,7 +156,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			if err := requireScheduleFleet(identity, vehicleAccessor, current); err != nil {
+			v, err := requireScheduleFleet(identity, vehicleAccessor, current)
+			if err != nil {
 				server.WriteError(w, err)
 				return
 			}
@@ -173,7 +174,10 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				}
 				parsedDueDate = parsed
 			}
-			updated, err := proc.Update(id, func(m Model) Model {
+			// The vehicle's live odometer, not the schedule's last-completed
+			// mileage: the recomputed status has to agree with what the hourly
+			// recompute job will derive a moment later.
+			updated, err := proc.Update(id, v.CurrentMileage(), func(m Model) Model {
 				rt := m.RecurrenceType()
 				months := m.IntervalMonths()
 				miles := m.IntervalMiles()
@@ -225,7 +229,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			if err := requireScheduleFleet(identity, vehicleAccessor, current); err != nil {
+			if _, err := requireScheduleFleet(identity, vehicleAccessor, current); err != nil {
 				server.WriteError(w, err)
 				return
 			}
@@ -376,10 +380,16 @@ func queueHandler(log logrus.FieldLogger, proc *Processor, state string) http.Ha
 
 // requireScheduleFleet resolves a schedule's vehicle and enforces same-fleet
 // access (404 no-leak). Used by GET/PATCH/DELETE on a schedule by ID.
-func requireScheduleFleet(identity auth.Identity, vehicleAccessor VehicleAccessor, m Model) error {
+//
+// It returns the resolved vehicle so a caller that also needs the odometer
+// baseline (PATCH, which recomputes status) does not fetch it twice.
+func requireScheduleFleet(identity auth.Identity, vehicleAccessor VehicleAccessor, m Model) (vehicle.Model, error) {
 	v, err := vehicleAccessor.GetByID(m.VehicleID())
 	if err != nil {
-		return err
+		return vehicle.Model{}, err
 	}
-	return authz.RequireSameFleet(identity, v.FleetID())
+	if err := authz.RequireSameFleet(identity, v.FleetID()); err != nil {
+		return vehicle.Model{}, err
+	}
+	return v, nil
 }
