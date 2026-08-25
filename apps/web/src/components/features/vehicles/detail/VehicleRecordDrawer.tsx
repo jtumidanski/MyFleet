@@ -6,6 +6,16 @@ import { Loader2 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '../../../ui/sheet';
 import { Button } from '../../../ui/button';
 import { Skeleton } from '../../../ui/skeleton';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../../ui/alert-dialog';
 import { RecordAttachmentList } from '../maintenance/RecordAttachmentList';
 import { MaintenanceRecordForm } from '../maintenance/MaintenanceRecordForm';
 import { FuelForm } from '../fuel/FuelForm';
@@ -15,6 +25,7 @@ import {
   useUpdateMaintenanceRecord,
   useAppendMaintenanceRecordDocument,
   useDeleteMaintenanceRecord,
+  useRemoveMaintenanceRecordDocument,
 } from '../../../../lib/hooks/api/maintenance';
 import { useFuelLog, useUpdateFuelLog, useDeleteFuelLog } from '../../../../lib/hooks/api/fuel';
 import { useMileageRecords } from '../../../../lib/hooks/api/mileage';
@@ -80,6 +91,10 @@ export function VehicleRecordDrawer({
     setMode('view');
   }
 
+  // The media id awaiting confirmation. Removal destroys the underlying media
+  // object and is not undoable, so it is never one click.
+  const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
+
   const isMaintenanceKind = row?.kind === 'maintenance' || row?.kind === 'modification';
   const isFuelKind = row?.kind === 'fuel';
   const isMileageKind = row?.kind === 'mileage';
@@ -92,6 +107,7 @@ export function VehicleRecordDrawer({
   const updateRecord = useUpdateMaintenanceRecord(vehicleId);
   const appendDocument = useAppendMaintenanceRecordDocument(vehicleId);
   const deleteRecord = useDeleteMaintenanceRecord(vehicleId);
+  const removeDocument = useRemoveMaintenanceRecordDocument(vehicleId);
 
   const { data: fuelLog, isLoading: fuelLoading } = useFuelLog(
     isFuelKind ? row?.sourceId : undefined,
@@ -185,6 +201,19 @@ export function VehicleRecordDrawer({
     }
   };
 
+  const handleConfirmRemoveAttachment = async () => {
+    const mediaId = pendingRemoval;
+    if (!record || !mediaId) return;
+    setPendingRemoval(null);
+    try {
+      await removeDocument.mutateAsync({ id: record.id, mediaId });
+      toast.success('Attachment removed');
+    } catch (err) {
+      const apiError = createErrorFromUnknown(err);
+      toast.error(apiError.message || 'Could not remove the attachment');
+    }
+  };
+
   const handleUpdateFuel = async (values: FuelFormInput) => {
     if (!fuelLog) return;
     try {
@@ -275,7 +304,11 @@ export function VehicleRecordDrawer({
 
           <div>
             <p className="mb-2 text-sm font-medium">Attachments</p>
-            <RecordAttachmentList mediaIds={record.attributes.documentMediaIds ?? []} />
+            <RecordAttachmentList
+              mediaIds={record.attributes.documentMediaIds ?? []}
+              canRemove={canWrite}
+              onRemove={setPendingRemoval}
+            />
           </div>
 
           {canWrite && (
@@ -294,6 +327,38 @@ export function VehicleRecordDrawer({
               </Button>
             </div>
           )}
+
+          {/* The copy does not name the file: the filename is resolved inside
+              AttachmentRow by useMediaObject, and lifting it up through
+              onRemove for one sentence is not worth widening that contract —
+              the unavailable row has no filename to lift anyway. */}
+          <AlertDialog
+            open={pendingRemoval !== null}
+            onOpenChange={(open) => !open && setPendingRemoval(null)}
+          >
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove this attachment?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  It will be taken off this record and the file itself will be deleted. This cannot
+                  be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={removeDocument.isPending}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  disabled={removeDocument.isPending}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void handleConfirmRemoveAttachment();
+                  }}
+                >
+                  Remove
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       );
     }
