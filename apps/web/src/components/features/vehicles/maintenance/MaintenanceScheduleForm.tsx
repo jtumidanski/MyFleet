@@ -10,6 +10,7 @@ import { Input } from '../../../ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
 import { CategoryCombobox } from '../CategoryCombobox';
+import { RequiredLegend } from '../../../ui/required';
 import type { MaintenanceCategory } from '../../../../types/models/maintenanceCategory';
 
 interface MaintenanceScheduleFormProps {
@@ -56,7 +57,7 @@ export function MaintenanceScheduleForm({
           control={form.control}
           name="categoryId"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Category</FormLabel>
               <FormControl>
                 <CategoryCombobox
@@ -76,7 +77,7 @@ export function MaintenanceScheduleForm({
           control={form.control}
           name="recurrenceType"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Recurrence Type</FormLabel>
               <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl>
@@ -100,7 +101,11 @@ export function MaintenanceScheduleForm({
             control={form.control}
             name="intervalMonths"
             render={({ field }) => (
-              <FormItem>
+              /* Required for `time` and `hybrid` — the same rule the schema's
+                 superRefine enforces (lib/schemas/maintenanceSchedule.ts:5-12)
+                 and the same boolean that decides whether this field renders,
+                 so schema, visibility and marker cannot drift apart. */
+              <FormItem required={showMonths}>
                 <FormLabel>Every (months)</FormLabel>
                 <FormControl>
                   <Input
@@ -126,7 +131,9 @@ export function MaintenanceScheduleForm({
             control={form.control}
             name="intervalMiles"
             render={({ field }) => (
-              <FormItem>
+              /* Required for `mileage` and `hybrid` — same rule, same boolean
+                 as the field's visibility. */
+              <FormItem required={showMiles}>
                 <FormLabel>Every (miles)</FormLabel>
                 <FormControl>
                   <Input
@@ -146,6 +153,8 @@ export function MaintenanceScheduleForm({
             )}
           />
         )}
+
+        <RequiredLegend />
 
         <div className="flex justify-end gap-2">
           {onCancel && (
