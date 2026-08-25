@@ -32,7 +32,7 @@ export function MileageForm({ defaultMileage, onSubmit, onCancel, submitting }: 
           control={form.control}
           name="mileage"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Mileage (miles)</FormLabel>
               <FormControl>
                 <Input

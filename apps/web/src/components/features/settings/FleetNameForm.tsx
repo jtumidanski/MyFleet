@@ -43,7 +43,7 @@ export function FleetNameForm({ fleetId, currentName }: FleetNameFormProps) {
           control={form.control}
           name="name"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Fleet Name</FormLabel>
               <FormControl>
                 <Input type="text" {...field} />

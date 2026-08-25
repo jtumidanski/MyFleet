@@ -46,4 +46,17 @@ describe('InviteForm', () => {
     expect(message).not.toMatch(/sent/i);
     expect(message).toMatch(/link/i);
   });
+
+  // Role is required by the schema even though it opens pre-filled with
+  // "Member" — required-ness is a property of the field, not of its initial
+  // value. This is also the SelectTrigger slot case.
+  it('marks both fields required', () => {
+    renderWithProviders(<InviteForm fleetId="f1" />);
+
+    expect(screen.getByLabelText(/email/i)).toHaveAttribute('aria-required', 'true');
+    expect(screen.getByRole('combobox', { name: /role/i })).toHaveAttribute(
+      'aria-required',
+      'true',
+    );
+  });
 });
