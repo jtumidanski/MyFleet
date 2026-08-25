@@ -54,15 +54,15 @@ replicas:
 # `latest` is only the seed for the first sync.
 images:
   - name: ghcr.io/jtumidanski/myfleet-auth-service
-    newTag: ae45cad8867eb4c0d10519e40df00e20b89c6fed
+    newTag: d3b16b57827f70c2253cf82214e7f619534043a4
   - name: ghcr.io/jtumidanski/myfleet-fleet-service
-    newTag: ae45cad8867eb4c0d10519e40df00e20b89c6fed
+    newTag: d3b16b57827f70c2253cf82214e7f619534043a4
   - name: ghcr.io/jtumidanski/myfleet-media-service
-    newTag: ae45cad8867eb4c0d10519e40df00e20b89c6fed
+    newTag: d3b16b57827f70c2253cf82214e7f619534043a4
   - name: ghcr.io/jtumidanski/myfleet-notification-service
-    newTag: ae45cad8867eb4c0d10519e40df00e20b89c6fed
+    newTag: d3b16b57827f70c2253cf82214e7f619534043a4
   - name: ghcr.io/jtumidanski/myfleet-web
-    newTag: ae45cad8867eb4c0d10519e40df00e20b89c6fed
+    newTag: d3b16b57827f70c2253cf82214e7f619534043a4
 
 patches:
   - path: patches/auth-service-config.yaml
