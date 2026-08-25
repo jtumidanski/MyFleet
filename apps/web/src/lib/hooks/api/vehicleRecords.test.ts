@@ -475,7 +475,7 @@ describe('useVehicleRecords documentCount', () => {
 
     const { result } = renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
 
-    expect(result.current.rows[0].documentCount).toBe(3);
+    expect(result.current.rows[0]?.documentCount).toBe(3);
   });
 
   // The server emits documentMediaIds with `omitempty`
@@ -491,7 +491,7 @@ describe('useVehicleRecords documentCount', () => {
 
     const { result } = renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
 
-    expect(result.current.rows[0].documentCount).toBe(0);
+    expect(result.current.rows[0]?.documentCount).toBe(0);
   });
 
   it('treats an empty documentMediaIds array as zero', () => {
@@ -505,7 +505,7 @@ describe('useVehicleRecords documentCount', () => {
 
     const { result } = renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
 
-    expect(result.current.rows[0].documentCount).toBe(0);
+    expect(result.current.rows[0]?.documentCount).toBe(0);
   });
 
   it('leaves documentCount unset on fuel and mileage rows', () => {
