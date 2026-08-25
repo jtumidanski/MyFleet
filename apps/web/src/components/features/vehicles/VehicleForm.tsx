@@ -6,6 +6,7 @@ import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Textarea } from '../../ui/textarea';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../ui/form';
+import { RequiredLegend } from '../../ui/required';
 
 interface VehicleFormProps {
   // 'create' shows all fields; 'edit' only the server-mutable subset
@@ -61,7 +62,7 @@ export function VehicleForm({
             control={form.control}
             name="make"
             render={({ field }) => (
-              <FormItem>
+              <FormItem required={isCreate}>
                 <FormLabel>Make</FormLabel>
                 <FormControl>
                   <Input type="text" disabled={!isCreate} {...field} value={field.value ?? ''} />
@@ -74,7 +75,7 @@ export function VehicleForm({
             control={form.control}
             name="model"
             render={({ field }) => (
-              <FormItem>
+              <FormItem required={isCreate}>
                 <FormLabel>Model</FormLabel>
                 <FormControl>
                   <Input type="text" disabled={!isCreate} {...field} value={field.value ?? ''} />
@@ -87,7 +88,7 @@ export function VehicleForm({
             control={form.control}
             name="year"
             render={({ field }) => (
-              <FormItem>
+              <FormItem required={isCreate}>
                 <FormLabel>Year</FormLabel>
                 <FormControl>
                   <Input
@@ -175,6 +176,10 @@ export function VehicleForm({
             </FormItem>
           )}
         />
+
+        {/* The legend explains the asterisks; only render it when fields are
+            actually marked required (create mode — see make/model/year above). */}
+        {isCreate && <RequiredLegend />}
 
         <div className="flex justify-end gap-2">
           {onCancel && (

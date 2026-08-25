@@ -212,3 +212,55 @@ Three things to carry over:
 3. **Mind where focus lands on close.** `VehiclesPage.tsx:97-103` redirects `onCloseAutoFocus` to the header button when the dialog was opened from the empty state, because that opener unmounts once the first vehicle exists — restoring focus to a detached node drops it to `<body>`.
 
 The `Form` component is unmounted with the dialog, so there is no `form.reset()` call anywhere. Do not add one to work around a dialog that was kept mounted.
+
+## Required field indicators
+
+`FE-18`. Required-ness is declared **once per field, on `FormItem`** — never on `FormLabel`, never at both:
+
+```tsx
+<FormItem required>
+  <FormLabel>Make</FormLabel>
+  <FormControl>
+    <Input type="text" {...field} />
+  </FormControl>
+  <FormMessage />
+</FormItem>
+```
+
+The `required` prop goes first on the tag, because the drift guard in `apps/web/src/test/requiredFieldMarkers.test.ts` matches it there.
+
+`FormItemContext` carries the flag. `FormLabel` reads it and renders `<RequiredMarker />`; `FormControl` reads it and emits `aria-required="true"` through the Radix `Slot`. Two consumers, one declaration, so the glyph and the semantics cannot disagree.
+
+- **The marker is `text-danger`, not `text-destructive`.** `--destructive` measures ~2:1 against the dark background; `--danger` is 6.67:1 light / 7.23:1 dark (`docs/tasks/task-003-dark-mode-branding/contrast.md:18,27`). `index.css:104-108` records the split: bare status tokens are for text on `--background` / `--card`, `--destructive` styles destructive *controls*.
+- **The marker is `aria-hidden`.** The accessible name comes from the label text and the required state from `aria-required`; announcing "Make star" is a regression. It also keeps exact-string `getByText('Category')` assertions passing, because `getNodeText` reads only direct child text nodes.
+- **Never the native `required` attribute** — it triggers browser validation bubbles that compete with `FormMessage`.
+- **`aria-required={required || undefined}`**, never a bare boolean: React renders `false` as the string `"false"`, and an unmarked control must carry no attribute at all.
+- **Custom controls must forward the prop.** `Input`, `Textarea` and `SelectTrigger` spread arbitrary props, so `Slot` injection reaches them for free. A control that destructures its props — `CategoryCombobox` — has to declare `'aria-required'?: boolean` and pass it to the focusable trigger.
+
+### Legend
+
+Forms rendering **three or more** fields close the field stack, above the submit row, with `<RequiredLegend />` (`* Required`). Shorter forms do not: a lone asterisk on a one- or two-field form is self-explanatory and the legend would outweigh it. The threshold is a judgement, so it is asserted per file in `test/requiredFieldMarkers.test.ts` — adding a fourth field to a short form fails that test and prompts the decision instead of drifting.
+
+### Conditional required-ness
+
+A field that is required only sometimes binds to **the same boolean that governs its visibility**, not to a second condition that can drift from the schema:
+
+```tsx
+const showMonths = recurrenceType === 'time' || recurrenceType === 'hybrid';
+…
+{showMonths && (
+  <FormField … render={({ field }) => (
+    <FormItem required={showMonths}>
+```
+
+The schema's `superRefine`, the visibility rule and the marker then read as one rule rather than three coincidences.
+
+### Cross-field requirements
+
+A rule like "price per gallon **or** total cost" is not expressible as a per-field asterisk — marking both claims both are mandatory, marking neither hides the rule. Neither field is marked; the rule is stated in prose, says the same thing as the schema's own message, in the wording the PRD specifies. `FuelForm.tsx` is the reference: one exported constant, rendered visibly under the pair, plus an `sr-only` `FormDescription` **inside each** `FormItem` so `FormControl`'s existing `aria-describedby` resolves for both.
+
+A single shared `FormDescription` under the pair does not work: it calls `useFormField()`, which throws outside a `FormItem`, and its id is scoped to one field.
+
+### Drift protection
+
+`apps/web/src/test/requiredFieldMarkers.test.ts` records every field of every form and fails on an unclassified new one. Deviations from the schema's static optionality are allowed, but each must be annotated in that table with its reason.

@@ -80,7 +80,7 @@ export function CompleteScheduleDialog({
               control={form.control}
               name="date"
               render={({ field }) => (
-                <FormItem>
+                <FormItem required>
                   <FormLabel>Date completed</FormLabel>
                   <FormControl>
                     <Input type="date" {...field} />

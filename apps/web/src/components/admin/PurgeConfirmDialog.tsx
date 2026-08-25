@@ -10,6 +10,7 @@ import {
 } from '../ui/dialog';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { RequiredMarker } from '../ui/required';
 
 /**
  * The purge confirmation (FR-ADMIN-UI-10).
@@ -195,9 +196,13 @@ export function PurgeConfirmDialog({
           ) : null}
 
           <div className="space-y-1">
-            <Label htmlFor="purge-confirmation">{promptLabel}</Label>
+            <Label htmlFor="purge-confirmation">
+              {promptLabel}
+              <RequiredMarker />
+            </Label>
             <Input
               id="purge-confirmation"
+              aria-required="true"
               value={typed}
               autoComplete="off"
               onChange={(e) => setTyped(e.target.value)}

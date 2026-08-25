@@ -44,7 +44,7 @@ export function InviteForm({ fleetId }: InviteFormProps) {
           control={form.control}
           name="email"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Email</FormLabel>
               <FormControl>
                 <Input type="email" placeholder="user@example.com" {...field} />
@@ -57,7 +57,7 @@ export function InviteForm({ fleetId }: InviteFormProps) {
           control={form.control}
           name="role"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Role</FormLabel>
               <Select onValueChange={field.onChange} defaultValue={field.value}>
                 <FormControl>

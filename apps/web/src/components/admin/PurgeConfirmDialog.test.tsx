@@ -90,6 +90,14 @@ describe('PurgeConfirmDialog', () => {
     expect(screen.getByLabelText(/type the fleet name/i)).toHaveValue('');
     expect(screen.getByRole('button', { name: /purge this fleet/i })).toBeDisabled();
   });
+
+  // Not a react-hook-form surface either: typing the phrase is mandatory, so
+  // the marker and aria-required are applied by hand.
+  it('marks the confirmation input required', () => {
+    render(<PurgeConfirmDialog {...props()} />);
+
+    expect(screen.getByLabelText(/type the fleet name/i)).toHaveAttribute('aria-required', 'true');
+  });
 });
 
 describe('PurgeConfirmDialog transmission', () => {

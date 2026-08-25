@@ -78,12 +78,17 @@ const emptyStateTrigger = () => triggerAt(1);
 const submitButton = () =>
   within(screen.getByRole('dialog')).getByRole('button', { name: 'Add Vehicle' });
 
-/** Fills the three required fields. */
+/**
+ * Fills the three required fields. Queried by role + accessible name: the
+ * required marker is a nested aria-hidden span, which the accessibility tree
+ * skips but Testing Library's label-content helper concatenates, so
+ * getByLabelText('Make') would look for "Make *".
+ */
 async function fillRequired(): Promise<void> {
   const dialog = within(screen.getByRole('dialog'));
-  await userEvent.type(dialog.getByLabelText('Make'), 'Toyota');
-  await userEvent.type(dialog.getByLabelText('Model'), 'Corolla');
-  await userEvent.type(dialog.getByLabelText('Year'), '2020');
+  await userEvent.type(dialog.getByRole('textbox', { name: 'Make' }), 'Toyota');
+  await userEvent.type(dialog.getByRole('textbox', { name: 'Model' }), 'Corolla');
+  await userEvent.type(dialog.getByRole('spinbutton', { name: 'Year' }), '2020');
 }
 
 beforeEach(() => {
@@ -104,7 +109,7 @@ describe('VehiclesPage — opening the dialog', () => {
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveAccessibleName('Add Vehicle');
     expect(dialog).toHaveAccessibleDescription('Make, model, and year are required.');
-    expect(within(dialog).getByLabelText('Make')).toBeInTheDocument();
+    expect(within(dialog).getByRole('textbox', { name: 'Make' })).toBeInTheDocument();
   });
 
   it('opens the same dialog from the empty state', async () => {
@@ -112,7 +117,9 @@ describe('VehiclesPage — opening the dialog', () => {
     await waitFor(() => expect(triggers()).toHaveLength(2));
 
     await userEvent.click(emptyStateTrigger());
-    expect(within(screen.getByRole('dialog')).getByLabelText('Make')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('dialog')).getByRole('textbox', { name: 'Make' }),
+    ).toBeInTheDocument();
   });
 
   it('keeps the header trigger rendered while the dialog is open', async () => {
@@ -131,7 +138,7 @@ describe('VehiclesPage — opening the dialog', () => {
   it('leaves no inline card form on the page', async () => {
     renderWithProviders(<VehiclesPage />);
     expect(screen.queryByText('New Vehicle')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Make')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Make' })).not.toBeInTheDocument();
   });
 
   it('offers a viewer neither trigger', async () => {
@@ -200,7 +207,9 @@ describe('VehiclesPage — submitting', () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    expect(within(screen.getByRole('dialog')).getByLabelText('Make')).toHaveValue('Toyota');
+    expect(within(screen.getByRole('dialog')).getByRole('textbox', { name: 'Make' })).toHaveValue(
+      'Toyota',
+    );
   });
 });
 

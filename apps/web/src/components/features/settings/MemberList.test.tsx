@@ -359,4 +359,18 @@ describe('MemberList — leaving', () => {
     await userEvent.click(leave);
     expect(screen.queryByText(/Leave this fleet\?/i)).not.toBeInTheDocument();
   });
+
+  // Not a react-hook-form surface, so the marker and aria-required are applied
+  // by hand from the same RequiredMarker the form primitives use.
+  it('marks the successor picker required', async () => {
+    seed(
+      [membership('me', 'owner'), membership('other', 'member')],
+      [userRow('other', 'Sam Ito', 'sam@example.com')],
+    );
+
+    renderWithProviders(<MemberList fleetId="f1" />);
+    await userEvent.click(await screen.findByRole('button', { name: /^leave$/i }));
+
+    expect(await screen.findByRole('combobox')).toHaveAttribute('aria-required', 'true');
+  });
 });
