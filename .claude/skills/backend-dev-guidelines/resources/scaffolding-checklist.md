@@ -67,10 +67,10 @@ objects (one stripprefix per service) referenced by the IngressRoutes in §5.
 **File:** `apps/<service-name>/Dockerfile`
 
 Multi-stage Go build, following `apps/fleet-service/Dockerfile`:
-- Builder stage: `FROM golang:1.25-alpine AS build`; copy `go.work`,
+- Builder stage: `FROM golang:1.27-alpine AS build`; copy `go.work`,
   `go.work.sum`, and every module's `go.mod`/`go.sum` first for layer
   caching, then `go build -o /out/<service-name> ./cmd`
-- Runtime stage: `FROM alpine:3.20`; create and switch to a non-root user
+- Runtime stage: `FROM alpine:3.24`; create and switch to a non-root user
   (`adduser -D -u 10001 app` / `USER app`)
 - Copy the built binary to `/<service-name>` (not `/server`) and set it as
   `ENTRYPOINT`
