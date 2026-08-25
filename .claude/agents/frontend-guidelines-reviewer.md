@@ -134,6 +134,7 @@ Never write "N/A", "not applicable", or "skipping". Pick one of the four labels.
 | FE-12 | Query key factory uses `as const` | Read query key factories | Keys are `[...] as const` |
 | FE-13 | Forms use `react-hook-form` + `zodResolver` | Read form components | `useForm({ resolver: zodResolver(schema) })` pattern |
 | FE-14 | Schema in `lib/schemas/` with inferred type | Read schema files | Path is `lib/schemas/<resource>.ts` — **no `.schema.` infix**. Each `z.object(...)` is paired with `export type XFormInput = z.infer<typeof xSchema>`. |
+| FE-18 | Required fields are marked | For each changed form, read its Zod schema in `lib/schemas/` and compare against the `<FormItem>` tags: `grep -n "<FormItem" <form file>` | Every `FormField` whose schema field is statically required declares `<FormItem required>` — on `FormItem`, never on `FormLabel`, and never on both. Conditionally-required fields bind to the same boolean as their visibility. Deviations are listed in `apps/web/src/test/requiredFieldMarkers.test.ts` with a reason; an unlisted deviation is a FAIL. Forms with 3+ fields render `<RequiredLegend />`. See `.claude/skills/frontend-dev-guidelines/resources/patterns-forms-validation.md` → "Required field indicators". |
 
 ### Styling Checklist
 
