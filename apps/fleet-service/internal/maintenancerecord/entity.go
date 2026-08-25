@@ -79,14 +79,24 @@ func ApplyPartialIndexes(db *gorm.DB) error {
 // (maintenance_record_id, media_id) group. Idempotent: a second run matches
 // nothing. CURRENT_TIMESTAMP rather than NOW() so the one statement is valid
 // under both Postgres and the sqlite test fixture.
+//
+// "Lowest id" is expressed as a correlated EXISTS over `o.id < d.id` rather
+// than the more obvious `id NOT IN (SELECT MIN(id) ... GROUP BY ...)`. Postgres
+// types `id` as uuid and has no min() aggregate for uuid, so the aggregate form
+// fails with SQLSTATE 42883 — and because Migration failure is fatal at
+// startup, that took fleet-service into a crash loop. The comparison operator
+// `<` is defined for uuid, and for the TEXT columns the sqlite fixture uses, so
+// this form is correct under both. See entity_postgres_test.go.
 func dedupeLiveDocuments(db *gorm.DB) error {
-	return db.Exec(`UPDATE fleet.maintenance_record_documents
+	return db.Exec(`UPDATE fleet.maintenance_record_documents AS d
 	 SET deleted_at = CURRENT_TIMESTAMP
-	 WHERE deleted_at IS NULL
-	   AND id NOT IN (
-	     SELECT MIN(id) FROM fleet.maintenance_record_documents
-	     WHERE deleted_at IS NULL
-	     GROUP BY maintenance_record_id, media_id
+	 WHERE d.deleted_at IS NULL
+	   AND EXISTS (
+	     SELECT 1 FROM fleet.maintenance_record_documents AS o
+	     WHERE o.deleted_at IS NULL
+	       AND o.maintenance_record_id = d.maintenance_record_id
+	       AND o.media_id = d.media_id
+	       AND o.id < d.id
 	   )`).Error
 }
 
