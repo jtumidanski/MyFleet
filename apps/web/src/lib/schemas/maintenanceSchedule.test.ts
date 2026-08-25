@@ -57,6 +57,27 @@ describe('maintenanceScheduleSchema — recurring', () => {
     expect(maintenanceScheduleSchema.safeParse({ ...recurringTime, intervalMonths: 0 }).success).toBe(false);
   });
 
+  it('requires intervalMiles for a mileage schedule', () => {
+    expect(
+      firstIssuePath({
+        categoryId: 'cat-1',
+        kind: 'recurring',
+        recurrenceType: 'mileage',
+        dueMileage: DUE_MILEAGE,
+      }),
+    ).toBe('intervalMiles');
+  });
+
+  it('rejects a zero intervalMiles', () => {
+    expect(maintenanceScheduleSchema.safeParse({
+      categoryId: 'cat-1',
+      kind: 'recurring',
+      recurrenceType: 'mileage',
+      intervalMiles: 0,
+      dueMileage: DUE_MILEAGE,
+    }).success).toBe(false);
+  });
+
   it('accepts a complete mileage schedule', () => {
     const result = maintenanceScheduleSchema.safeParse({
       categoryId: 'cat-1',
