@@ -44,6 +44,13 @@ interface MaintenanceRecordFormProps {
   ) => Promise<void> | void;
   onCancel?: () => void;
   submitting?: boolean;
+  /**
+   * Attachments the record already holds, on the edit path. Threaded to both
+   * the pending-upload hook and the picker so the ten-per-record cap counts
+   * existing plus pending rather than pending alone. Defaults to 0 for the
+   * create flow, where there is no record yet.
+   */
+  existingAttachmentCount?: number;
 }
 
 /**
@@ -59,9 +66,10 @@ export function MaintenanceRecordForm({
   onSubmit,
   onCancel,
   submitting,
+  existingAttachmentCount = 0,
 }: MaintenanceRecordFormProps) {
   const now = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM for datetime-local
-  const attachments = usePendingAttachments();
+  const attachments = usePendingAttachments(existingAttachmentCount);
 
   const visibleCategories = categories.filter((c) => c.attributes.kind === kind);
 
@@ -220,6 +228,7 @@ export function MaintenanceRecordForm({
           items={attachments.items}
           onAdd={attachments.add}
           onRemove={attachments.remove}
+          existingCount={existingAttachmentCount}
         />
 
         <RequiredLegend />

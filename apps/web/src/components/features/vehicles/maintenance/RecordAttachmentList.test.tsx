@@ -75,4 +75,65 @@ describe('RecordAttachmentList', () => {
 
     expect(await screen.findByText(/unavailable/i)).toBeInTheDocument();
   });
+
+  // Viewers keep read-only access: they see and download attachments and get
+  // no remove control at all, rather than a control that fails late.
+  it('omits the remove control when canRemove is false', async () => {
+    vi.mocked(mediaService.get).mockResolvedValue(mediaResource('m1', 'application/pdf') as never);
+
+    render(<RecordAttachmentList mediaIds={['m1']} onRemove={vi.fn()} canRemove={false} />, {
+      wrapper,
+    });
+
+    await screen.findByRole('button', { name: /m1\.file/i });
+    expect(screen.queryByRole('button', { name: /^remove/i })).not.toBeInTheDocument();
+  });
+
+  it('omits the remove control when no onRemove handler is supplied', async () => {
+    vi.mocked(mediaService.get).mockResolvedValue(mediaResource('m1', 'application/pdf') as never);
+
+    render(<RecordAttachmentList mediaIds={['m1']} canRemove />, { wrapper });
+
+    await screen.findByRole('button', { name: /m1\.file/i });
+    expect(screen.queryByRole('button', { name: /^remove/i })).not.toBeInTheDocument();
+  });
+
+  it('calls onRemove with the media id from a document row', async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn();
+    vi.mocked(mediaService.get).mockResolvedValue(mediaResource('m1', 'application/pdf') as never);
+
+    render(<RecordAttachmentList mediaIds={['m1']} onRemove={onRemove} canRemove />, { wrapper });
+
+    await user.click(await screen.findByRole('button', { name: 'Remove m1.file' }));
+
+    expect(onRemove).toHaveBeenCalledWith('m1');
+  });
+
+  it('calls onRemove with the media id from an image row', async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn();
+    vi.mocked(mediaService.get).mockResolvedValue(mediaResource('m1', 'image/jpeg') as never);
+
+    render(<RecordAttachmentList mediaIds={['m1']} onRemove={onRemove} canRemove />, { wrapper });
+
+    await user.click(await screen.findByRole('button', { name: 'Remove m1.file' }));
+
+    expect(onRemove).toHaveBeenCalledWith('m1');
+  });
+
+  // An unavailable attachment is exactly the one a user most wants to clear,
+  // so the row that used to render nothing but a message must still offer it.
+  it('offers removal on an unavailable attachment row', async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn();
+    vi.mocked(mediaService.get).mockRejectedValue(new Error('404'));
+
+    render(<RecordAttachmentList mediaIds={['m1']} onRemove={onRemove} canRemove />, { wrapper });
+
+    await screen.findByText(/attachment unavailable/i);
+    await user.click(screen.getByRole('button', { name: 'Remove attachment' }));
+
+    expect(onRemove).toHaveBeenCalledWith('m1');
+  });
 });

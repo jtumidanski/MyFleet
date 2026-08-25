@@ -38,7 +38,57 @@ type DocumentEntity struct {
 
 func (DocumentEntity) TableName() string { return "fleet.maintenance_record_documents" }
 
-func Migration(db *gorm.DB) error { return db.AutoMigrate(&Entity{}, &DocumentEntity{}) }
+func Migration(db *gorm.DB) error {
+	if err := db.AutoMigrate(&Entity{}, &DocumentEntity{}); err != nil {
+		return err
+	}
+	return ApplyPartialIndexes(db)
+}
+
+// ApplyPartialIndexes makes (maintenance_record_id, media_id) unique among
+// LIVE document rows, following the same pattern as mediavariant, membership
+// and invite.
+//
+// It cannot be a `gorm:"uniqueIndex"` struct tag: GORM has no way to express a
+// WHERE clause, and a plain unique index is the wrong invariant here. A
+// detached (soft-deleted) row would keep occupying the slot, so re-attaching a
+// media object a user had previously removed would fail forever against a row
+// no reader can see. Detach-then-reattach is an obvious user action and is the
+// exact flow the detach endpoint creates.
+//
+// De-duplication runs first and is not optional. Existing data can already
+// violate the index — nothing stopped the create path from being handed the
+// same id twice in documentMediaIds — and CREATE UNIQUE INDEX against such a
+// row fails, which would take the service down at startup rather than at the
+// call site.
+func ApplyPartialIndexes(db *gorm.DB) error {
+	if err := dedupeLiveDocuments(db); err != nil {
+		return err
+	}
+	create := `CREATE UNIQUE INDEX IF NOT EXISTS ux_maintenance_record_documents_record_media
+	 ON fleet.maintenance_record_documents (maintenance_record_id, media_id) WHERE deleted_at IS NULL`
+	if db.Name() == "sqlite" {
+		// SQLite puts the schema on the INDEX name, not the table name.
+		create = `CREATE UNIQUE INDEX IF NOT EXISTS fleet.ux_maintenance_record_documents_record_media
+		 ON maintenance_record_documents (maintenance_record_id, media_id) WHERE deleted_at IS NULL`
+	}
+	return db.Exec(create).Error
+}
+
+// dedupeLiveDocuments soft-deletes all but the lowest-id live row in each
+// (maintenance_record_id, media_id) group. Idempotent: a second run matches
+// nothing. CURRENT_TIMESTAMP rather than NOW() so the one statement is valid
+// under both Postgres and the sqlite test fixture.
+func dedupeLiveDocuments(db *gorm.DB) error {
+	return db.Exec(`UPDATE fleet.maintenance_record_documents
+	 SET deleted_at = CURRENT_TIMESTAMP
+	 WHERE deleted_at IS NULL
+	   AND id NOT IN (
+	     SELECT MIN(id) FROM fleet.maintenance_record_documents
+	     WHERE deleted_at IS NULL
+	     GROUP BY maintenance_record_id, media_id
+	   )`).Error
+}
 
 // Make converts an Entity (and its document rows) to a Model.
 func Make(e Entity, docs []DocumentEntity) Model {

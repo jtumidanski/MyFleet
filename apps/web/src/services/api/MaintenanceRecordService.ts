@@ -17,6 +17,8 @@ import { BaseService } from './BaseService';
  *   GET    /api/fleet/maintenance-records/{id}           — get single
  *   PATCH  /api/fleet/maintenance-records/{id}           — partial update
  *   DELETE /api/fleet/maintenance-records/{id}           — soft delete
+ *   POST   /api/fleet/maintenance-records/{id}/document-media            — attach one media object
+ *   DELETE /api/fleet/maintenance-records/{id}/document-media/{mediaId}  — detach one media object
  */
 class MaintenanceRecordService extends BaseService<
   MaintenanceRecordAttributes,
@@ -46,7 +48,7 @@ class MaintenanceRecordService extends BaseService<
     return this.createAt(`/api/fleet/vehicles/${vehicleId}/maintenance-records`, attributes);
   }
 
-  /** POST /api/fleet/maintenance-records/{id} with documentMediaIds append */
+  /** POST /api/fleet/maintenance-records/{id}/document-media */
   async appendDocumentMedia(
     id: string,
     mediaId: string,
@@ -58,6 +60,19 @@ class MaintenanceRecordService extends BaseService<
       body: JSON.stringify({ data: { type: 'mediaRefs', attributes: { mediaId } } }),
     });
     return doc.data;
+  }
+
+  /**
+   * DELETE /api/fleet/maintenance-records/{id}/document-media/{mediaId}
+   *
+   * Removes the REFERENCE only. The media object itself is deleted separately
+   * by the caller against media-service; fleet-service has no authority to do
+   * it (PRD D3).
+   */
+  async removeDocumentMedia(id: string, mediaId: string): Promise<void> {
+    await apiClient.request<null>(`${this.basePath}/${id}/document-media/${mediaId}`, {
+      method: 'DELETE',
+    });
   }
 }
 

@@ -1,10 +1,14 @@
 package maintenancerecord
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // Administrator is the write interface for maintenance record data access.
@@ -17,6 +21,14 @@ type Administrator interface {
 	// transaction handle, so cross-domain orchestrations (completion flow,
 	// design §10.3) can wrap it in a single db.Transaction.
 	InsertTx(tx *gorm.DB, m Model) (Model, error)
+	// AttachDocument adds one media reference to an existing record and
+	// returns the re-read model. Deliberately NOT folded into Update: the
+	// column allow-list in Update is the mechanism that keeps PATCH from
+	// touching documents, and threading documents through it would put that
+	// guarantee at the mercy of a future edit to the map (design D-1).
+	AttachDocument(recordID, mediaID string) (Model, error)
+	// DetachDocument soft-deletes one media reference from a record.
+	DetachDocument(recordID, mediaID string) error
 }
 
 type dbAdministrator struct{ db *gorm.DB }
@@ -101,4 +113,140 @@ func (a *dbAdministrator) SoftDelete(id string) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// AttachDocument attaches one media reference to a record, enforcing the
+// per-record cap and idempotency inside a single transaction.
+//
+// The parent row is locked FOR UPDATE, and that is load-bearing, not
+// decoration. Read-then-insert inside a transaction is NOT sufficient at
+// Postgres's default READ COMMITTED isolation: two concurrent attaches to a
+// record holding nine documents each count nine, neither sees the other's
+// uncommitted insert, and the record ends with eleven. A transaction is not a
+// lock. Locking the record serializes attaches to it, so the second
+// transaction blocks until the first commits, then counts ten and gets its
+// validation error. Locking the record (not the document table) also cleanly
+// excludes a concurrent soft-delete of the record itself.
+//
+// The lock is dialect-guarded because this package's tests run on sqlite,
+// which rejects FOR UPDATE as a syntax error. Skipping it there is safe:
+// sqlite serializes writers at the database level, so the correctness the lock
+// buys exists for free. Branching on the dialect for a gap like this is the
+// same thing mediavariant.ApplyPartialIndexes already does.
+//
+// The post-lock Count is also only correct because Postgres defaults to READ
+// COMMITTED: a fresh statement inside an already-open transaction takes a new
+// snapshot and so observes the other transaction's commit once it releases the
+// lock. Under REPEATABLE READ the Count would instead read the snapshot taken
+// at this transaction's start, miss that commit, and reopen the eleven-
+// attachment gap this lock exists to close. Latent, not live, as long as
+// nothing changes the connection's isolation level.
+func (a *dbAdministrator) AttachDocument(recordID, mediaID string) (Model, error) {
+	var out Model
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		q := tx.Where("id = ? AND deleted_at IS NULL", recordID)
+		if tx.Name() != "sqlite" {
+			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var locked Entity
+		if err := q.First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+
+		// Idempotency BEFORE the cap check, deliberately: re-attaching an id a
+		// full record already holds must succeed, or a retry of an attach that
+		// actually landed would be punished with a 422.
+		var already int64
+		if err := tx.Model(&DocumentEntity{}).
+			Where("maintenance_record_id = ? AND media_id = ? AND deleted_at IS NULL", recordID, mediaID).
+			Count(&already).Error; err != nil {
+			return err
+		}
+		if already == 0 {
+			var live int64
+			if err := tx.Model(&DocumentEntity{}).
+				Where("maintenance_record_id = ? AND deleted_at IS NULL", recordID).
+				Count(&live).Error; err != nil {
+				return err
+			}
+			if live >= MaxDocuments {
+				return server.ErrValidation
+			}
+			d := DocumentEntity{ID: uuid.NewString(), MaintenanceRecordID: recordID, MediaID: mediaID}
+			if err := tx.Create(&d).Error; err != nil {
+				return err
+			}
+		}
+
+		// Re-read, for the same reason Update does: a model built from the
+		// in-memory entity is how a response comes to disagree with the row.
+		var stored Entity
+		if err := tx.Where("id = ? AND deleted_at IS NULL", recordID).First(&stored).Error; err != nil {
+			return err
+		}
+		var docs []DocumentEntity
+		if err := tx.Where("maintenance_record_id = ? AND deleted_at IS NULL", recordID).
+			Find(&docs).Error; err != nil {
+			return err
+		}
+		out = Make(stored, docs)
+		return nil
+	})
+	if err != nil {
+		return Model{}, err
+	}
+	return out, nil
+}
+
+// DetachDocument stamps deleted_at on one live document row.
+//
+// Soft, not hard: every other delete in fleet-service is soft, and
+// admin/visibility_document_test already asserts that a stamped row is
+// invisible on both the detail and the list path.
+//
+// Wrapped in a transaction that takes the same dialect-guarded FOR UPDATE
+// lock on the parent record as AttachDocument, and for the same reason:
+// without it, a concurrent attach and detach of the same media id can
+// interleave so that the attach's idempotency count sees the row live, skips
+// the insert, re-reads before the detach commits, and returns 201 with the id
+// present while the committed state already has it detached — a response
+// disagreeing with the stored row, the exact failure Update was rewritten to
+// eliminate. Locking the record serializes the two against each other.
+//
+// RowsAffected == 0 still covers "never attached" and "already detached" with
+// the same answer, which is also what keeps the response from confirming that
+// a media id exists elsewhere.
+//
+// Locking the parent means this now reads it, unlike before, so a detach
+// against a missing or soft-deleted parent must be translated to ErrNotFound
+// explicitly (previously that check lived only in the resource layer's
+// GetByID) — observable behavior is unchanged, but it is no longer free.
+func (a *dbAdministrator) DetachDocument(recordID, mediaID string) error {
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		q := tx.Where("id = ? AND deleted_at IS NULL", recordID)
+		if tx.Name() != "sqlite" {
+			q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		var locked Entity
+		if err := q.First(&locked).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+
+		res := tx.Model(&DocumentEntity{}).
+			Where("maintenance_record_id = ? AND media_id = ? AND deleted_at IS NULL", recordID, mediaID).
+			Update("deleted_at", time.Now().UTC())
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }

@@ -66,3 +66,30 @@ func (pr *Processor) SoftDelete(id string) error {
 	}
 	return err
 }
+
+// AttachDocument attaches one media reference to a record.
+//
+// No validation lives here. Validate speaks about the model's fields, and an
+// attach mutates rows rather than the model, so there is nothing for it to say
+// — which is also why this does not go through Update.
+func (pr *Processor) AttachDocument(recordID, mediaID string) (Model, error) {
+	m, err := pr.a.AttachDocument(recordID, mediaID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Model{}, server.ErrNotFound
+		}
+		// server.ErrValidation from the cap check passes straight through;
+		// StatusFor maps it to 422.
+		return Model{}, err
+	}
+	return m, nil
+}
+
+// DetachDocument removes one media reference from a record.
+func (pr *Processor) DetachDocument(recordID, mediaID string) error {
+	err := pr.a.DetachDocument(recordID, mediaID)
+	if errors.Is(err, ErrNotFound) {
+		return server.ErrNotFound
+	}
+	return err
+}
