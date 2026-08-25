@@ -34,6 +34,10 @@ type dbAdministrator struct{ db *gorm.DB }
 func NewAdministrator(db *gorm.DB) Administrator { return &dbAdministrator{db: db} }
 
 func (a *dbAdministrator) Insert(m Model) (Model, error) {
+	// Entity.Active carries a `default:true` GORM tag, so GORM substitutes that
+	// default for any explicit Active=false at Create time: Insert can never
+	// persist an inactive row. Deactivation always goes through AdvanceTx's
+	// column-map UPDATE instead, which the default tag has no effect on.
 	e := m.ToEntity()
 	if err := a.db.Create(&e).Error; err != nil {
 		return Model{}, err

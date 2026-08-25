@@ -77,9 +77,23 @@ func TestProcessorUpdate_conversionDerivesFromCompletionPoint(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 	created, err := NewAdministrator(db).Insert(
-		m.WithLastCompleted(completedAt, 42000).WithDuePoint(time.Time{}, 0).WithActive(false))
+		m.WithLastCompleted(completedAt, 42000).WithDuePoint(time.Time{}, 0))
 	if err != nil {
 		t.Fatalf("insert: %v", err)
+	}
+	// Entity.Active carries a `default:true` GORM tag, so Insert cannot persist
+	// active=false (GORM substitutes the tag's default for an explicit Go zero
+	// value at Create time). Flip it with an explicit update instead.
+	if err := db.Table("fleet.maintenance_schedules").Where("id = ?", created.ID()).
+		Update("active", false).Error; err != nil {
+		t.Fatalf("seed inactive: %v", err)
+	}
+	seeded, err := NewProvider(db).GetByID(created.ID())
+	if err != nil {
+		t.Fatalf("reload seeded schedule: %v", err)
+	}
+	if seeded.Active() {
+		t.Fatalf("seed inactive: row is still active")
 	}
 
 	proc := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db))

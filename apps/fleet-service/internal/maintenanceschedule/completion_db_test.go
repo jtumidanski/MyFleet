@@ -294,9 +294,23 @@ func TestCompleteInTransaction_inactiveScheduleWritesNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build schedule: %v", err)
 	}
-	created, err := NewAdministrator(db).Insert(s.WithActive(false))
+	created, err := NewAdministrator(db).Insert(s)
 	if err != nil {
 		t.Fatalf("insert schedule: %v", err)
+	}
+	// Entity.Active carries a `default:true` GORM tag, so Insert cannot persist
+	// active=false (GORM substitutes the tag's default for an explicit Go zero
+	// value at Create time). Flip it with an explicit update instead.
+	if err := db.Table("fleet.maintenance_schedules").Where("id = ?", created.ID()).
+		Update("active", false).Error; err != nil {
+		t.Fatalf("seed inactive: %v", err)
+	}
+	seeded, err := NewProvider(db).GetByID(created.ID())
+	if err != nil {
+		t.Fatalf("reload seeded schedule: %v", err)
+	}
+	if seeded.Active() {
+		t.Fatalf("seed inactive: row is still active")
 	}
 
 	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
