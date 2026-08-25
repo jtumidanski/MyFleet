@@ -458,3 +458,71 @@ describe('useVehicleRecords', () => {
     expect(second.rows).not.toBe(first.rows);
   });
 });
+
+// ---------------------------------------------------------------------------
+// documentCount (task-025)
+// ---------------------------------------------------------------------------
+
+describe('useVehicleRecords documentCount', () => {
+  it('counts the attached documents on a maintenance row', () => {
+    setupSources({
+      maintenance: stub([
+        maintenanceRecord('m1', 'oil-change', '2026-01-01T00:00:00Z', {
+          documentMediaIds: ['a', 'b', 'c'],
+        }),
+      ]),
+    });
+
+    const { result } = renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
+
+    expect(result.current.rows[0]?.documentCount).toBe(3);
+  });
+
+  // The server emits documentMediaIds with `omitempty`
+  // (fleet-service/internal/maintenancerecord/rest.go:22), so a record with no
+  // attachments omits the key entirely. "The backend said nothing" must mean
+  // zero, not unknown — a bare `?.length` without `?? 0` would leave it
+  // undefined here and make a maintenance row indistinguishable from a fuel
+  // row, which genuinely has no document concept.
+  it('treats an absent documentMediaIds key as zero', () => {
+    setupSources({
+      maintenance: stub([maintenanceRecord('m1', 'oil-change', '2026-01-01T00:00:00Z')]),
+    });
+
+    const { result } = renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
+
+    expect(result.current.rows[0]?.documentCount).toBe(0);
+  });
+
+  it('treats an empty documentMediaIds array as zero', () => {
+    setupSources({
+      maintenance: stub([
+        maintenanceRecord('m1', 'oil-change', '2026-01-01T00:00:00Z', {
+          documentMediaIds: [],
+        }),
+      ]),
+    });
+
+    const { result } = renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
+
+    expect(result.current.rows[0]?.documentCount).toBe(0);
+  });
+
+  it('leaves documentCount unset on fuel and mileage rows', () => {
+    setupSources({
+      fuel: stub([fuelLog('f1', '2026-03-01T00:00:00Z', 10)]),
+      mileage: stub([mileageRecord('mi1', '2026-02-01T00:00:00Z', 12000)]),
+    });
+
+    const { result } = renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
+
+    const byId = new Map(result.current.rows.map((r) => [r.id, r]));
+    // Without these presence checks, a Map.get miss (e.g. the id prefix no
+    // longer matching) would return undefined too, satisfying the
+    // toBeUndefined() assertions below for the wrong reason.
+    expect(byId.has('fuel:f1')).toBe(true);
+    expect(byId.has('mileage:mi1')).toBe(true);
+    expect(byId.get('fuel:f1')?.documentCount).toBeUndefined();
+    expect(byId.get('mileage:mi1')?.documentCount).toBeUndefined();
+  });
+});

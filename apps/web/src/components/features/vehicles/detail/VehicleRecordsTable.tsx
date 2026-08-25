@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Paperclip } from 'lucide-react';
 import { formatMileage, formatMoney } from '@myfleet/ui-components';
 import { cn } from '../../../../lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
@@ -30,6 +30,15 @@ const CHIPS: ReadonlyArray<{ value: VehicleRecordKind | 'all'; label: string }> 
   { value: 'fuel', label: 'Fuel' },
   { value: 'mileage', label: 'Mileage' },
 ];
+
+/**
+ * Column count for the full-width skeleton and empty-state cells. Keep in sync
+ * with <thead>. Two hardcoded `colSpan={5}` literals previously sat in
+ * separate places and updating only one left a visibly misaligned table
+ * (PRD FR-TBL-2); this reduces two silent drift sites to one named one, and
+ * the colSpan tests assert it still matches the real header cell count.
+ */
+const COLUMN_COUNT = 6;
 
 /**
  * Type-cell badge classes, keyed by kind. mileage/fuel/maintenance use the
@@ -68,12 +77,36 @@ function TypeBadge({ kind }: { kind: VehicleRecordKind }) {
   );
 }
 
+/**
+ * The paperclip + count shown on a record that has documents attached.
+ *
+ * Both the icon and the visible digit are aria-hidden, with exactly one
+ * sr-only string carrying the whole message — otherwise a screen reader
+ * announces "3, 3 attachments" (the bare number plus the label). Uses the
+ * same sr-only + aria-hidden vocabulary as PhotoGalleryDialog.tsx, though
+ * that site takes a different approach (it appends an sr-only suffix to
+ * visible label text rather than hiding the visible text).
+ *
+ * Spans only: no button, no handler, no tabIndex. Clicks bubble to the
+ * enclosing <tr role="button">, so this adds no second affordance and no
+ * extra tab stop (PRD FR-UI-4).
+ */
+function AttachmentIndicator({ count }: { count: number }) {
+  return (
+    <span className="inline-flex items-center gap-1 text-muted-foreground">
+      <Paperclip className="h-4 w-4" aria-hidden="true" />
+      <span aria-hidden="true">{count}</span>
+      <span className="sr-only">{count === 1 ? '1 attachment' : `${count} attachments`}</span>
+    </span>
+  );
+}
+
 function SkeletonRows() {
   return (
     <>
       {[1, 2, 3].map((i) => (
         <tr key={i}>
-          <td className="p-2" colSpan={5}>
+          <td className="p-2" colSpan={COLUMN_COUNT}>
             <Skeleton className="h-8 w-full" />
           </td>
         </tr>
@@ -152,6 +185,14 @@ export function VehicleRecordsTable({
                 <th className="p-2 font-medium">Item</th>
                 <th className="p-2 font-medium">Odometer</th>
                 <th className="p-2 font-medium">Cost</th>
+                {/*
+                  Visually empty so it doesn't crowd the header row
+                  (FR-TBL-3), but still named for table-navigation mode
+                  rather than left a nameless column.
+                */}
+                <th className="p-2 font-medium">
+                  <span className="sr-only">Attachments</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -159,40 +200,56 @@ export function VehicleRecordsTable({
                 <SkeletonRows />
               ) : visible.length === 0 ? (
                 <tr>
-                  <td className="p-4 text-center text-sm text-muted-foreground" colSpan={5}>
+                  <td
+                    className="p-4 text-center text-sm text-muted-foreground"
+                    colSpan={COLUMN_COUNT}
+                  >
                     No records yet.
                   </td>
                 </tr>
               ) : (
-                visible.map((row) => (
-                  <tr
-                    key={row.id}
-                    role="button"
-                    tabIndex={0}
-                    className="cursor-pointer border-b last:border-b-0 hover:bg-accent/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={() => onSelectRow(row)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        onSelectRow(row);
-                      }
-                    }}
-                  >
-                    <td className="p-2 text-muted-foreground">
-                      {new Date(row.date).toLocaleDateString()}
-                    </td>
-                    <td className="p-2">
-                      <TypeBadge kind={row.kind} />
-                    </td>
-                    <td className="max-w-[240px] truncate p-2">{row.title}</td>
-                    <td className="p-2 text-muted-foreground">
-                      {typeof row.mileage === 'number' ? formatMileage(row.mileage) : '—'}
-                    </td>
-                    <td className="p-2 text-muted-foreground">
-                      {typeof row.cost === 'number' ? formatMoney(row.cost) : '—'}
-                    </td>
-                  </tr>
-                ))
+                visible.map((row) => {
+                  // Narrowed once here so the cell below needs no non-null
+                  // assertion. Fuel and mileage rows land on 0 because their
+                  // adapters leave the field unset, not because of a `kind`
+                  // check — the `> 0` rule below is deliberately the only
+                  // branch, which is what keeps a modification row behaving
+                  // identically to a maintenance row by construction
+                  // (PRD FR-UI-1).
+                  const documentCount = row.documentCount ?? 0;
+                  return (
+                    <tr
+                      key={row.id}
+                      role="button"
+                      tabIndex={0}
+                      className="cursor-pointer border-b last:border-b-0 hover:bg-accent/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => onSelectRow(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelectRow(row);
+                        }
+                      }}
+                    >
+                      <td className="p-2 text-muted-foreground">
+                        {new Date(row.date).toLocaleDateString()}
+                      </td>
+                      <td className="p-2">
+                        <TypeBadge kind={row.kind} />
+                      </td>
+                      <td className="max-w-[240px] truncate p-2">{row.title}</td>
+                      <td className="p-2 text-muted-foreground">
+                        {typeof row.mileage === 'number' ? formatMileage(row.mileage) : '—'}
+                      </td>
+                      <td className="p-2 text-muted-foreground">
+                        {typeof row.cost === 'number' ? formatMoney(row.cost) : '—'}
+                      </td>
+                      <td className="whitespace-nowrap p-2">
+                        {documentCount > 0 && <AttachmentIndicator count={documentCount} />}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

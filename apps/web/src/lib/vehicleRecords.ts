@@ -24,6 +24,17 @@ export interface VehicleRecordRow {
   cost?: number;
   /** Fuel volume in gallons. Populated by the fuel adapter; used to derive average economy. */
   gallons?: number;
+  /**
+   * Count of documents attached to this record. Populated (possibly 0) only by
+   * the maintenance adapter; fuel and mileage have no document concept and
+   * leave it unset. Deliberately a plain number, not an icon or component —
+   * this module is pure data and its tests assert on plain values (the same
+   * reason VehicleCard.tsx:37-40 keeps lucide-react out of modules like this).
+   * A count rather than the raw id array: the row never uses the ids, and
+   * carrying them would invite exactly the per-attachment fan-out that
+   * RecordAttachmentList.tsx:84-87 exists to avoid.
+   */
+  documentCount?: number;
 }
 
 /** One paginated source's currently-loaded rows. */

@@ -68,6 +68,11 @@ export function useVehicleRecords(vehicleId: string, categoriesQuery: Categories
         title: r.attributes.description || category?.attributes.name || r.attributes.categoryId,
         mileage: r.attributes.mileage,
         cost: r.attributes.cost,
+        // `?? 0` is load-bearing: the server omits documentMediaIds entirely
+        // when empty (omitempty, rest.go:22). An explicit 0 makes "no
+        // attachments" a fact the adapter asserts, rather than leaving it
+        // indistinguishable from fuel/mileage's "no such concept".
+        documentCount: r.attributes.documentMediaIds?.length ?? 0,
       };
     });
 
