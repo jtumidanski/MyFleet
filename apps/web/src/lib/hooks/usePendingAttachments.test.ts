@@ -143,4 +143,43 @@ describe('usePendingAttachments', () => {
     expect(result.current.items).toHaveLength(MAX_ATTACHMENTS);
     expect(result.current.isFull).toBe(true);
   });
+
+  // The cap is per RECORD, not per picker session. Counting only newly-picked
+  // files meant a record already holding eight let a user pick ten more and
+  // find out from a 422.
+  it('drops files that would exceed the combined existing-plus-pending cap', async () => {
+    mockUploadSucceeds('m1');
+    const existing = MAX_ATTACHMENTS - 2;
+    const { result } = renderHook(() => usePendingAttachments(existing));
+
+    act(() => {
+      result.current.add([file('a.pdf'), file('b.pdf'), file('c.pdf'), file('d.pdf')]);
+    });
+
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    expect(result.current.items.map((i) => i.file.name)).toEqual(['a.pdf', 'b.pdf']);
+  });
+
+  it('reports isFull once existing plus pending reaches the cap', async () => {
+    mockUploadSucceeds('m1');
+    const { result } = renderHook(() => usePendingAttachments(MAX_ATTACHMENTS - 1));
+    expect(result.current.isFull).toBe(false);
+
+    act(() => {
+      result.current.add([file('a.pdf')]);
+    });
+
+    await waitFor(() => expect(result.current.isFull).toBe(true));
+  });
+
+  it('accepts a full picker-load when the record has no existing attachments', async () => {
+    mockUploadSucceeds('m1');
+    const { result } = renderHook(() => usePendingAttachments());
+
+    act(() => {
+      result.current.add(Array.from({ length: MAX_ATTACHMENTS }, (_, i) => file(`f${i}.pdf`)));
+    });
+
+    await waitFor(() => expect(result.current.items).toHaveLength(MAX_ATTACHMENTS));
+  });
 });

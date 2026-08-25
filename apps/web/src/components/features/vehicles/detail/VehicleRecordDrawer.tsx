@@ -241,6 +241,7 @@ export function VehicleRecordDrawer({
           onSubmit={handleUpdateRecord}
           onCancel={() => setMode('view')}
           submitting={updateRecord.isPending || appendDocument.isPending}
+          existingAttachmentCount={record.attributes.documentMediaIds?.length ?? 0}
         />
       );
     } else {

@@ -17,6 +17,17 @@ interface AttachmentPickerProps {
   onRemove: (localId: string) => void;
   /** Hides the picker for viewers (PRD FR-VIEW-5). */
   disabled?: boolean;
+  /**
+   * Attachments the record already holds. The cap is per record, so on the
+   * edit path the picker's room is what is left after them. Defaults to 0, so
+   * the create-flow call site is unaffected.
+   *
+   * A prop rather than a query: this is a presentational control inside a
+   * form, and giving it a useMaintenanceRecord call would couple it to the
+   * server cache and make it untestable without a QueryClient. The drawer
+   * already holds the record.
+   */
+  existingCount?: number;
 }
 
 /**
@@ -26,9 +37,31 @@ interface AttachmentPickerProps {
  * The `accept` attribute mirrors the server allowlist as a convenience only —
  * the server answers 415 regardless of what a client offers.
  */
-export function AttachmentPicker({ items, onAdd, onRemove, disabled }: AttachmentPickerProps) {
+export function AttachmentPicker({
+  items,
+  onAdd,
+  onRemove,
+  disabled,
+  existingCount = 0,
+}: AttachmentPickerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const isFull = items.length >= MAX_ATTACHMENTS;
+  const remaining = Math.max(MAX_ATTACHMENTS - existingCount - items.length, 0);
+  const isFull = remaining === 0;
+
+  // The server cap is authoritative (a client that ignores all of this still
+  // gets a 422); this copy exists so the user finds out before picking rather
+  // than after saving.
+  let helperText: string;
+  if (isFull) {
+    helperText =
+      existingCount > 0
+        ? `This record is at the ${MAX_ATTACHMENTS}-attachment limit.`
+        : `Maximum ${MAX_ATTACHMENTS} attachments per record.`;
+  } else if (existingCount > 0) {
+    helperText = `${existingCount} of ${MAX_ATTACHMENTS} attached. You can add ${remaining} more.`;
+  } else {
+    helperText = `PDF, image, Word, Excel or CSV. Up to ${formatUploadSize(MEDIA_MAX_UPLOAD_BYTES)} each, ${MAX_ATTACHMENTS} per record.`;
+  }
 
   return (
     <div className="space-y-2">
@@ -60,11 +93,7 @@ export function AttachmentPicker({ items, onAdd, onRemove, disabled }: Attachmen
         }}
       />
 
-      <p className="text-xs text-muted-foreground">
-        {isFull
-          ? `Maximum ${MAX_ATTACHMENTS} attachments per record.`
-          : `PDF, image, Word, Excel or CSV. Up to ${formatUploadSize(MEDIA_MAX_UPLOAD_BYTES)} each, ${MAX_ATTACHMENTS} per record.`}
-      </p>
+      <p className="text-xs text-muted-foreground">{helperText}</p>
 
       {items.length > 0 && (
         <ul className="space-y-1">

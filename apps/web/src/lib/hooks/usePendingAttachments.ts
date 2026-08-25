@@ -38,7 +38,14 @@ export interface PendingAttachment {
  * Deliberately no beforeunload handler: it cannot reliably issue authenticated
  * requests during teardown, and layer 3 already covers the case.
  */
-export function usePendingAttachments() {
+/**
+ * @param existingCount attachments the record ALREADY holds. The cap is per
+ * record, so the picker's room is what is left after them. A snapshot taken
+ * when the form renders: if an attach lands from another tab mid-edit this is
+ * stale, which is exactly why the server cap stays authoritative and this is
+ * only ergonomics.
+ */
+export function usePendingAttachments(existingCount = 0) {
   const [items, setItems] = useState<PendingAttachment[]>([]);
   // A ref mirrors the list so async upload callbacks and the unmount cleanup
   // read the current value without re-subscribing on every state change.
@@ -59,7 +66,7 @@ export function usePendingAttachments() {
 
   const add = useCallback(
     (files: FileList | File[]) => {
-      const room = Math.max(MAX_ATTACHMENTS - itemsRef.current.length, 0);
+      const room = Math.max(MAX_ATTACHMENTS - existingCount - itemsRef.current.length, 0);
       const accepted = Array.from(files).slice(0, room);
       if (accepted.length === 0) {
         return;
@@ -89,7 +96,7 @@ export function usePendingAttachments() {
           );
       }
     },
-    [patch, write],
+    [existingCount, patch, write],
   );
 
   const remove = useCallback(
@@ -137,6 +144,6 @@ export function usePendingAttachments() {
     commit,
     mediaIds,
     isUploading: items.some((i) => i.status === 'uploading'),
-    isFull: items.length >= MAX_ATTACHMENTS,
+    isFull: existingCount + items.length >= MAX_ATTACHMENTS,
   };
 }
