@@ -123,6 +123,11 @@ describe('MaintenanceRecordForm', () => {
       'aria-required',
       'true',
     );
+
+    // A datetime-local input has no mapped ARIA role, so it is reached through
+    // its generated id rather than by role (see FuelForm.test.tsx).
+    const performedAt = document.querySelector('input[type="datetime-local"]');
+    expect(performedAt).toHaveAttribute('aria-required', 'true');
   });
 
   it('leaves the optional fields unmarked', () => {

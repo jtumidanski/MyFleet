@@ -177,7 +177,9 @@ export function VehicleForm({
           )}
         />
 
-        <RequiredLegend />
+        {/* The legend explains the asterisks; only render it when fields are
+            actually marked required (create mode — see make/model/year above). */}
+        {isCreate && <RequiredLegend />}
 
         <div className="flex justify-end gap-2">
           {onCancel && (

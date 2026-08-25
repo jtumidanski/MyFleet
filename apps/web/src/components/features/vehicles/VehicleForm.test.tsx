@@ -52,4 +52,12 @@ describe('VehicleForm required markers', () => {
 
     expect(screen.getByText('Required')).toBeInTheDocument();
   });
+
+  // Nothing on the edit-mode form is marked required, so the legend would
+  // explain an asterisk that never appears.
+  it('does not render the required legend in edit mode', () => {
+    render(<VehicleForm mode="edit" onSubmit={vi.fn()} />);
+
+    expect(screen.queryByText('Required')).not.toBeInTheDocument();
+  });
 });
