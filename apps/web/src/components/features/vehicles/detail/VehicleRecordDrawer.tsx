@@ -204,9 +204,12 @@ export function VehicleRecordDrawer({
   const handleConfirmRemoveAttachment = async () => {
     const mediaId = pendingRemoval;
     if (!record || !mediaId) return;
-    setPendingRemoval(null);
     try {
       await removeDocument.mutateAsync({ id: record.id, mediaId });
+      // Keep the dialog mounted while the request is in flight so a failure
+      // can be retried from it (see MemberList.tsx's handling of the same
+      // shape). Only close it once the mutation actually succeeds.
+      setPendingRemoval(null);
       toast.success('Attachment removed');
     } catch (err) {
       const apiError = createErrorFromUnknown(err);
@@ -327,38 +330,6 @@ export function VehicleRecordDrawer({
               </Button>
             </div>
           )}
-
-          {/* The copy does not name the file: the filename is resolved inside
-              AttachmentRow by useMediaObject, and lifting it up through
-              onRemove for one sentence is not worth widening that contract —
-              the unavailable row has no filename to lift anyway. */}
-          <AlertDialog
-            open={pendingRemoval !== null}
-            onOpenChange={(open) => !open && setPendingRemoval(null)}
-          >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Remove this attachment?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  It will be taken off this record and the file itself will be deleted. This cannot
-                  be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel disabled={removeDocument.isPending}>Cancel</AlertDialogCancel>
-                <AlertDialogAction
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                  disabled={removeDocument.isPending}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    void handleConfirmRemoveAttachment();
-                  }}
-                >
-                  Remove
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </div>
       );
     }
@@ -434,13 +405,50 @@ export function VehicleRecordDrawer({
   }
 
   return (
-    <Sheet open onOpenChange={(open) => !open && onClose()}>
-      <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
-        <SheetHeader>
-          <SheetTitle>{row.title}</SheetTitle>
-        </SheetHeader>
-        <div className="mt-4">{body}</div>
-      </SheetContent>
-    </Sheet>
+    <>
+      <Sheet open onOpenChange={(open) => !open && onClose()}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
+          <SheetHeader>
+            <SheetTitle>{row.title}</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4">{body}</div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Sibling of the sheet, not a child: nesting it inside SheetContent
+          would unmount the confirmation along with the sheet the moment the
+          alert took focus away, following PhotoGalleryDialog's arrangement.
+          The copy does not name the file: the filename is resolved inside
+          AttachmentRow by useMediaObject, and lifting it up through onRemove
+          for one sentence is not worth widening that contract — the
+          unavailable row has no filename to lift anyway. */}
+      <AlertDialog
+        open={pendingRemoval !== null}
+        onOpenChange={(open) => !open && setPendingRemoval(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this attachment?</AlertDialogTitle>
+            <AlertDialogDescription>
+              It will be taken off this record and the file itself will be deleted. This cannot be
+              undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removeDocument.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={removeDocument.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmRemoveAttachment();
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
