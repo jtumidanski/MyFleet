@@ -17,6 +17,8 @@ import { BaseService } from './BaseService';
  *   GET    /api/fleet/maintenance-records/{id}           — get single
  *   PATCH  /api/fleet/maintenance-records/{id}           — partial update
  *   DELETE /api/fleet/maintenance-records/{id}           — soft delete
+ *   POST   /api/fleet/maintenance-records/{id}/document-media            — attach one media object
+ *   DELETE /api/fleet/maintenance-records/{id}/document-media/{mediaId}  — detach one media object
  */
 class MaintenanceRecordService extends BaseService<
   MaintenanceRecordAttributes,
@@ -46,7 +48,7 @@ class MaintenanceRecordService extends BaseService<
     return this.createAt(`/api/fleet/vehicles/${vehicleId}/maintenance-records`, attributes);
   }
 
-  /** POST /api/fleet/maintenance-records/{id} with documentMediaIds append */
+  /** POST /api/fleet/maintenance-records/{id}/document-media */
   async appendDocumentMedia(
     id: string,
     mediaId: string,

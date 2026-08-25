@@ -45,7 +45,7 @@ type DocumentValidator interface {
 // InitializeRoutes wires the JWT-protected maintenance record endpoints.
 // vehicleAccessor resolves the owning vehicle's fleetID for authz;
 // categoryAccessor backs the ?kind= filter; docs validates attachment
-// ownership on create and may be nil.
+// ownership on create and on attach, and may be nil.
 func InitializeRoutes(
 	log logrus.FieldLogger,
 	db *gorm.DB,
@@ -323,6 +323,105 @@ func InitializeRoutes(
 				return
 			}
 			if err := proc.SoftDelete(id); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+
+		// POST /maintenance-records/{id}/document-media — attach one
+		// already-uploaded media object to an existing record.
+		//
+		// The frontend has been calling this route since task-004; it simply
+		// did not exist, so every edit-time attach 404'd and stranded a
+		// confirmed media object. The request shape below is the one the
+		// client already sends — the server is built to fit the client here,
+		// not the other way round (PRD D1).
+		r.Post("/maintenance-records/{id}/document-media", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
+			MediaID string `json:"mediaId"`
+		},
+		) {
+			identity := auth.IdentityFromContext(req.Context())
+			id := chi.URLParam(req, "id")
+			current, err := proc.GetByID(id)
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			v, err := vehicleAccessor.GetByID(current.VehicleID())
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			if err := authz.RequireSameFleet(identity, v.FleetID()); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			if err := authz.RequireWrite(identity); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+
+			// Rejected before the ownership call so a blank id never reaches
+			// media-service as `?ids=`, which would be an unbounded lookup for
+			// what is really a malformed request.
+			if attrs.MediaID == "" {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+
+			// Prove the attachment is the caller's own BEFORE anything is
+			// written, so a rejection leaves nothing to roll back. Without
+			// this, the route is a way to graft another fleet's media onto
+			// your own record and then read it back through
+			// GET /api/media/{id}/content.
+			if docs != nil {
+				if err := docs.ValidateOwnership(req.Context(), identity.ActiveFleetID, []string{attrs.MediaID}); err != nil {
+					log.WithError(err).Warn("attachment ownership validation failed")
+					server.WriteError(w, err)
+					return
+				}
+			}
+
+			updated, err := proc.AttachDocument(id, attrs.MediaID)
+			if err != nil {
+				log.WithError(err).Error("attach maintenance record document")
+				server.WriteError(w, err)
+				return
+			}
+			server.WriteJSON(w, http.StatusCreated, server.Document{Data: Transform(updated)})
+		}))
+
+		// DELETE /maintenance-records/{id}/document-media/{mediaId} — detach.
+		//
+		// This removes the REFERENCE only. Deleting the media object itself is
+		// the client's job, issued against media-service with the user's own
+		// JWT: mediaclient is the no-JWT internal client, and giving
+		// media-service's /internal surface delete authority would create an
+		// unauthenticated destructive endpoint whose only protection is a
+		// Traefik rule (PRD D3).
+		r.Delete("/maintenance-records/{id}/document-media/{mediaId}", func(w http.ResponseWriter, req *http.Request) {
+			identity := auth.IdentityFromContext(req.Context())
+			id := chi.URLParam(req, "id")
+			current, err := proc.GetByID(id)
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			v, err := vehicleAccessor.GetByID(current.VehicleID())
+			if err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			if err := authz.RequireSameFleet(identity, v.FleetID()); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			if err := authz.RequireWrite(identity); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			if err := proc.DetachDocument(id, chi.URLParam(req, "mediaId")); err != nil {
 				server.WriteError(w, err)
 				return
 			}
