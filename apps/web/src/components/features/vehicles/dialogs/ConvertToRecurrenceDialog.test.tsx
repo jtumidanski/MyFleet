@@ -8,7 +8,7 @@ import type { MaintenanceSchedule } from '../../../../types/models/maintenanceSc
 import { expectNoCall, expectNoCallWith } from '../../../../test/expectNoCall';
 
 vi.mock('../../../../services/api/MaintenanceScheduleService', () => ({
-  maintenanceScheduleService: { patch: vi.fn() },
+  maintenanceScheduleService: { patch: vi.fn(), listByVehicle: vi.fn() },
 }));
 
 const toastError = vi.fn();
@@ -35,7 +35,7 @@ const completedOneTime: MaintenanceSchedule = {
   },
 };
 
-function renderDialog(onOpenChange = vi.fn()) {
+function renderDialog(onOpenChange = vi.fn(), schedule: MaintenanceSchedule = completedOneTime) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
@@ -44,16 +44,18 @@ function renderDialog(onOpenChange = vi.fn()) {
       <ConvertToRecurrenceDialog
         open
         onOpenChange={onOpenChange}
-        schedule={completedOneTime}
+        schedule={schedule}
         categoryName="Oil Change"
       />
     </QueryClientProvider>,
   );
-  return { onOpenChange };
+  return { onOpenChange, client };
 }
 
 beforeEach(() => {
   vi.mocked(maintenanceScheduleService.patch).mockReset();
+  vi.mocked(maintenanceScheduleService.listByVehicle).mockReset();
+  vi.mocked(maintenanceScheduleService.listByVehicle).mockResolvedValue({ data: [] });
   toastError.mockReset();
 });
 
@@ -119,6 +121,65 @@ describe('ConvertToRecurrenceDialog', () => {
     await expectNoCall(
       vi.mocked(maintenanceScheduleService.patch),
       'maintenanceScheduleService.patch',
+    );
+  });
+
+  // The toast path hands this dialog the row as it looked BEFORE the completion
+  // PATCH. On a first-time completion that snapshot has no lastCompleted* at
+  // all, so the anchor line rendered nothing — the primary path for the
+  // feature. The values must come from the refreshed schedule list instead.
+  it('states the anchor from the refreshed schedule, not the pre-completion snapshot', async () => {
+    const preCompletion: MaintenanceSchedule = {
+      ...completedOneTime,
+      attributes: {
+        ...completedOneTime.attributes,
+        active: true,
+        lastCompletedDate: undefined,
+        lastCompletedMileage: undefined,
+      },
+    };
+    vi.mocked(maintenanceScheduleService.listByVehicle).mockResolvedValue({
+      data: [completedOneTime],
+    });
+
+    renderDialog(vi.fn(), preCompletion);
+
+    expect(screen.queryByText(/repeats from the completion/i)).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText(/repeats from the completion you just recorded/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/42,000/)).toBeInTheDocument();
+  });
+
+  // A conversion reactivates the row, which changes the vehicle's server-derived
+  // nextDue and the fleet's upcoming/overdue queues as well as the schedule
+  // itself. Under-invalidating leaves those views stale.
+  it('invalidates the schedule, queue and vehicle caches after converting', async () => {
+    const user = userEvent.setup();
+    vi.mocked(maintenanceScheduleService.patch).mockResolvedValue({
+      ...completedOneTime,
+      attributes: { ...completedOneTime.attributes, oneTime: false, active: true },
+    });
+    const { client } = renderDialog();
+    const invalidate = vi.spyOn(client, 'invalidateQueries');
+
+    const months = screen.getByLabelText(/every \(months\)/i);
+    await user.clear(months);
+    await user.type(months, '12');
+    await user.click(screen.getByRole('button', { name: /set up recurrence/i }));
+
+    await waitFor(() => expect(maintenanceScheduleService.patch).toHaveBeenCalledTimes(1));
+
+    const invalidated = () => invalidate.mock.calls.map(([arg]) => arg?.queryKey);
+    await waitFor(() =>
+      expect(invalidated()).toEqual(
+        expect.arrayContaining([
+          ['maintenanceSchedules', 'list'],
+          ['maintenanceSchedules', 'detail', 's1'],
+          ['maintenanceSchedules', 'queue'],
+          ['vehicles', 'detail', 'v1'],
+        ]),
+      ),
     );
   });
 });

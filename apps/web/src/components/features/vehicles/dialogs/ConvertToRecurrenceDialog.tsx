@@ -8,7 +8,10 @@ import { Button } from '../../../ui/button';
 import { Input } from '../../../ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '../../../ui/form';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
-import { useUpdateMaintenanceSchedule } from '../../../../lib/hooks/api/maintenance';
+import {
+  useMaintenanceSchedules,
+  useUpdateMaintenanceSchedule,
+} from '../../../../lib/hooks/api/maintenance';
 import {
   convertToRecurrenceSchema,
   type ConvertToRecurrenceFormInput,
@@ -42,7 +45,9 @@ export function ConvertToRecurrenceDialog({
   schedule,
   categoryName,
 }: ConvertToRecurrenceDialogProps) {
-  const update = useUpdateMaintenanceSchedule();
+  const vehicleId = schedule.attributes.vehicleId;
+  const update = useUpdateMaintenanceSchedule(vehicleId);
+  const { data: schedules } = useMaintenanceSchedules(vehicleId);
 
   const form = useForm<ConvertToRecurrenceFormInput>({
     resolver: zodResolver(convertToRecurrenceSchema),
@@ -57,7 +62,17 @@ export function ConvertToRecurrenceDialog({
   const showMonths = recurrenceType === 'time' || recurrenceType === 'hybrid';
   const showMiles = recurrenceType === 'mileage' || recurrenceType === 'hybrid';
 
-  const { lastCompletedDate, lastCompletedMileage } = schedule.attributes;
+  // The `schedule` prop is a snapshot taken BEFORE the completion PATCH — the
+  // toast action hands back the row the page held when the user pressed "Mark
+  // complete". Its lastCompleted* are absent on a first completion (so the
+  // anchor line never rendered on the toast path, this dialog's primary entry
+  // point) and one cycle behind on a re-completion. The completion mutation
+  // invalidates maintenanceScheduleKeys.lists(), so the vehicle's schedule list
+  // carries the server's post-completion values; this subscribes to the key the
+  // page already uses rather than issuing a new request. The prop remains the
+  // fallback for the cold-cache case.
+  const fresh = schedules?.find((s) => s.id === schedule.id) ?? schedule;
+  const { lastCompletedDate, lastCompletedMileage } = fresh.attributes;
   const anchorParts = [
     lastCompletedDate ? new Date(lastCompletedDate).toLocaleDateString() : null,
     lastCompletedMileage ? `${lastCompletedMileage.toLocaleString()} miles` : null,
