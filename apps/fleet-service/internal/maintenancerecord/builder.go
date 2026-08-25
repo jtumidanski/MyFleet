@@ -24,6 +24,7 @@ func (b *Builder) SetCost(cost float64) *Builder             { b.m.cost = cost; 
 func (b *Builder) SetVendor(vendor string) *Builder          { b.m.vendor = vendor; return b }
 func (b *Builder) SetNotes(notes string) *Builder            { b.m.notes = notes; return b }
 func (b *Builder) SetCreatedByUserID(userID string) *Builder { b.m.createdByUserID = userID; return b }
+
 func (b *Builder) SetDocumentMediaIDs(ids []string) *Builder { b.m.documentMediaIDs = ids; return b }
 
 // SetDescription sets the short summary, trimmed of surrounding whitespace.
