@@ -8,12 +8,12 @@ import (
 
 // Entity maps to fleet.maintenance_schedules (PRD §6, design §8.2, §10.1).
 type Entity struct {
-	ID                   string `gorm:"type:uuid;primaryKey"`
-	VehicleID            string `gorm:"type:uuid;not null;index"`
-	CategoryID           string `gorm:"type:uuid;not null"`
-	RecurrenceType       string `gorm:"not null"` // time | mileage | hybrid
-	IntervalMonths       int
-	IntervalMiles        int
+	ID             string `gorm:"type:uuid;primaryKey"`
+	VehicleID      string `gorm:"type:uuid;not null;index"`
+	CategoryID     string `gorm:"type:uuid;not null"`
+	RecurrenceType string `gorm:"not null"` // time | mileage | hybrid
+	IntervalMonths int
+	IntervalMiles  int
 	// OneTime marks a schedule that is due once and never repeats (FR-OT-1).
 	// It is orthogonal to RecurrenceType, which continues to say which AXES
 	// the schedule is judged on rather than how often it repeats.
