@@ -55,7 +55,7 @@ All four skill-doc claims in scope check out exactly against the post-change tre
 
 | Check | Verification | Result |
 |---|---|---|
-| No `toolchain` directive added | `grep -rn "^toolchain" apps/*/go.mod packages/*/go.mod go.work` → zero matches | PASS — deliberate per design; an older local `go` binary will hard-error rather than silently auto-downloading 1.27 |
+| No `toolchain` directive added | `grep -rn "^toolchain" apps/*/go.mod packages/*/go.mod go.work` → zero matches | PASS — deliberate per design; a `toolchain` line would only name a second version string that could drift from the `go` directive, and omitting it changes nothing about download behavior — under the default `GOTOOLCHAIN=auto` an older local `go` silently downloads 1.27 regardless; only `GOTOOLCHAIN=local` (not set here) would make an older `go` fail outright |
 | `go 1.27.0` directive form (not bare `1.27`) | All 6 `go.mod` + `go.work` diffs show `go 1.25.0` → `go 1.27.0` | PASS — full patch-version form used consistently everywhere it was already used pre-change |
 | Builder tag `golang:1.27-alpine` is a floating minor tag, not a digest pin | `apps/*/Dockerfile:1` | Confirmed as designed/expected — flagged here per audit instructions as a floating tag but this is the pre-existing repo convention (prior tag `golang:1.26-alpine` was equally floating), not a regression introduced by this branch. No action item. |
 | `go.work.sum` working-tree state | `git status --short go.work.sum` → no output | PASS — clean; the known golangci-lint v2.13.1 side effect (documented in `progress.md`, ruling P-7) is not present in this worktree right now and was not committed |
