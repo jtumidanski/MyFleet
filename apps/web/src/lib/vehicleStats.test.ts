@@ -42,6 +42,7 @@ function schedule(
       vehicleId: 'v1',
       categoryId: 'oil-change',
       recurrenceType: 'mileage',
+      oneTime: false,
       status,
       severity: 'informational',
       active: true,

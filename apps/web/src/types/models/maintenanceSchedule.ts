@@ -10,6 +10,11 @@ export interface MaintenanceScheduleAttributes {
   recurrenceType: string;
   intervalMonths?: number;
   intervalMiles?: number;
+  /** True when the schedule is due once and never repeats. Always present. */
+  oneTime: boolean;
+  /** RFC3339. The permanent due point of a one-time schedule, or a recurring schedule's first-due anchor. */
+  dueDate?: string;
+  dueMileage?: number;
   /** RFC3339 */
   lastCompletedDate?: string;
   lastCompletedMileage?: number;
@@ -29,15 +34,28 @@ export type MaintenanceSchedule = JsonApiResource<MaintenanceScheduleAttributes>
 export interface CreateMaintenanceScheduleAttributes {
   categoryId: string;
   recurrenceType: string;
+  oneTime?: boolean;
   intervalMonths?: number;
   intervalMiles?: number;
+  /** RFC3339 */
+  dueDate?: string;
+  dueMileage?: number;
 }
 
 /** PATCH /api/fleet/maintenance-schedules/{id} body attributes */
 export interface UpdateMaintenanceScheduleAttributes {
   recurrenceType?: string;
+  oneTime?: boolean;
   intervalMonths?: number;
   intervalMiles?: number;
+  /**
+   * RFC3339, or an explicit `null` to clear the stored anchor. The server
+   * distinguishes an absent key from a null one (server.Nullable), so the two
+   * are NOT interchangeable — omitting the key leaves the anchor in place.
+   */
+  dueDate?: string | null;
+  /** 0 clears the stored odometer anchor. */
+  dueMileage?: number;
   active?: boolean;
 }
 
