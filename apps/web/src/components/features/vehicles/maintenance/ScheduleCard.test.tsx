@@ -92,7 +92,14 @@ describe('ScheduleCard — active one-time', () => {
   });
 
   it('still offers Complete', () => {
-    renderCard(schedule({ oneTime: true, intervalMonths: undefined, dueMileage: 60000, recurrenceType: 'mileage' }));
+    renderCard(
+      schedule({
+        oneTime: true,
+        intervalMonths: undefined,
+        dueMileage: 60000,
+        recurrenceType: 'mileage',
+      }),
+    );
     expect(screen.getByRole('button', { name: /complete/i })).toBeInTheDocument();
   });
 });

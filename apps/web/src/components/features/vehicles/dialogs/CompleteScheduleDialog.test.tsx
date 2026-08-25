@@ -16,7 +16,9 @@ vi.mock('../../../../services/api/MaintenanceScheduleService', () => ({
 // The vehicle and mileage queries are incidental to what is under test; stub
 // the hooks rather than the transport so the dialog mounts without a network.
 vi.mock('../../../../lib/hooks/api/vehicles', () => ({
-  useVehicle: () => ({ data: { id: 'v1', type: 'vehicles', attributes: { currentMileage: 40000 } } }),
+  useVehicle: () => ({
+    data: { id: 'v1', type: 'vehicles', attributes: { currentMileage: 40000 } },
+  }),
   // useCompleteMaintenanceSchedule's onSettled invalidates vehicleKeys.detail;
   // the mock needs a real implementation of it, not just useVehicle.
   vehicleKeys: {
@@ -61,7 +63,9 @@ function schedule(overrides: Partial<MaintenanceScheduleAttributes>): Maintenanc
 async function completeVia(s: MaintenanceSchedule) {
   const user = userEvent.setup();
   const onRequestConvert = vi.fn();
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   render(
     <QueryClientProvider client={client}>
       <CompleteScheduleDialog
@@ -88,7 +92,9 @@ beforeEach(() => {
 
 describe('CompleteScheduleDialog success toast', () => {
   it('offers a Set up recurrence action after completing a one-time schedule', async () => {
-    await completeVia(schedule({ oneTime: true, intervalMonths: undefined, dueDate: '2026-11-30T00:00:00Z' }));
+    await completeVia(
+      schedule({ oneTime: true, intervalMonths: undefined, dueDate: '2026-11-30T00:00:00Z' }),
+    );
 
     await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
     const [, options] = toastSuccess.mock.calls[0] as [string, { action?: { label: string } }];

@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  maintenanceScheduleSchema,
-  convertToRecurrenceSchema,
-} from './maintenanceSchedule';
+import { maintenanceScheduleSchema, convertToRecurrenceSchema } from './maintenanceSchedule';
 
 const DUE_DATE = '2026-11-30';
 const DUE_MILEAGE = 60000;
@@ -54,7 +51,9 @@ describe('maintenanceScheduleSchema — recurring', () => {
   });
 
   it('rejects a zero intervalMonths', () => {
-    expect(maintenanceScheduleSchema.safeParse({ ...recurringTime, intervalMonths: 0 }).success).toBe(false);
+    expect(
+      maintenanceScheduleSchema.safeParse({ ...recurringTime, intervalMonths: 0 }).success,
+    ).toBe(false);
   });
 
   it('requires intervalMiles for a mileage schedule', () => {
@@ -69,13 +68,15 @@ describe('maintenanceScheduleSchema — recurring', () => {
   });
 
   it('rejects a zero intervalMiles', () => {
-    expect(maintenanceScheduleSchema.safeParse({
-      categoryId: 'cat-1',
-      kind: 'recurring',
-      recurrenceType: 'mileage',
-      intervalMiles: 0,
-      dueMileage: DUE_MILEAGE,
-    }).success).toBe(false);
+    expect(
+      maintenanceScheduleSchema.safeParse({
+        categoryId: 'cat-1',
+        kind: 'recurring',
+        recurrenceType: 'mileage',
+        intervalMiles: 0,
+        dueMileage: DUE_MILEAGE,
+      }).success,
+    ).toBe(false);
   });
 
   it('accepts a complete mileage schedule', () => {
@@ -150,9 +151,9 @@ describe('maintenanceScheduleSchema — one-time', () => {
   });
 
   it('requires a due date on the time axis', () => {
-    expect(
-      firstIssuePath({ categoryId: 'cat-1', kind: 'oneTime', recurrenceType: 'time' }),
-    ).toBe('dueDate');
+    expect(firstIssuePath({ categoryId: 'cat-1', kind: 'oneTime', recurrenceType: 'time' })).toBe(
+      'dueDate',
+    );
   });
 
   it('requires a due odometer on the mileage axis', () => {
@@ -214,7 +215,9 @@ describe('maintenanceScheduleSchema — shared fields', () => {
 
 describe('convertToRecurrenceSchema', () => {
   it('accepts a time recurrence with an interval', () => {
-    expect(convertToRecurrenceSchema.safeParse({ recurrenceType: 'time', intervalMonths: 12 }).success).toBe(true);
+    expect(
+      convertToRecurrenceSchema.safeParse({ recurrenceType: 'time', intervalMonths: 12 }).success,
+    ).toBe(true);
   });
 
   it('requires intervalMonths for a time recurrence', () => {
@@ -241,6 +244,9 @@ describe('convertToRecurrenceSchema', () => {
   // The conversion dialog carries no category or due-point fields: the category
   // is fixed and read-only, and the anchor is being cleared, not set.
   it('does not require a categoryId or a due point', () => {
-    expect(convertToRecurrenceSchema.safeParse({ recurrenceType: 'mileage', intervalMiles: 5000 }).success).toBe(true);
+    expect(
+      convertToRecurrenceSchema.safeParse({ recurrenceType: 'mileage', intervalMiles: 5000 })
+        .success,
+    ).toBe(true);
   });
 });

@@ -3,8 +3,9 @@ package maintenanceschedule
 import (
 	"time"
 
-	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"gorm.io/gorm"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // Administrator is the write interface for maintenance schedule data access.

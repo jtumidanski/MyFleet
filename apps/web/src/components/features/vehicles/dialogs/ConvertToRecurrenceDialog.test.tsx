@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConvertToRecurrenceDialog } from './ConvertToRecurrenceDialog';
 import { maintenanceScheduleService } from '../../../../services/api/MaintenanceScheduleService';
 import type { MaintenanceSchedule } from '../../../../types/models/maintenanceSchedule';
+import { expectNoCall, expectNoCallWith } from '../../../../test/expectNoCall';
 
 vi.mock('../../../../services/api/MaintenanceScheduleService', () => ({
   maintenanceScheduleService: { patch: vi.fn() },
@@ -35,7 +36,9 @@ const completedOneTime: MaintenanceSchedule = {
 };
 
 function renderDialog(onOpenChange = vi.fn()) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   render(
     <QueryClientProvider client={client}>
       <ConvertToRecurrenceDialog
@@ -103,14 +106,19 @@ describe('ConvertToRecurrenceDialog', () => {
     await user.click(screen.getByRole('button', { name: /set up recurrence/i }));
 
     await waitFor(() => expect(toastError).toHaveBeenCalled());
-    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    await expectNoCallWith(onOpenChange, [false], 'onOpenChange');
   });
 
   it('does not submit without the interval its recurrence type needs', async () => {
     const user = userEvent.setup();
     renderDialog();
     await user.click(screen.getByRole('button', { name: /set up recurrence/i }));
-    await waitFor(() => expect(screen.getByText(/interval months is required/i)).toBeInTheDocument());
-    expect(maintenanceScheduleService.patch).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByText(/interval months is required/i)).toBeInTheDocument(),
+    );
+    await expectNoCall(
+      vi.mocked(maintenanceScheduleService.patch),
+      'maintenanceScheduleService.patch',
+    );
   });
 });
