@@ -9,6 +9,7 @@ require (
 	github.com/jtumidanski/myfleet/packages/dto-go v0.0.0-20260729130335-a5bfa151d5e4
 	github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55
 	github.com/sirupsen/logrus v1.10.0
+	gorm.io/driver/postgres v1.6.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
 )
@@ -45,5 +46,4 @@ require (
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gorm.io/driver/postgres v1.6.0 // indirect
 )
