@@ -5,6 +5,7 @@ import {
   useUpcomingMaintenanceQueue,
   useOverdueMaintenanceQueue,
 } from '../../../../lib/hooks/api/maintenance';
+import { categoryLabel, useCategoryNameMap } from '../../../../lib/hooks/api/labels';
 
 interface MaintenanceQueueViewProps {
   fleetId: string;
@@ -17,8 +18,13 @@ interface MaintenanceQueueViewProps {
 export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
   const { data: upcoming, isLoading: upcomingLoading } = useUpcomingMaintenanceQueue(fleetId);
   const { data: overdue, isLoading: overdueLoading } = useOverdueMaintenanceQueue(fleetId);
+  const { names, isLoading: categoriesLoading } = useCategoryNameMap();
 
-  const isLoading = upcomingLoading || overdueLoading;
+  // Every query this view reads, ORed: React Query v5's isLoading is
+  // `isPending && isFetching`, so a genuinely in-flight category query holds the
+  // skeleton (no frame can show a UUID), while a *failed* one settles to false
+  // and lets rows through with the Unknown category fallback.
+  const isLoading = upcomingLoading || overdueLoading || categoriesLoading;
 
   if (isLoading) {
     return (
@@ -48,7 +54,9 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
                 >
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{item.attributes.categoryId}</span>
+                      <span className="text-sm font-medium">
+                        {categoryLabel(names, item.attributes.categoryId)}
+                      </span>
                       <SeverityChip severity={item.attributes.severity} />
                     </div>
                     {item.attributes.nextDueDate && (
@@ -85,7 +93,9 @@ export function MaintenanceQueueView({ fleetId }: MaintenanceQueueViewProps) {
                 >
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{item.attributes.categoryId}</span>
+                      <span className="text-sm font-medium">
+                        {categoryLabel(names, item.attributes.categoryId)}
+                      </span>
                       <SeverityChip severity={item.attributes.severity} />
                     </div>
                     {item.attributes.nextDueDate && (
