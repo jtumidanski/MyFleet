@@ -201,3 +201,76 @@ func TestBuild_newRecurringScheduleIsNotBornOverdue(t *testing.T) {
 		t.Fatalf("status = %q want ok", m.Status())
 	}
 }
+
+// TestBuild_carriesDuePointThroughForBothKinds pins the builder call sequence
+// the create handler uses (SetOneTime -> intervals -> SetDuePoint ->
+// SetCurrentMileage -> Build): a due point handed to the builder must survive
+// onto the built model, for both a one-time and a recurring schedule. The
+// handler-level counterpart, which proves the HTTP route actually makes those
+// calls, is TestCreate_handlerWiresDuePointThrough in resource_test.go.
+func TestBuild_carriesDuePointThroughForBothKinds(t *testing.T) {
+	due := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
+
+	t.Run("one-time", func(t *testing.T) {
+		m, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
+			SetRecurrenceType("hybrid").SetOneTime(true).
+			SetDuePoint(due, 60000).SetCurrentMileage(59000).Build()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !m.OneTime() {
+			t.Fatal("OneTime() = false, want true")
+		}
+		if !m.DueDate().Equal(due) {
+			t.Fatalf("DueDate() = %v want %v", m.DueDate(), due)
+		}
+		if m.DueMileage() != 60000 {
+			t.Fatalf("DueMileage() = %d want 60000", m.DueMileage())
+		}
+	})
+
+	t.Run("recurring", func(t *testing.T) {
+		m, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
+			SetRecurrenceType("hybrid").
+			SetIntervalMonths(6).SetIntervalMiles(5000).
+			SetDuePoint(due, 60000).SetCurrentMileage(59000).Build()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if m.OneTime() {
+			t.Fatal("OneTime() = true, want false")
+		}
+		if !m.DueDate().Equal(due) {
+			t.Fatalf("DueDate() = %v want %v", m.DueDate(), due)
+		}
+		if m.DueMileage() != 60000 {
+			t.Fatalf("DueMileage() = %d want 60000", m.DueMileage())
+		}
+	})
+}
+
+// TestBuild_requiresDuePointForNeverCompletedSchedule pins validate()'s rule at
+// the builder: a never-completed schedule (one-time or freshly-recurring) built
+// without a due point must fail server.ErrValidation. The route-level
+// counterpart, which proves that rejection reaches the caller as a 422, is
+// TestCreate_rejectsMissingDuePointForNeverCompletedSchedule in resource_test.go.
+func TestBuild_requiresDuePointForNeverCompletedSchedule(t *testing.T) {
+	t.Run("one-time without a due point", func(t *testing.T) {
+		_, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
+			SetRecurrenceType("hybrid").SetOneTime(true).
+			SetCurrentMileage(59000).Build()
+		if !errors.Is(err, server.ErrValidation) {
+			t.Fatalf("want server.ErrValidation, got %v", err)
+		}
+	})
+
+	t.Run("recurring without a due point", func(t *testing.T) {
+		_, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
+			SetRecurrenceType("hybrid").
+			SetIntervalMonths(6).SetIntervalMiles(5000).
+			SetCurrentMileage(59000).Build()
+		if !errors.Is(err, server.ErrValidation) {
+			t.Fatalf("want server.ErrValidation, got %v", err)
+		}
+	})
+}

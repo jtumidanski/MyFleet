@@ -2,11 +2,8 @@ package maintenanceschedule
 
 import (
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
-
-	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // attrsJSON renders a model's attributes to a generic map so the test can
@@ -119,77 +116,4 @@ func TestTransformInternalDue_oneTimeTokenIsStableAcrossRecomputes(t *testing.T)
 	if got, want := DueCycleToken(m), due.Format(timeFormat)+"|60000"; got != want {
 		t.Fatalf("DueCycleToken = %q want %q", got, want)
 	}
-}
-
-// TestCreate_succeedsWithDuePoint pins the create handler's builder call
-// sequence (SetOneTime -> intervals -> SetDuePoint -> SetCurrentMileage ->
-// Build): a due point supplied at create time must be persisted and readable
-// back off the built model, for both a one-time and a recurring schedule.
-func TestCreate_succeedsWithDuePoint(t *testing.T) {
-	due := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
-
-	t.Run("one-time", func(t *testing.T) {
-		m, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
-			SetRecurrenceType("hybrid").SetOneTime(true).
-			SetDuePoint(due, 60000).SetCurrentMileage(59000).Build()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !m.OneTime() {
-			t.Fatal("OneTime() = false, want true")
-		}
-		if !m.DueDate().Equal(due) {
-			t.Fatalf("DueDate() = %v want %v", m.DueDate(), due)
-		}
-		if m.DueMileage() != 60000 {
-			t.Fatalf("DueMileage() = %d want 60000", m.DueMileage())
-		}
-	})
-
-	t.Run("recurring", func(t *testing.T) {
-		m, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
-			SetRecurrenceType("hybrid").
-			SetIntervalMonths(6).SetIntervalMiles(5000).
-			SetDuePoint(due, 60000).SetCurrentMileage(59000).Build()
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if m.OneTime() {
-			t.Fatal("OneTime() = true, want false")
-		}
-		if !m.DueDate().Equal(due) {
-			t.Fatalf("DueDate() = %v want %v", m.DueDate(), due)
-		}
-		if m.DueMileage() != 60000 {
-			t.Fatalf("DueMileage() = %d want 60000", m.DueMileage())
-		}
-	})
-}
-
-// TestCreate_requiresDuePointForNeverCompletedSchedule pins the regression
-// Task 4's validate() introduced and Task 8's create handler fixed: creating a
-// never-completed schedule (one-time or freshly-recurring) without a due point
-// must fail server.ErrValidation. Task 4 made validate() require the due
-// point; that broke every create until Task 8 wired SetOneTime / SetDuePoint /
-// SetCurrentMileage into the create handler. The only prior proof of this was
-// a temporary test the implementer deleted — this is the durable replacement.
-func TestCreate_requiresDuePointForNeverCompletedSchedule(t *testing.T) {
-	t.Run("one-time without a due point", func(t *testing.T) {
-		_, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
-			SetRecurrenceType("hybrid").SetOneTime(true).
-			SetCurrentMileage(59000).Build()
-		if !errors.Is(err, server.ErrValidation) {
-			t.Fatalf("want server.ErrValidation, got %v", err)
-		}
-	})
-
-	t.Run("recurring without a due point", func(t *testing.T) {
-		_, err := NewBuilder().SetVehicleID("v1").SetCategoryID("c1").
-			SetRecurrenceType("hybrid").
-			SetIntervalMonths(6).SetIntervalMiles(5000).
-			SetCurrentMileage(59000).Build()
-		if !errors.Is(err, server.ErrValidation) {
-			t.Fatalf("want server.ErrValidation, got %v", err)
-		}
-	})
 }
