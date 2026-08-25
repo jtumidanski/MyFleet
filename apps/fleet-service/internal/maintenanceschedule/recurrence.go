@@ -22,12 +22,37 @@ type Thresholds struct {
 // DefaultThresholds: 30 days / 500 mi (design §10.1, FR-STATUS-2). Configurable.
 var DefaultThresholds = Thresholds{DueSoonDays: 30, DueSoonMiles: 500}
 
+// NextDue resolves a schedule's next due point, one axis at a time.
+//
+// Each axis prefers the stored absolute due point over interval arithmetic. For
+// a one-time schedule that point is permanent; for a recurring schedule it is
+// the first-due anchor, which the completion flow clears so that arithmetic
+// from the new completion point takes over for every subsequent cycle
+// (FR-OT-4, FR-ANCHOR-2, FR-ANCHOR-3).
+//
+// The override is per AXIS rather than per schedule: a hybrid row may hold one
+// anchor and not the other, and the presence of one must not suppress the
+// other's arithmetic.
+//
+// The !s.OneTime guard is what makes a one-time axis terminal. Without it, a
+// completed one-time schedule whose anchor was cleared would fall back to
+// lastCompleted + 0 — "due again the instant it was completed".
 func NextDue(s Schedule) (nextDate time.Time, nextMiles int) {
 	if s.RecurrenceType == "time" || s.RecurrenceType == "hybrid" {
-		nextDate = s.LastCompletedDate.AddDate(0, s.IntervalMonths, 0)
+		switch {
+		case !s.DueDate.IsZero():
+			nextDate = s.DueDate
+		case !s.OneTime:
+			nextDate = s.LastCompletedDate.AddDate(0, s.IntervalMonths, 0)
+		}
 	}
 	if s.RecurrenceType == "mileage" || s.RecurrenceType == "hybrid" {
-		nextMiles = s.LastCompletedMileage + s.IntervalMiles
+		switch {
+		case s.DueMileage > 0:
+			nextMiles = s.DueMileage
+		case !s.OneTime:
+			nextMiles = s.LastCompletedMileage + s.IntervalMiles
+		}
 	}
 	return
 }
