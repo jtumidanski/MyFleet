@@ -9,6 +9,7 @@ import {
 } from './maintenance';
 import { maintenanceRecordService } from '../../../services/api/MaintenanceRecordService';
 import { mediaService } from '../../../services/api/MediaService';
+import { expectNoCall } from '../../../test/expectNoCall';
 
 vi.mock('../../../services/api/MaintenanceRecordService', () => ({
   maintenanceRecordService: {
@@ -86,7 +87,7 @@ describe('useRemoveMaintenanceRecordDocument', () => {
     await expect(
       result.current.mutateAsync({ id: 'rec-1', mediaId: 'media-1' }),
     ).rejects.toThrow();
-    expect(mediaService.remove).not.toHaveBeenCalled();
+    await expectNoCall(mediaService.remove);
   });
 
   it('invalidates the record detail and the record lists', async () => {
