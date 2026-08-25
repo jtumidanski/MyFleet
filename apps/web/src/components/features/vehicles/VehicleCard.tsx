@@ -16,6 +16,7 @@ import { VehiclePhotoThumbnail } from './VehiclePhotoThumbnail';
 import { vehicleBanner, type BannerIcon, type BannerTone } from './vehicleBanner';
 import { buildCarfaxUrl } from '../../../lib/carfax';
 import { useRuntimeConfig } from '../../../lib/hooks/useRuntimeConfig';
+import { vehicleTitle } from '../../../lib/utils/vehicleTitle';
 import { cn } from '../../../lib/utils';
 import type { Vehicle } from '../../../types/models/vehicle';
 
@@ -50,9 +51,7 @@ const EM_DASH = '—';
 
 export function VehicleCard({ vehicle }: { vehicle: Vehicle }) {
   const { attributes } = vehicle;
-  const title =
-    attributes.nickname?.trim() ||
-    `${attributes.year} ${attributes.make} ${attributes.model}`.trim();
+  const title = vehicleTitle(attributes);
 
   const banner = vehicleBanner(attributes, new Date());
   const BannerIconComponent = BANNER_ICONS[banner.icon];

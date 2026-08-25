@@ -2,15 +2,28 @@ import { Skeleton } from '../../../ui/skeleton';
 import { Card, CardContent } from '../../../ui/card';
 import { SeverityChip } from '../../vehicles/maintenance/SeverityChip';
 import { useOverdueMaintenanceQueue } from '../../../../lib/hooks/api/maintenance';
+import {
+  categoryLabel,
+  useCategoryNameMap,
+  useVehicleTitleMap,
+  vehicleLabel,
+} from '../../../../lib/hooks/api/labels';
 
 interface OverdueMaintenanceWidgetProps {
   fleetId: string;
 }
 
 export function OverdueMaintenanceWidget({ fleetId }: OverdueMaintenanceWidgetProps) {
-  const { data: items, isLoading } = useOverdueMaintenanceQueue(fleetId);
+  const { data: items, isLoading: queueLoading } = useOverdueMaintenanceQueue(fleetId);
+  const { names, isLoading: categoriesLoading } = useCategoryNameMap();
+  const { titles, isLoading: vehiclesLoading } = useVehicleTitleMap(fleetId);
 
-  if (isLoading) {
+  // Every query the rows read, ORed. React Query v5's isLoading is
+  // `isPending && isFetching`: an in-flight supporting query holds the skeleton
+  // so no frame can show a UUID (FR-LOAD-1), while a failed one settles to false
+  // and lets rows through with the Unknown fallbacks (FR-LOAD-3). A disabled
+  // query reports isLoading false, so a null fleetId never wedges the skeleton.
+  if (queueLoading || categoriesLoading || vehiclesLoading) {
     return (
       <Card>
         <CardContent className="pt-4 space-y-2">
@@ -31,12 +44,34 @@ export function OverdueMaintenanceWidget({ fleetId }: OverdueMaintenanceWidgetPr
         ) : (
           <ul className="space-y-2">
             {items.slice(0, 5).map((item) => (
+              // min-w-0 is load-bearing: a flex child defaults to
+              // min-width:auto, so without it `truncate` does nothing and a long
+              // category name pushes the chip out of the card.
               <li
                 key={item.id}
-                className="flex items-center justify-between text-sm border-b pb-2 last:border-0"
+                className="flex items-start justify-between gap-2 text-sm border-b pb-2 last:border-0"
               >
-                <span className="font-medium">{item.attributes.categoryId}</span>
-                <SeverityChip severity={item.attributes.severity} />
+                <div className="min-w-0 flex-1 space-y-0.5">
+                  <p className="truncate font-medium">
+                    {categoryLabel(names, item.attributes.categoryId)}
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {vehicleLabel(titles, item.attributes.vehicleId)}
+                  </p>
+                  {item.attributes.nextDueDate && (
+                    <p className="text-xs text-muted-foreground">
+                      Was due {new Date(item.attributes.nextDueDate).toLocaleDateString()}
+                    </p>
+                  )}
+                  {/* `? :` not `&&`: nextDueMileage is a Go int with omitempty,
+                      and `&&` on a number renders a literal 0 into the row. */}
+                  {item.attributes.nextDueMileage ? (
+                    <p className="text-xs text-muted-foreground">
+                      At {item.attributes.nextDueMileage.toLocaleString()} miles
+                    </p>
+                  ) : null}
+                </div>
+                <SeverityChip severity={item.attributes.severity} className="shrink-0" />
               </li>
             ))}
           </ul>
