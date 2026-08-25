@@ -20,6 +20,11 @@ interface CompleteScheduleDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   schedule: MaintenanceSchedule;
+  /**
+   * Opens the conversion dialog. Owned by the PAGE, not nested here: the two
+   * dialogs are independent, so dismissing one must not affect the other.
+   */
+  onRequestConvert: (schedule: MaintenanceSchedule) => void;
 }
 
 /**
@@ -32,6 +37,7 @@ export function CompleteScheduleDialog({
   open,
   onOpenChange,
   schedule,
+  onRequestConvert,
 }: CompleteScheduleDialogProps) {
   const vehicleId = schedule.attributes.vehicleId;
   const { data: vehicle } = useVehicle(vehicleId);
@@ -60,7 +66,19 @@ export function CompleteScheduleDialog({
           latestMileage: values.latestMileage,
         },
       });
-      toast.success('Maintenance marked as complete');
+      // FR-CONV-1 / FR-CONV-5: the conversion offer rides the success toast,
+      // and only for a one-time schedule. Completing a recurring one keeps the
+      // plain toast — there is nothing to convert.
+      if (schedule.attributes.oneTime) {
+        toast.success('Maintenance marked as complete', {
+          action: {
+            label: 'Set up recurrence',
+            onClick: () => onRequestConvert(schedule),
+          },
+        });
+      } else {
+        toast.success('Maintenance marked as complete');
+      }
       onOpenChange(false);
     } catch (err) {
       const apiError = createErrorFromUnknown(err);
