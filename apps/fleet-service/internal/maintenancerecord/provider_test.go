@@ -11,7 +11,10 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
-func newTestDB(t *testing.T) *gorm.DB {
+// newTestDBWithoutIndexes builds the schema-qualified sqlite fixture WITHOUT
+// the partial unique indexes, so a test can seed rows that the index would
+// reject and then prove ApplyPartialIndexes cleans them up.
+func newTestDBWithoutIndexes(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	if err != nil {
@@ -42,6 +45,19 @@ func newTestDB(t *testing.T) *gorm.DB {
 		if err := db.Exec(stmt).Error; err != nil {
 			t.Fatalf("ddl: %v", err)
 		}
+	}
+	return db
+}
+
+// newTestDB is the fixture every other test uses: the same schema production
+// gets, indexes included. Applying the real ApplyPartialIndexes here rather
+// than hand-writing the DDL is deliberate — a test database without the
+// index would let a duplicate-row bug pass.
+func newTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db := newTestDBWithoutIndexes(t)
+	if err := ApplyPartialIndexes(db); err != nil {
+		t.Fatalf("apply partial indexes: %v", err)
 	}
 	return db
 }
