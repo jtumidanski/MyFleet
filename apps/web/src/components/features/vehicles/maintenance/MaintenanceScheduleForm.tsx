@@ -92,6 +92,19 @@ export function MaintenanceScheduleForm({
     }
   }, [recurring, showMonths, showMiles, intervalMonths, intervalMiles, currentMileage, setValue]);
 
+  // A one-time schedule forbids intervalMonths/intervalMiles (see the schema's
+  // superRefine), but the interval FormFields only render while `recurring` is
+  // true. Without this, switching to one-time leaves a stale interval value in
+  // form state that the resolver rejects with no visible field to show the
+  // error on — the form silently refuses to submit. Clearing on the way out is
+  // enough: those fields stay unmounted for the rest of the one-time session,
+  // so nothing repopulates them before a possible switch back to recurring.
+  useEffect(() => {
+    if (recurring) return;
+    setValue('intervalMonths', undefined);
+    setValue('intervalMiles', undefined);
+  }, [recurring, setValue]);
+
   const dueDateLabel = recurring ? 'First due date' : 'Due date';
   const dueMileageLabel = recurring ? 'First due odometer (miles)' : 'Due odometer (miles)';
 

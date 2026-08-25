@@ -237,4 +237,40 @@ describe('MaintenanceScheduleForm — submission', () => {
       }),
     );
   });
+
+  // Regression: typing an interval while recurring, then switching to
+  // one-time, used to leave the stale interval value in form state. The
+  // interval FormField only renders for a recurring schedule, so the schema's
+  // "a one-time schedule cannot repeat" error had no field to attach to —
+  // handleSubmit silently refused to call onSubmit, with no visible error.
+  it('submits successfully after switching from repeating to one-time with an interval already entered', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderForm();
+
+    await user.click(screen.getByRole('combobox', { name: /category/i }));
+    await user.click(await screen.findByRole('option', { name: /oil change/i }));
+
+    const months = screen.getByLabelText(/every \(months\)/i);
+    await user.clear(months);
+    await user.type(months, '6');
+
+    await selectOption(/schedule type/i, /one-time/i);
+
+    const dueDate = await screen.findByLabelText(/due date/i);
+    await user.clear(dueDate);
+    await user.type(dueDate, '2027-01-15');
+
+    await user.click(screen.getByRole('button', { name: /save schedule/i }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        categoryId: 'c1',
+        kind: 'oneTime',
+        recurrenceType: 'time',
+        intervalMonths: undefined,
+        dueDate: '2027-01-15',
+      }),
+    );
+  });
 });
