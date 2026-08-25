@@ -52,7 +52,7 @@ The linter pin is a **prerequisite** of the toolchain bump, not a companion to i
 - Consumes: nothing.
 - Produces: a working tree where `tools/lint.sh --check --go` passes tree-wide under `golangci-lint v2.13.1`. Task 7 depends on this remaining true after the directive bump. Also produces the two pre-change kustomize baseline files that Task 9 diffs against.
 
-- [ ] **Step 1: Confirm a clean start and capture the manifest baseline**
+- [x] **Step 1: Confirm a clean start and capture the manifest baseline**
 
 The kustomize baseline must be captured *before* any file changes so Task 9 can prove the renders are byte-identical.
 
@@ -68,7 +68,7 @@ wc -l /tmp/task029-kustomize-*-before.yaml
 
 Expected: `git status --short` prints nothing, and both baseline files are non-empty. If the worktree is dirty, stop and report — do not stash someone else's work.
 
-- [ ] **Step 2: Reproduce the failure that motivates this task**
+- [x] **Step 2: Reproduce the failure that motivates this task**
 
 Run the pinned linter under the current pin so the "before" state is observed rather than assumed:
 
@@ -78,7 +78,7 @@ tools/lint.sh --check --go packages/dto-go
 
 Expected: FAIL, with `unknown field rfd in struct literal of type splicePipe (typecheck)` pointing into the Go 1.27 stdlib's `internal/poll/splice_linux.go`. This is the failing "test" for this task.
 
-- [ ] **Step 3: Bump the lint pin**
+- [x] **Step 3: Bump the lint pin**
 
 `tools/lint.versions` is a shell-sourced key=value file read by both local runs and CI. Change line 5 only; leave the four comment lines above it untouched.
 
@@ -87,7 +87,7 @@ Expected: FAIL, with `unknown field rfd in struct literal of type splicePipe (ty
 +GOLANGCI_LINT_VERSION=v2.13.1
 ```
 
-- [ ] **Step 4: Verify the pin fixes type-checking and surfaces exactly three gofumpt findings**
+- [x] **Step 4: Verify the pin fixes type-checking and surfaces exactly three gofumpt findings**
 
 ```bash
 tools/lint.sh --check --go
@@ -106,7 +106,7 @@ Expected: FAIL, but for a completely different reason than Step 2 — no typeche
 
 **If you see any finding from an analyzer (staticcheck, govet, errcheck, …) rather than `gofumpt`, stop and report.** The probe measured zero analyzer findings; an analyzer finding means the newer vendored `honnef.co/go/tools v0.8.0` caught something real, which is a scope question for the user (FR-12 forbids suppressing it) — not something to silently fix or ignore.
 
-- [ ] **Step 5: Apply the formatter fixes automatically**
+- [x] **Step 5: Apply the formatter fixes automatically**
 
 Do **not** hand-edit these. The rule at work is a newer-gofumpt rule about runs of single-line function bodies whose alignment column differs from the declaration that follows; let the formatter decide the exact bytes.
 
@@ -125,7 +125,7 @@ For orientation, this is the shape of the change in `apps/fleet-service/internal
 
 **Anti-goal, recorded so the implementation does not drift into it:** the alignment churn in these builder files is tempting bait for "while we're here, let's restructure these builders." Do not. Whitespace, nothing else.
 
-- [ ] **Step 6: Verify the fixes are whitespace-only**
+- [x] **Step 6: Verify the fixes are whitespace-only**
 
 ```bash
 git diff --stat
@@ -136,7 +136,7 @@ git diff -w -- apps/fleet-service/internal/fuel/builder.go \
 
 Expected: `--stat` lists exactly those three `.go` files plus `tools/lint.versions`, and the whitespace-ignoring diff prints **nothing**. Any non-empty `-w` diff means an identifier, expression, or statement changed — revert and re-run fix mode.
 
-- [ ] **Step 7: Verify lint is clean tree-wide**
+- [x] **Step 7: Verify lint is clean tree-wide**
 
 ```bash
 tools/lint.sh --check --go
@@ -144,7 +144,7 @@ tools/lint.sh --check --go
 
 Expected: `lint.sh: OK` and `0 issues.` per module, all six.
 
-- [ ] **Step 8: Verify the code still compiles and tests pass**
+- [x] **Step 8: Verify the code still compiles and tests pass**
 
 ```bash
 make vet && make test
@@ -152,7 +152,7 @@ make vet && make test
 
 Expected: both pass. These run under the local `go1.27.0` against the still-`1.25.0` directives — the probe captured this green, so a failure here is not caused by this task's edits and must be root-caused before proceeding.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add tools/lint.versions \
@@ -184,7 +184,7 @@ The directive change is the formality, not the hazard — the probe confirmed th
 - Consumes: Task 1's lint pin — without it, Step 5 of this task fails on every module.
 - Produces: a workspace whose minimum toolchain is Go 1.27.0. Task 8's container builds depend on this: a builder image older than 1.27 now fails loudly, which is what makes a Dockerfile tag typo detectable.
 
-- [ ] **Step 1: Change all seven directives**
+- [x] **Step 1: Change all seven directives**
 
 Every one of the seven files currently has the identical line `go 1.25.0`. This is the one place in this plan where a repository-wide mechanical sweep via shell is the right tool:
 
@@ -192,7 +192,7 @@ Every one of the seven files currently has the identical line `go 1.25.0`. This 
 sed -i 's/^go 1\.25\.0$/go 1.27.0/' go.work apps/*/go.mod packages/*/go.mod
 ```
 
-- [ ] **Step 2: Verify all seven changed and nothing else did**
+- [x] **Step 2: Verify all seven changed and nothing else did**
 
 ```bash
 grep -H '^go ' go.work apps/*/go.mod packages/*/go.mod
@@ -201,13 +201,13 @@ git diff --stat
 
 Expected: seven lines, each `go 1.27.0`, from `go.work`, the four `apps/*/go.mod`, and the two `packages/*/go.mod`. `--stat` shows exactly seven files, one insertion and one deletion each.
 
-- [ ] **Step 3: Tidy**
+- [x] **Step 3: Tidy**
 
 ```bash
 make tidy
 ```
 
-- [ ] **Step 4: Verify no `toolchain` directive was inserted (FR-3)**
+- [x] **Step 4: Verify no `toolchain` directive was inserted (FR-3)**
 
 ```bash
 grep -n '^toolchain' go.work apps/*/go.mod packages/*/go.mod
@@ -215,7 +215,7 @@ grep -n '^toolchain' go.work apps/*/go.mod packages/*/go.mod
 
 Expected: no output (grep exits 1). If a `toolchain` line appeared, delete it and re-run this check. A `toolchain` line would only add a second version string that could drift from the `go` directive, which the PRD's non-goals explicitly reject in favour of one authoritative surface. (Omitting it does not block older toolchains — under the default `GOTOOLCHAIN=auto` the `go` directive alone triggers a silent auto-download; a hard `requires go >= 1.27.0` error only occurs under `GOTOOLCHAIN=local`, which this project does not set.)
 
-- [ ] **Step 5: Verify the checksum churn is bookkeeping only (FR-4)**
+- [x] **Step 5: Verify the checksum churn is bookkeeping only (FR-4)**
 
 The probe measured this precisely: **+12 lines, all additions, all `/go.mod` hash lines** for modules already in the graph (`github.com/alecthomas/units`, `github.com/creack/pty`, `github.com/google/gofuzz`, `github.com/modern-go/concurrent`, and similar). Make the check mechanical rather than eyeball-based:
 
@@ -232,7 +232,7 @@ git diff -- '**/go.mod' | grep -E '^[+-]\s+[a-z0-9.]+\.[a-z]+/' || echo "OK: no 
 
 Expected: all three print their `OK:` message. Anything else means something other than bookkeeping happened — root-cause it, do not commit through it.
 
-- [ ] **Step 6: Verify the workspace still builds, vets, tests, and lints**
+- [x] **Step 6: Verify the workspace still builds, vets, tests, and lints**
 
 ```bash
 make vet && make build && make test && make lint-check
@@ -240,7 +240,7 @@ make vet && make build && make test && make lint-check
 
 Expected: all four pass. `make test` is `go test -race` across the workspace; the probe captured it green on 1.27 pre-change, so any failure now is attributable to the directive bump and must be root-caused, not retried.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add go.work go.work.sum apps/*/go.mod apps/*/go.sum packages/*/go.mod packages/*/go.sum
@@ -263,7 +263,7 @@ bookkeeping only; no dependency version changes."
 - Consumes: nothing from prior tasks (the tag change is independent), but lands after Task 2 per design §3's forced ordering.
 - Produces: the images Task 8 builds.
 
-- [ ] **Step 1: Change line 1 of all four service Dockerfiles**
+- [x] **Step 1: Change line 1 of all four service Dockerfiles**
 
 All four are byte-identical on line 1 today (`FROM golang:1.26-alpine AS build`):
 
@@ -275,7 +275,7 @@ sed -i 's|^FROM golang:1\.26-alpine AS build$|FROM golang:1.27-alpine AS build|'
 
 Note the tag is the **floating minor** `1.27-alpine`, not `1.27.0-alpine`. That is a deliberate decision (design OQ-3): it picks up Go patch releases on the next image rebuild without routing every security rollup through a Renovate PR gated behind `minimumReleaseAge: 7 days`.
 
-- [ ] **Step 2: Verify the builder changed and the runtime did not (FR-5, FR-6)**
+- [x] **Step 2: Verify the builder changed and the runtime did not (FR-5, FR-6)**
 
 ```bash
 grep -n '^FROM' apps/auth-service/Dockerfile apps/fleet-service/Dockerfile \
@@ -285,7 +285,7 @@ git status --short apps/web/Dockerfile
 
 Expected: each service shows `FROM golang:1.27-alpine AS build` on line 1 and `FROM alpine:3.24` on line 31. `alpine:3.24` is correct and stays — 3.24 is the current series, the floating tag already tracks the latest patch, and `golang:1.27-alpine` resolves to the `alpine3.24` variant, so builder and runtime stay on the same Alpine series. `git status --short apps/web/Dockerfile` must print nothing.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add apps/auth-service/Dockerfile apps/fleet-service/Dockerfile \
@@ -310,7 +310,7 @@ The comments around these lines document hard-won cache-race findings (`main.yml
 - Consumes: Task 1's lint pin. This is the ordering constraint that matters most — CI on 1.27 with `golangci-lint v2.12.2` is red by construction.
 - Produces: nothing later tasks read.
 
-- [ ] **Step 1: Change the three `go-version` inputs**
+- [x] **Step 1: Change the three `go-version` inputs**
 
 All three lines are identical (`          go-version: '1.26'`), and `1.26` appears nowhere else in either file:
 
@@ -319,7 +319,7 @@ sed -i "s/^\( *\)go-version: '1\.26'$/\1go-version: '1.27'/" \
   .github/workflows/pr.yml .github/workflows/main.yml
 ```
 
-- [ ] **Step 2: Verify all three sites and only those lines changed (FR-9)**
+- [x] **Step 2: Verify all three sites and only those lines changed (FR-9)**
 
 ```bash
 grep -rn "go-version" .github/workflows/
@@ -328,7 +328,7 @@ git diff -- .github/workflows/
 
 Expected from `grep`: exactly three `go-version: '1.27'` hits — `pr.yml:15`, `pr.yml:50`, `main.yml:44` — plus one prose occurrence at `main.yml:46` (`its key from OS/arch/go-version/file-hash only`) which is a comment and must be untouched. No `'1.26'` anywhere. Expected from `git diff`: three changed lines total, no comment lines in the diff.
 
-- [ ] **Step 3: Confirm no cache key needs busting (FR-10, design OQ-4)**
+- [x] **Step 3: Confirm no cache key needs busting (FR-10, design OQ-4)**
 
 This is a verification, not an edit. Read the keys:
 
@@ -338,7 +338,7 @@ grep -n 'key:\|restore-keys:' .github/workflows/pr.yml .github/workflows/main.ym
 
 Expected: `go-build-*` and `go-lint-*` key on `hashFiles('**/go.sum', 'go.work.sum')`; `lint-tools-*` keys on `hashFiles('tools/lint.versions')`. **None embeds the Go version, and none should be changed.** Two things happen for free: the `go.work.sum` churn from Task 2 busts the two build caches once (the expected one-run slowdown), and Task 1's `tools/lint.versions` edit self-busts the lint-tooling cache so no stale `golangci-lint-v2.12.2` binary survives. Restoring 1.26 build objects into a 1.27 job is not a correctness hazard — Go's build cache is content-addressed on a key that includes the toolchain build ID, so stale entries are inert misses, and `GOMODCACHE` is toolchain-independent.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/pr.yml .github/workflows/main.yml
@@ -365,7 +365,7 @@ Three files. `architecture-overview.md` is doubly wrong — it claims Go 1.25 *a
 - Consumes: the post-change tree, since the skill's file:line citations must be re-verified against it (FR-15).
 - Produces: nothing later tasks read.
 
-- [ ] **Step 1: Update the README prerequisite (FR-14)**
+- [x] **Step 1: Update the README prerequisite (FR-14)**
 
 `README.md:87`. This line is not cosmetic — because no `toolchain` directive is added, a contributor on older Go isn't hard-blocked at all; under the default `GOTOOLCHAIN=auto` the `go` directive alone triggers a silent download of 1.27. This README line is what makes the new floor discoverable without relying on the build to enforce it.
 
@@ -374,7 +374,7 @@ Three files. `architecture-overview.md` is doubly wrong — it claims Go 1.25 *a
 +- Go 1.27+
 ```
 
-- [ ] **Step 2: Update the architecture overview (FR-15)**
+- [x] **Step 2: Update the architecture overview (FR-15)**
 
 `.claude/skills/backend-dev-guidelines/resources/architecture-overview.md:18-19`:
 
@@ -384,7 +384,7 @@ Three files. `architecture-overview.md` is doubly wrong — it claims Go 1.25 *a
    at `.github/workflows/pr.yml:15,50`)
 ```
 
-- [ ] **Step 3: Re-verify the cited file:line references (FR-15)**
+- [x] **Step 3: Re-verify the cited file:line references (FR-15)**
 
 The citations must be true of the post-change tree, not merely plausible:
 
@@ -395,7 +395,7 @@ sed -n '15p;50p' .github/workflows/pr.yml
 
 Expected: `go 1.27.0`, and both workflow lines reading `          go-version: '1.27'`. If a line number has shifted, update the citation to the real number rather than leaving a stale one.
 
-- [ ] **Step 4: Update the scaffolding checklist (FR-16)**
+- [x] **Step 4: Update the scaffolding checklist (FR-16)**
 
 `.claude/skills/backend-dev-guidelines/resources/scaffolding-checklist.md`, lines 70 and 73. Both values are wrong today; the builder is two minors stale and the runtime base is a whole series stale:
 
@@ -409,7 +409,7 @@ Expected: `go 1.27.0`, and both workflow lines reading `          go-version: '1
 +- Runtime stage: `FROM alpine:3.24`; create and switch to a non-root user
 ```
 
-- [ ] **Step 5: Sweep for any remaining version claim outside the archives (FR-17)**
+- [x] **Step 5: Sweep for any remaining version claim outside the archives (FR-17)**
 
 ```bash
 grep -rn '1\.25\|1\.26' --include='*.md' . | grep -v node_modules
@@ -417,7 +417,7 @@ grep -rn '1\.25\|1\.26' --include='*.md' . | grep -v node_modules
 
 Expected: **hits only under `docs/tasks/task-0NN-*/`** — roughly ten files of plans, contexts, and audits from tasks 001–020. Those are records of what was true when that work happened; rewriting them would falsify the record and mislead future archaeology. Leave them. A hit anywhere else is a miss in this task and must be fixed here. (Ignore incidental matches that are not Go versions, e.g. an unrelated `1.25` in a numeric table — read each hit rather than pattern-matching blindly.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add README.md .claude/skills/backend-dev-guidelines/resources/architecture-overview.md \
@@ -443,7 +443,7 @@ This is the anti-drift mechanism, and the one place the PRD's phrasing ("gains a
 - Consumes: nothing.
 - Produces: nothing later tasks read. Behavioural confirmation lands post-merge (Step 5).
 
-- [ ] **Step 1: Add `custom.regex` to `enabledManagers`**
+- [x] **Step 1: Add `custom.regex` to `enabledManagers`**
 
 Carry this as its own step rather than folding it into "update renovate.json" — it is the single easiest thing to forget and the failure mode is silent.
 
@@ -458,7 +458,7 @@ Carry this as its own step rather than folding it into "update renovate.json" �
    ],
 ```
 
-- [ ] **Step 2: Add the `customManagers` array**
+- [x] **Step 2: Add the `customManagers` array**
 
 Insert as a new top-level key. Place it immediately after the closing `]` of `enabledManagers` (i.e. between `enabledManagers` and `packageRules`):
 
@@ -481,7 +481,7 @@ Two details that are load-bearing:
 - **`managerFilePatterns`, not `fileMatch`.** `fileMatch` is the deprecated spelling; current Renovate wants `managerFilePatterns`.
 - **The regex is anchored on `go-version:` followed by a quoted value.** The literal string `go-version` also appears in prose at `.github/workflows/main.yml:46` ("its key from OS/arch/go-version/file-hash only"). That occurrence has no `:`-then-quote following it, so it does not match — Step 4 asserts this rather than trusting it.
 
-- [ ] **Step 3: Append the grouping rule**
+- [x] **Step 3: Append the grouping rule**
 
 Append as the **last** entry of the `packageRules` array — after the in-repo-module exclusion rule — so it wins Renovate's last-rule-wins merge:
 
@@ -496,7 +496,7 @@ Append as the **last** entry of the `packageRules` array — after the in-repo-m
 
 Notes: the rule sets **no `automerge` and no `minimumReleaseAge` override**, so both inherit from the top-level config and major Go releases continue to require review (FR-18). `matchPackageNames` includes `go` as well as `golang` because Renovate's `gomod` manager *does* extract the `go` directive as a `golang-version` dependency named `go` — so the same rule sweeps the `go.work`/`go.mod` directive into the group for free, a third surface at no extra cost. The existing "Separate major upgrades" rule sets only `automerge`/`labels` and no `groupName`, so it composes with this rule rather than fighting it.
 
-- [ ] **Step 4: Verify the regex matches what it should and nothing it shouldn't**
+- [x] **Step 4: Verify the regex matches what it should and nothing it shouldn't**
 
 ```bash
 grep -nP "go-version:\s*['\"][0-9.]+['\"]" .github/workflows/*.yml
@@ -505,7 +505,7 @@ grep -n 'go-version' .github/workflows/main.yml
 
 Expected: the first command matches exactly three lines (`pr.yml:15`, `pr.yml:50`, `main.yml:44`), all showing `1.27`. The second shows those plus the prose comment at `main.yml:46` — confirming the prose line is **not** in the first command's output.
 
-- [ ] **Step 5: Validate the config and verify the existing rules survived (FR-19)**
+- [x] **Step 5: Validate the config and verify the existing rules survived (FR-19)**
 
 ```bash
 npx --yes --package renovate renovate-config-validator --strict
@@ -517,7 +517,7 @@ Expected: the validator reports the config as valid; JSON parses; and the TypeSc
 
 **Understand what this validation does and does not prove.** The validator reports "Validating as global config", which is a looser schema check than repo-config validation — it proves *syntax*, not *behaviour*. The regex manager's real proof is the next Renovate run's Dependency Dashboard showing a `go` dependency at `1.27`. That confirmation lands **post-merge and must not block the PR**; note it in the PR description as a follow-up to eyeball.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add renovate.json
@@ -542,7 +542,7 @@ Layered verification, because the layers fail differently and a single `make ci`
 - Consumes: Tasks 1–6, all committed.
 - Produces: the evidence the PR description cites.
 
-- [ ] **Step 1: Run the full gate**
+- [x] **Step 1: Run the full gate**
 
 ```bash
 export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22
@@ -551,7 +551,7 @@ make ci
 
 Expected: `lint-check`, `vet`, `test`, `build`, `fe-test`, `fe-build` all pass. `make test` is `go test -race` across the workspace, and no test may be skipped or removed relative to the pre-change baseline.
 
-- [ ] **Step 2: Audit scope discipline — no Go feature adoption crept in**
+- [x] **Step 2: Audit scope discipline — no Go feature adoption crept in**
 
 The compiler side of this migration was already de-risked (the tree tested green on `go1.27.0` before any change), so the *only* thing the directive bump changes is what the language permits — exactly the surface a well-meaning implementer starts exercising. Two commands, no judgement calls:
 
@@ -567,7 +567,7 @@ git diff -w main -- apps/fleet-service/internal/fuel/builder.go \
 
 Expected: the first lists **only** those three files; the second prints **nothing**.
 
-- [ ] **Step 3: Run the acceptance-criteria greps**
+- [x] **Step 3: Run the acceptance-criteria greps**
 
 ```bash
 grep -H '^go ' go.work apps/*/go.mod packages/*/go.mod            # all: go 1.27.0
@@ -593,7 +593,7 @@ This is the only check that exercises `golang:1.27-alpine` as an actual image ra
 - Consumes: Tasks 2 and 3.
 - Produces: image size figures for the PR description.
 
-- [ ] **Step 1: Build each service image from the repo root**
+- [x] **Step 1: Build each service image from the repo root**
 
 The build context is the repo root for every service (CLAUDE.md), which is why `-f` is required:
 
@@ -605,7 +605,7 @@ done
 
 Expected: all four succeed, no `FAILED:` lines. A failure mentioning `go.mod requires go >= 1.27.0` means the Dockerfile tag did not actually change — recheck Task 3.
 
-- [ ] **Step 2: Glance at image sizes**
+- [x] **Step 2: Glance at image sizes**
 
 ```bash
 docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' | grep task029
@@ -613,7 +613,7 @@ docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}' | grep task029
 
 Expected: sizes in line with the pre-change images. A Go minor bump moves binary size by low single-digit percentages; anything beyond a few percent gets investigated before merge rather than waved through.
 
-- [ ] **Step 3: Confirm the web image was not dragged in**
+- [x] **Step 3: Confirm the web image was not dragged in**
 
 ```bash
 git diff main --stat -- apps/web/Dockerfile
@@ -633,7 +633,7 @@ No manifest carries a Go version, so both renders must come out byte-identical t
 - Consumes: the baseline files captured in Task 1 Step 1.
 - Produces: the final green light before code review.
 
-- [ ] **Step 1: Re-render and diff against the pre-change baseline**
+- [x] **Step 1: Re-render and diff against the pre-change baseline**
 
 ```bash
 kustomize build deploy/k8s/overlays/local > /tmp/task029-kustomize-local-after.yaml
@@ -644,7 +644,7 @@ diff /tmp/task029-kustomize-main-before.yaml  /tmp/task029-kustomize-main-after.
 
 Expected: both `OK:` lines, no diff output.
 
-- [ ] **Step 2: Re-assert the `main` overlay's invariants**
+- [x] **Step 2: Re-assert the `main` overlay's invariants**
 
 ```bash
 grep -c 'kind: PersistentVolumeClaim\|kind: Secret\|kind: ClusterRole' /tmp/task029-kustomize-main-after.yaml
@@ -653,7 +653,7 @@ grep -n 'REPLACE\|CHANGEME\|TODO\|placeholder' /tmp/task029-kustomize-main-after
 
 Expected: `0` from the first, no output from the second. The `main` overlay must render with no PersistentVolumeClaims, no Secrets, no ClusterRole, and no placeholder values.
 
-- [ ] **Step 3: Run both server dry-runs**
+- [x] **Step 3: Run both server dry-runs**
 
 Rendering alone does not catch namespace or cross-resource-reference errors. `--dry-run=server` validates against the API server without persisting anything, so it is safe to point at the shared `bee` context; it needs the `traefik.io` CRDs, which bee has.
 
@@ -680,7 +680,7 @@ CLAUDE.md is explicit: always run the code-review step before opening a PR, and 
 - Consumes: Tasks 1–9.
 - Produces: the audit and the PR.
 
-- [ ] **Step 1: Request code review**
+- [x] **Step 1: Request code review**
 
 Invoke `superpowers:requesting-code-review`. It dispatches the appropriate subset of reviewers; for this branch expect `plan-adherence-reviewer` and `backend-guidelines-reviewer` (Go files changed — three whitespace-only edits). `frontend-guidelines-reviewer` is not applicable: no TypeScript or React file is touched.
 
