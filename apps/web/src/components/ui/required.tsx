@@ -14,7 +14,12 @@
 export function RequiredMarker() {
   // Leading space inside the span, on one line, so JSX cannot trim it: the
   // rendered text must be "Make *", never "Make*".
-  return <span aria-hidden="true" className="text-danger"> *</span>;
+  return (
+    <span aria-hidden="true" className="text-danger">
+      {' '}
+      *
+    </span>
+  );
 }
 
 /**

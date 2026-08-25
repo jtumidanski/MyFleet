@@ -201,8 +201,6 @@ describe('CategoryCombobox', () => {
   it('leaves the trigger without aria-required when the prop is absent', () => {
     renderCombobox();
 
-    expect(screen.getByRole('combobox', { name: 'Category' })).not.toHaveAttribute(
-      'aria-required',
-    );
+    expect(screen.getByRole('combobox', { name: 'Category' })).not.toHaveAttribute('aria-required');
   });
 });

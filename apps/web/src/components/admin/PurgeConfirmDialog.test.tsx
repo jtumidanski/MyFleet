@@ -96,10 +96,7 @@ describe('PurgeConfirmDialog', () => {
   it('marks the confirmation input required', () => {
     render(<PurgeConfirmDialog {...props()} />);
 
-    expect(screen.getByLabelText(/type the fleet name/i)).toHaveAttribute(
-      'aria-required',
-      'true',
-    );
+    expect(screen.getByLabelText(/type the fleet name/i)).toHaveAttribute('aria-required', 'true');
   });
 });
 
