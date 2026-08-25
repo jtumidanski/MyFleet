@@ -29,11 +29,16 @@ type Entity struct {
 	NextDueMileage       int
 	Status               string // ok | upcoming | overdue
 	Severity             string // informational | recommended | urgent
-	Active               bool   `gorm:"not null;default:true"`
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	DeletedAt            *time.Time `gorm:"index"`
-	PurgeOperationID     *string    `gorm:"type:uuid;index"`
+	// No "default:true" tag: GORM substitutes a field's "default" tag value for
+	// its Go zero value at Create time, which would silently turn an explicit
+	// Active=false (e.g. a completed one-time schedule, or a test seeding an
+	// inactive row) into true. Every write path already sets Active explicitly
+	// (the builder defaults it to true), so no DB-level default is needed.
+	Active           bool `gorm:"not null"`
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time `gorm:"index"`
+	PurgeOperationID *string    `gorm:"type:uuid;index"`
 }
 
 func (Entity) TableName() string { return "fleet.maintenance_schedules" }

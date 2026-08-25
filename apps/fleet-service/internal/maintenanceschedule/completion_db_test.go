@@ -1,6 +1,7 @@
 package maintenanceschedule
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancerecord"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 func newCompletionDB(t *testing.T) *gorm.DB {
@@ -146,5 +148,177 @@ func TestCompleteInTransaction(t *testing.T) {
 	}
 	if !advanced.LastCompletedDate().Equal(at) {
 		t.Fatalf("want last_completed_date %v, got %v", at, advanced.LastCompletedDate())
+	}
+}
+
+// seedVehicle inserts a vehicle at the given odometer and returns its id.
+func seedVehicle(t *testing.T, db *gorm.DB, miles int) string {
+	t.Helper()
+	v, err := vehicle.NewBuilder().SetFleetID("f1").SetMake("Honda").SetModel("Civic").
+		SetYear(2020).SetCurrentMileage(miles).Build()
+	if err != nil {
+		t.Fatalf("build vehicle: %v", err)
+	}
+	if _, err := vehicle.NewAdministrator(db).Insert(v); err != nil {
+		t.Fatalf("insert vehicle: %v", err)
+	}
+	return v.ID()
+}
+
+// countRows is a small helper so each assertion reads as one line.
+func countRows(t *testing.T, db *gorm.DB, table, where string, args ...any) int64 {
+	t.Helper()
+	var n int64
+	if err := db.Table(table).Where(where, args...).Count(&n).Error; err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return n
+}
+
+// FR-COMPLETE-1 + FR-COMPLETE-2: completing a one-time schedule writes the
+// record and the mileage row AND deactivates the schedule with its anchor
+// cleared, all in one transaction.
+func TestCompleteInTransaction_oneTimeDeactivates(t *testing.T) {
+	db := newCompletionDB(t)
+	vehicleID := seedVehicle(t, db, 40000)
+
+	s, err := NewBuilder().SetVehicleID(vehicleID).SetCategoryID("c1").
+		SetRecurrenceType("mileage").SetOneTime(true).
+		SetDuePoint(time.Time{}, 60000).SetCurrentMileage(40000).Build()
+	if err != nil {
+		t.Fatalf("build schedule: %v", err)
+	}
+	created, err := NewAdministrator(db).Insert(s)
+	if err != nil {
+		t.Fatalf("insert schedule: %v", err)
+	}
+
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
+	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	out, err := deps.CompleteInTransaction(logrus.New(), CompletionInput{
+		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
+		Date: at, LatestMileage: 60100,
+	})
+	if err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	if n := countRows(t, db, "fleet.maintenance_records", "id = ?", out.MaintenanceRecordID); n != 1 {
+		t.Fatalf("want 1 maintenance record, got %d", n)
+	}
+	if n := countRows(t, db, "fleet.mileage_records",
+		"vehicle_id = ? AND source = ? AND source_ref_id = ?", vehicleID, "maintenance", out.MaintenanceRecordID); n != 1 {
+		t.Fatalf("want 1 mileage record, got %d", n)
+	}
+
+	after, err := NewProvider(db).GetByID(created.ID())
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if after.Active() {
+		t.Error("a completed one-time schedule must be deactivated")
+	}
+	if !after.DueDate().IsZero() || after.DueMileage() != 0 {
+		t.Errorf("the due point must be cleared, got %v / %d", after.DueDate(), after.DueMileage())
+	}
+	if after.LastCompletedMileage() != 60100 || !after.LastCompletedDate().Equal(at) {
+		t.Errorf("completion point not recorded: %v / %d", after.LastCompletedDate(), after.LastCompletedMileage())
+	}
+	// A completed one-time schedule has no next due point; the generic DueState
+	// would read its zero due-date as overdue, which is what the vehicle
+	// schedule list would then render for the inactive row.
+	if after.Status() != "ok" {
+		t.Errorf("status = %q want ok", after.Status())
+	}
+}
+
+// FR-COMPLETE-5 + FR-ANCHOR-3: a recurring schedule stays active, and its
+// first-due anchor is cleared so interval arithmetic from the new completion
+// point takes over permanently.
+func TestCompleteInTransaction_recurringClearsAnchorAndStaysActive(t *testing.T) {
+	db := newCompletionDB(t)
+	vehicleID := seedVehicle(t, db, 40000)
+
+	// Anchored two years out: if the anchor survived, next-due would still be
+	// the anchor rather than completion + 12 months.
+	farAnchor := time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC)
+	s, err := NewBuilder().SetVehicleID(vehicleID).SetCategoryID("c1").
+		SetRecurrenceType("hybrid").SetIntervalMonths(12).SetIntervalMiles(5000).
+		SetDuePoint(farAnchor, 90000).SetCurrentMileage(40000).Build()
+	if err != nil {
+		t.Fatalf("build schedule: %v", err)
+	}
+	created, err := NewAdministrator(db).Insert(s)
+	if err != nil {
+		t.Fatalf("insert schedule: %v", err)
+	}
+
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
+	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := deps.CompleteInTransaction(logrus.New(), CompletionInput{
+		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
+		Date: at, LatestMileage: 42000,
+	}); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	after, err := NewProvider(db).GetByID(created.ID())
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !after.Active() {
+		t.Error("a completed recurring schedule must stay active")
+	}
+	if !after.DueDate().IsZero() || after.DueMileage() != 0 {
+		t.Errorf("the first-due anchor must be cleared, got %v / %d", after.DueDate(), after.DueMileage())
+	}
+	if want := at.AddDate(0, 12, 0); !after.NextDueDate().Equal(want) {
+		t.Errorf("next_due_date = %v want %v (completion point + interval)", after.NextDueDate(), want)
+	}
+	if after.NextDueMileage() != 47000 {
+		t.Errorf("next_due_mileage = %d want 47000", after.NextDueMileage())
+	}
+}
+
+// FR-COMPLETE-4: completing an already-inactive schedule is rejected, and the
+// rejection rolls back the record insert and the mileage append with it. This
+// is the acceptance criterion "an integration test that fails the last step and
+// asserts nothing was written".
+func TestCompleteInTransaction_inactiveScheduleWritesNothing(t *testing.T) {
+	db := newCompletionDB(t)
+	vehicleID := seedVehicle(t, db, 40000)
+
+	s, err := NewBuilder().SetVehicleID(vehicleID).SetCategoryID("c1").
+		SetRecurrenceType("mileage").SetOneTime(true).
+		SetDuePoint(time.Time{}, 60000).SetCurrentMileage(40000).Build()
+	if err != nil {
+		t.Fatalf("build schedule: %v", err)
+	}
+	created, err := NewAdministrator(db).Insert(s.WithActive(false))
+	if err != nil {
+		t.Fatalf("insert schedule: %v", err)
+	}
+
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
+	_, err = deps.CompleteInTransaction(logrus.New(), CompletionInput{
+		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
+		Date: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), LatestMileage: 60100,
+	})
+	if !errors.Is(err, server.ErrValidation) {
+		t.Fatalf("want server.ErrValidation, got %v", err)
+	}
+
+	if n := countRows(t, db, "fleet.maintenance_records", "vehicle_id = ?", vehicleID); n != 0 {
+		t.Errorf("a rejected completion wrote %d maintenance records", n)
+	}
+	if n := countRows(t, db, "fleet.mileage_records", "vehicle_id = ?", vehicleID); n != 0 {
+		t.Errorf("a rejected completion wrote %d mileage records", n)
+	}
+	var current int
+	if err := db.Table("fleet.vehicles").Select("current_mileage").Where("id = ?", vehicleID).Scan(&current).Error; err != nil {
+		t.Fatalf("read current_mileage: %v", err)
+	}
+	if current != 40000 {
+		t.Errorf("current_mileage = %d want 40000 (unchanged)", current)
 	}
 }

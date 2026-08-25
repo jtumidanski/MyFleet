@@ -3,6 +3,7 @@ package maintenanceschedule
 import (
 	"time"
 
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"gorm.io/gorm"
 )
 
@@ -44,9 +45,14 @@ func (a *dbAdministrator) Update(m Model) (Model, error) {
 	e := m.ToEntity()
 	if err := a.db.Model(&Entity{}).Where("id = ?", e.ID).
 		Updates(map[string]any{
-			"recurrence_type":  e.RecurrenceType,
-			"interval_months":  e.IntervalMonths,
-			"interval_miles":   e.IntervalMiles,
+			"recurrence_type": e.RecurrenceType,
+			"interval_months": e.IntervalMonths,
+			"interval_miles":  e.IntervalMiles,
+			"one_time":        e.OneTime,
+			// e.DueDate is a *time.Time that ToEntity leaves nil for a zero
+			// time, so a cleared anchor writes SQL NULL rather than year 1.
+			"due_date":         e.DueDate,
+			"due_mileage":      e.DueMileage,
 			"active":           e.Active,
 			"next_due_date":    e.NextDueDate,
 			"next_due_mileage": e.NextDueMileage,
@@ -78,17 +84,40 @@ func (a *dbAdministrator) AdvanceTx(tx *gorm.DB, id string, date time.Time, mile
 	if err := tx.First(&e, "id = ?", id).Error; err != nil {
 		return err
 	}
-	m := Make(e).WithLastCompleted(date, miles)
-	// Recompute next-due from the new completion point (design §10.1).
+	// FR-COMPLETE-4. The handler pre-checks this too, for the better error
+	// message, but check-then-act across two statements is a race: two
+	// concurrent completes of the same one-time schedule would both pass a
+	// handler check and both write a maintenance record. Only the check on the
+	// row THIS transaction loaded is authoritative, and failing here rolls back
+	// the record insert and the mileage append with it.
+	if !e.Active {
+		return server.ErrValidation
+	}
+
+	// Clearing the anchor happens for BOTH kinds (FR-ANCHOR-3, FR-COMPLETE-2).
+	// For a recurring schedule it hands next-due permanently to interval
+	// arithmetic from the new completion point; for a one-time schedule the row
+	// is deactivated in the same update, so the cleared anchor is never read
+	// again. Clearing before NextDue is what stops a stale anchor from
+	// outranking the completion point.
+	m := Make(e).WithLastCompleted(date, miles).WithDuePoint(time.Time{}, 0)
 	nd, nm := NextDue(m.AsSchedule())
 	m = m.WithNextDue(nd, nm)
-	// Re-derive status/severity from the new schedule at completion mileage/now.
 	state := DueState(m.AsSchedule(), time.Now().UTC(), miles, DefaultThresholds)
+	if m.OneTime() {
+		// A completed one-time schedule has no next due point at all, and the
+		// generic DueState reads a zero due-date as overdue. The row is being
+		// deactivated in this same update, but the stored status is what the
+		// vehicle's schedule list renders for an inactive row.
+		state = "ok"
+	}
 	m = m.WithStatus(state, Severity(state))
 
 	updates := map[string]any{
 		"last_completed_date":    date,
 		"last_completed_mileage": miles,
+		"due_date":               nil,
+		"due_mileage":            0,
 		"next_due_mileage":       m.NextDueMileage(),
 		"status":                 m.Status(),
 		"severity":               m.Severity(),
@@ -97,6 +126,9 @@ func (a *dbAdministrator) AdvanceTx(tx *gorm.DB, id string, date time.Time, mile
 		updates["next_due_date"] = m.NextDueDate()
 	} else {
 		updates["next_due_date"] = nil
+	}
+	if m.OneTime() {
+		updates["active"] = false
 	}
 	return tx.Model(&Entity{}).Where("id = ?", id).Updates(updates).Error
 }
