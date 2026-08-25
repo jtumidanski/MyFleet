@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
@@ -86,15 +87,31 @@ func (a *dbAdministrator) Advance(id string, date time.Time, miles int) error {
 
 func (a *dbAdministrator) AdvanceTx(tx *gorm.DB, id string, date time.Time, miles int) error {
 	var e Entity
-	if err := tx.First(&e, "id = ?", id).Error; err != nil {
+	// FR-COMPLETE-4. Two concurrent completions of the same one-time schedule
+	// must not both succeed, and a bare SELECT-then-check-then-UPDATE does not
+	// prevent that: under READ COMMITTED both readers see active=true and both
+	// pass the guard. Mutual exclusion comes from two things, not from the
+	// in-Go check:
+	//
+	//  1. this SELECT takes a row lock (FOR UPDATE), so the second transaction
+	//     blocks here until the first commits and then re-reads active=false;
+	//  2. the closing UPDATE re-asserts `active` in its WHERE, so even without
+	//     the lock the loser matches zero rows and fails.
+	//
+	// The in-Go check below is only a fast path that avoids doing the recurrence
+	// math for a row already known to be inactive.
+	//
+	// The lock clause is emitted only on Postgres: SQLite (the package's test
+	// harness) has no FOR UPDATE and would reject the statement outright. It
+	// serialises writers by database-level locking instead, and guarantee (2)
+	// holds on every dialect.
+	sel := tx
+	if d := tx.Dialector; d != nil && d.Name() == "postgres" {
+		sel = tx.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := sel.First(&e, "id = ?", id).Error; err != nil {
 		return err
 	}
-	// FR-COMPLETE-4. The handler pre-checks this too, for the better error
-	// message, but check-then-act across two statements is a race: two
-	// concurrent completes of the same one-time schedule would both pass a
-	// handler check and both write a maintenance record. Only the check on the
-	// row THIS transaction loaded is authoritative, and failing here rolls back
-	// the record insert and the mileage append with it.
 	if !e.Active {
 		return server.ErrValidation
 	}
@@ -135,7 +152,25 @@ func (a *dbAdministrator) AdvanceTx(tx *gorm.DB, id string, date time.Time, mile
 	if m.OneTime() {
 		updates["active"] = false
 	}
-	return tx.Model(&Entity{}).Where("id = ?", id).Updates(updates).Error
+	return applyAdvance(tx, id, updates)
+}
+
+// applyAdvance writes a completion's column map, re-asserting `active` so a row
+// deactivated since AdvanceTx loaded it matches nothing. Zero rows affected is
+// the same validation failure the in-Go guard reports, which rolls the whole
+// completion transaction back.
+//
+// It is a separate function so the SELECT→UPDATE window can be exercised
+// directly against an already-inactive row.
+func applyAdvance(tx *gorm.DB, id string, updates map[string]any) error {
+	res := tx.Model(&Entity{}).Where("id = ? AND active = ?", id, true).Updates(updates)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return server.ErrValidation
+	}
+	return nil
 }
 
 func (a *dbAdministrator) Recompute(id string, currentMileage int, now time.Time) error {
