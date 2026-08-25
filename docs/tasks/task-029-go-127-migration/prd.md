@@ -197,10 +197,14 @@ The baseline was captured green on this branch before any change, so any failure
 after the bump is attributable to the bump and must be root-caused, not retried.
 
 **Build reproducibility.** The `go 1.27.0` directive raises the minimum toolchain
-for anyone building the repo. Because no `toolchain` line is added, a contributor
-on an older Go gets a clear "requires go >= 1.27.0" error rather than a silent
-auto-download. This is the intended trade-off and must be reflected in the
-README prerequisite.
+for anyone building the repo. The `go` directive alone is what drives toolchain
+selection: under the default `GOTOOLCHAIN=auto`, a contributor on an older Go
+silently downloads 1.27 rather than being blocked. No `toolchain` line is added
+because it would only name a second, independent version string to keep in
+sync with the `go` directive — one fewer drift surface, and conventional for
+this kind of bump. This must be reflected in the README prerequisite so
+contributors know 1.27 is expected even though the build won't hard-stop them
+on an older toolchain.
 
 **Container size and startup.** Image size and service startup time should not
 regress meaningfully. A Go minor bump can shift binary size by a small

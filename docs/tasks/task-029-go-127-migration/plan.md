@@ -213,7 +213,7 @@ make tidy
 grep -n '^toolchain' go.work apps/*/go.mod packages/*/go.mod
 ```
 
-Expected: no output (grep exits 1). If a `toolchain` line appeared, delete it and re-run this check. A `toolchain` line would let an older Go silently auto-download a newer one, which the PRD's non-goals explicitly reject in favour of a clear `requires go >= 1.27.0` error.
+Expected: no output (grep exits 1). If a `toolchain` line appeared, delete it and re-run this check. A `toolchain` line would only add a second version string that could drift from the `go` directive, which the PRD's non-goals explicitly reject in favour of one authoritative surface. (Omitting it does not block older toolchains — under the default `GOTOOLCHAIN=auto` the `go` directive alone triggers a silent auto-download; a hard `requires go >= 1.27.0` error only occurs under `GOTOOLCHAIN=local`, which this project does not set.)
 
 - [ ] **Step 5: Verify the checksum churn is bookkeeping only (FR-4)**
 
@@ -367,7 +367,7 @@ Three files. `architecture-overview.md` is doubly wrong — it claims Go 1.25 *a
 
 - [ ] **Step 1: Update the README prerequisite (FR-14)**
 
-`README.md:87`. This line is not cosmetic — because no `toolchain` directive is added, a contributor on older Go is hard-blocked with a `requires go >= 1.27.0` error, and this line is what makes that discoverable.
+`README.md:87`. This line is not cosmetic — because no `toolchain` directive is added, a contributor on older Go isn't hard-blocked at all; under the default `GOTOOLCHAIN=auto` the `go` directive alone triggers a silent download of 1.27. This README line is what makes the new floor discoverable without relying on the build to enforce it.
 
 ```diff
 -- Go 1.25+

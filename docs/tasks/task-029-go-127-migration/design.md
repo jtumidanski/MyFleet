@@ -397,11 +397,17 @@ Low — the probe ran the same script CI runs, tree-wide, on the same pinned
 binary. Residual risk is platform-specific analysis (CI is linux/amd64, as is
 the probe machine), so this is close to eliminated.
 
-**A contributor on Go < 1.27 is hard-blocked.** Intended, per the PRD's
-non-goals: no `toolchain` directive is added, so they get an explicit
-"requires go >= 1.27.0" rather than a silent multi-hundred-megabyte auto-download.
-The README prerequisite change is what makes this discoverable, which is why
-FR-14 is not cosmetic.
+**A contributor on Go < 1.27 silently downloads a new toolchain.** Intended,
+per the PRD's non-goals: no `toolchain` directive is added, since it would
+only be a second version string that could drift from the `go` directive —
+one fewer surface to keep in sync, and conventional for a bump like this.
+Under the default `GOTOOLCHAIN=auto`, the `go` directive alone is what
+triggers this: a contributor on an older Go gets a silent, multi-hundred-
+megabyte auto-download rather than being blocked (a hard `requires go >=
+1.27.0` error only happens under `GOTOOLCHAIN=local`, which this project does
+not set). The README prerequisite change is what makes the new floor
+discoverable without relying on the build to enforce it, which is why FR-14
+is not cosmetic.
 
 **The Renovate regex manager silently does nothing.** Moderate likelihood, low
 impact — this is the `custom.regex`-missing-from-`enabledManagers` trap in
