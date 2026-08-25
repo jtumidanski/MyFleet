@@ -60,8 +60,11 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 		r.Post("/vehicles/{id}/maintenance-schedules", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			CategoryID     string `json:"categoryId"`
 			RecurrenceType string `json:"recurrenceType"`
+			OneTime        bool   `json:"oneTime"`
 			IntervalMonths int    `json:"intervalMonths"`
 			IntervalMiles  int    `json:"intervalMiles"`
+			DueDate        string `json:"dueDate"`
+			DueMileage     int    `json:"dueMileage"`
 		},
 		) {
 			identity := auth.IdentityFromContext(req.Context())
@@ -79,12 +82,27 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
+			// An empty dueDate is passed through as the zero time and left to
+			// validate; an unparseable one is a 400 here, mirroring the
+			// complete route's date handling.
+			var dueDate time.Time
+			if attrs.DueDate != "" {
+				parsed, perr := time.Parse(time.RFC3339, attrs.DueDate)
+				if perr != nil {
+					server.WriteError(w, server.ErrValidation)
+					return
+				}
+				dueDate = parsed
+			}
 			m, err := NewBuilder().
 				SetVehicleID(vehicleID).
 				SetCategoryID(attrs.CategoryID).
 				SetRecurrenceType(attrs.RecurrenceType).
+				SetOneTime(attrs.OneTime).
 				SetIntervalMonths(attrs.IntervalMonths).
 				SetIntervalMiles(attrs.IntervalMiles).
+				SetDuePoint(dueDate, attrs.DueMileage).
+				SetCurrentMileage(v.CurrentMileage()).
 				Build()
 			if err != nil {
 				server.WriteError(w, err)
@@ -118,9 +136,17 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 		// PATCH /maintenance-schedules/{id} — partial update.
 		r.Patch("/maintenance-schedules/{id}", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			RecurrenceType *string `json:"recurrenceType"`
+			OneTime        *bool   `json:"oneTime"`
 			IntervalMonths *int    `json:"intervalMonths"`
 			IntervalMiles  *int    `json:"intervalMiles"`
-			Active         *bool   `json:"active"`
+			// dueDate needs Nullable because its cleared state is a NULL
+			// column, which a *string cannot tell apart from an absent key.
+			// dueMileage stays a *int: 0 is already its "unset" encoding at the
+			// column, the model and NextDue, so {"dueMileage": 0} is
+			// unambiguous without new machinery (FR-UPD-3).
+			DueDate    server.Nullable[string] `json:"dueDate"`
+			DueMileage *int                    `json:"dueMileage"`
+			Active     *bool                   `json:"active"`
 		},
 		) {
 			identity := auth.IdentityFromContext(req.Context())
@@ -138,6 +164,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
+			var parsedDueDate time.Time
+			if attrs.DueDate.Present && attrs.DueDate.Valid {
+				parsed, perr := time.Parse(time.RFC3339, attrs.DueDate.Value)
+				if perr != nil {
+					server.WriteError(w, server.ErrValidation)
+					return
+				}
+				parsedDueDate = parsed
+			}
 			updated, err := proc.Update(id, func(m Model) Model {
 				rt := m.RecurrenceType()
 				months := m.IntervalMonths()
@@ -152,6 +187,22 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 					miles = *attrs.IntervalMiles
 				}
 				m = m.WithRecurrence(rt, months, miles)
+				if attrs.OneTime != nil {
+					m = m.WithOneTime(*attrs.OneTime)
+				}
+				dueDate := m.DueDate()
+				dueMileage := m.DueMileage()
+				if attrs.DueDate.Present {
+					// Present-but-not-valid is an explicit null: clear it.
+					dueDate = time.Time{}
+					if attrs.DueDate.Valid {
+						dueDate = parsedDueDate
+					}
+				}
+				if attrs.DueMileage != nil {
+					dueMileage = *attrs.DueMileage
+				}
+				m = m.WithDuePoint(dueDate, dueMileage)
 				if attrs.Active != nil {
 					m = m.WithActive(*attrs.Active)
 				}
@@ -213,6 +264,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			}
 			if err := authz.RequireWrite(identity); err != nil {
 				server.WriteError(w, err)
+				return
+			}
+
+			// FR-COMPLETE-4. AdvanceTx re-checks this inside the transaction,
+			// which is the authoritative check; this one exists so a caller
+			// gets a 400 without a transaction ever being opened. Placed after
+			// the authz checks so a non-member still gets 403/404, not 400.
+			if !sched.Active() {
+				server.WriteError(w, server.ErrValidation)
 				return
 			}
 
