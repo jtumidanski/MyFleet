@@ -103,7 +103,7 @@ FR-UPD-3 requires `"dueDate": null` to clear the stored anchor. `encoding/json` 
 - Consumes: nothing.
 - Produces: `type Nullable[T any] struct { Present bool; Valid bool; Value T }` with `func (n *Nullable[T]) UnmarshalJSON([]byte) error`. Task 8 uses it as `server.Nullable[string]` for the PATCH `dueDate` field.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `packages/shared-go/server/nullable_test.go`:
 
@@ -178,12 +178,12 @@ func TestNullableUnmarshal_int(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./packages/shared-go/server/... -run TestNullable -v`
 Expected: FAIL — `undefined: Nullable`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `packages/shared-go/server/nullable.go`:
 
@@ -229,12 +229,12 @@ func (n *Nullable[T]) UnmarshalJSON(b []byte) error {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `go test ./packages/shared-go/server/... -run TestNullable -v`
 Expected: PASS (four subtests plus the two standalone tests).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/shared-go/server/nullable.go packages/shared-go/server/nullable_test.go
@@ -263,7 +263,7 @@ Purely structural: the columns, the model fields, and the `Schedule` fields exis
   - `Schedule` fields `OneTime bool`, `DueDate time.Time`, `DueMileage int`.
   - Tasks 3–9 depend on every one of these names.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/fleet-service/internal/maintenanceschedule/entity_test.go`:
 
@@ -358,12 +358,12 @@ func TestAsSchedule_carriesDuePoint(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -run 'TestEntityRoundTrip|TestModelCopyWiths|TestAsSchedule' -v`
 Expected: FAIL to compile — `m.oneTime undefined`, `e.DueDate undefined`, `WithOneTime undefined`.
 
-- [ ] **Step 3: Add the entity columns and mapping**
+- [x] **Step 3: Add the entity columns and mapping**
 
 In `apps/fleet-service/internal/maintenanceschedule/entity.go`, add three fields to `Entity` immediately after `IntervalMiles`:
 
@@ -429,7 +429,7 @@ and three fields to the returned `Entity` literal, after `IntervalMiles`:
 		DueMileage:           m.dueMileage,
 ```
 
-- [ ] **Step 4: Add the model fields, accessors, copy-withs and `AsSchedule` carry**
+- [x] **Step 4: Add the model fields, accessors, copy-withs and `AsSchedule` carry**
 
 In `apps/fleet-service/internal/maintenanceschedule/model.go`, add three fields to `Model` after `intervalMiles`:
 
@@ -481,7 +481,7 @@ func (m Model) WithDuePoint(date time.Time, miles int) Model {
 }
 ```
 
-- [ ] **Step 5: Add the `Schedule` fields**
+- [x] **Step 5: Add the `Schedule` fields**
 
 In `apps/fleet-service/internal/maintenanceschedule/recurrence.go`, extend the struct (leave `NextDue` alone for now):
 
@@ -499,7 +499,7 @@ type Schedule struct {
 }
 ```
 
-- [ ] **Step 6: Add the columns to both sqlite test harnesses**
+- [x] **Step 6: Add the columns to both sqlite test harnesses**
 
 The package's tests and the admin fixtures create `fleet.maintenance_schedules` with explicit DDL rather than `AutoMigrate`. A write that names a column the DDL lacks fails with `no such column`.
 
@@ -527,12 +527,12 @@ In `apps/fleet-service/internal/admin/admintest/db.go`, replace the matching DDL
 		updated_at DATETIME, deleted_at DATETIME, purge_operation_id TEXT)`,
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [x] **Step 7: Run the tests to verify they pass**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... ./apps/fleet-service/internal/admin/... -v`
 Expected: PASS, including every pre-existing test in both packages.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/fleet-service/internal/maintenanceschedule/entity.go \
@@ -556,7 +556,7 @@ git commit -m "feat(fleet): add one_time/due_date/due_mileage to maintenance sch
 - Consumes: `Schedule.OneTime`, `Schedule.DueDate`, `Schedule.DueMileage` from Task 2.
 - Produces: no new names — `NextDue(Schedule) (time.Time, int)` keeps its signature. Every downstream consumer (Tasks 4, 6, 7, 9 and the untouched queue/banner/dashboard/feed paths) inherits the new behaviour through it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `apps/fleet-service/internal/maintenanceschedule/recurrence_test.go`:
 
@@ -684,12 +684,12 @@ func TestNextDue_oneTimeWithoutAnchorIsZero(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -run TestNextDue -v`
 Expected: FAIL — the anchored cases return interval arithmetic (or the zero-value fallback) instead of the anchor.
 
-- [ ] **Step 3: Rewrite `NextDue`**
+- [x] **Step 3: Rewrite `NextDue`**
 
 Replace the whole `NextDue` function in `apps/fleet-service/internal/maintenanceschedule/recurrence.go` with:
 
@@ -730,12 +730,12 @@ func NextDue(s Schedule) (nextDate time.Time, nextMiles int) {
 }
 ```
 
-- [ ] **Step 4: Run the whole package to verify nothing regressed**
+- [x] **Step 4: Run the whole package to verify nothing regressed**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -v`
 Expected: PASS. The pre-existing `TestNextDue` cases all carry a zero due point and `OneTime: false`, so they keep taking the arithmetic branch unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/fleet-service/internal/maintenanceschedule/recurrence.go \
@@ -764,7 +764,7 @@ Today the invariants live inside `Builder.Build` and `Processor.Update` does not
   - `func (b *Builder) SetCurrentMileage(miles int) *Builder`
   - Task 8's create handler calls all three.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/fleet-service/internal/maintenanceschedule/builder_test.go`:
 
@@ -974,12 +974,12 @@ func TestBuild_newRecurringScheduleIsNotBornOverdue(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -run 'TestBuild|TestValidate' -v`
 Expected: FAIL to compile — `SetOneTime`, `SetDuePoint`, `SetCurrentMileage`, `validate` undefined.
 
-- [ ] **Step 3: Extract `validate` and add the setters**
+- [x] **Step 3: Extract `validate` and add the setters**
 
 Rewrite `apps/fleet-service/internal/maintenanceschedule/builder.go` from the `Builder` type declaration down:
 
@@ -1090,12 +1090,12 @@ func (b *Builder) Build() (Model, error) {
 }
 ```
 
-- [ ] **Step 4: Run the package tests**
+- [x] **Step 4: Run the package tests**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -v`
 Expected: PASS. `TestCompleteInTransaction`'s fixture schedule carries `SetLastCompletedDate(base)` and `SetLastCompletedMileage(35000)`, so the never-completed carve-out exempts it from the anchor requirement and it still builds.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/fleet-service/internal/maintenanceschedule/builder.go \
@@ -1117,7 +1117,7 @@ FR-UPD-2. Today `Update` applies a mutation function, recomputes next-due, and w
 - Consumes: `validate` (Task 4), `newCompletionDB(t)` from `completion_db_test.go` (same package).
 - Produces: no new names — `Processor.Update(id string, apply func(Model) Model) (Model, error)` keeps its signature and gains a `server.ErrValidation` failure mode.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/fleet-service/internal/maintenanceschedule/processor_update_test.go`:
 
@@ -1190,12 +1190,12 @@ func TestProcessorUpdate_rejectsOneTimeWithIntervals(t *testing.T) {
 Drop the `"time"` import if the file does not otherwise use it — the two tests above do not.
 
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -run TestProcessorUpdate -v`
 Expected: FAIL — the first two cases return `nil` and write the invalid row.
 
-- [ ] **Step 3: Add the validation call**
+- [x] **Step 3: Add the validation call**
 
 In `apps/fleet-service/internal/maintenanceschedule/processor.go`, replace the body of `Update` with:
 
@@ -1224,12 +1224,12 @@ func (pr *Processor) Update(id string, apply func(Model) Model) (Model, error) {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -v`
 Expected: PASS, including every pre-existing test in the package.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/fleet-service/internal/maintenanceschedule/processor.go \
@@ -1254,7 +1254,7 @@ The already-inactive guard lives **inside** `AdvanceTx`, on the row the transact
 - Consumes: `Model.OneTime()`, `WithDuePoint` (Task 2), `NextDue` (Task 3).
 - Produces: no signature changes. `AdvanceTx` gains a `server.ErrValidation` failure mode on an inactive target; `Administrator.Update` now persists `one_time`, `due_date`, `due_mileage`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `apps/fleet-service/internal/maintenanceschedule/completion_db_test.go`:
 
@@ -1495,12 +1495,12 @@ func TestProcessorUpdate_persistsDuePoint(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -run 'TestCompleteInTransaction|TestProcessorUpdate' -v`
 Expected: FAIL — the one-time schedule stays active with its anchor intact, the inactive completion succeeds, and the conversion PATCH leaves `one_time` at `true`.
 
-- [ ] **Step 3: Name the new columns in `Administrator.Update`**
+- [x] **Step 3: Name the new columns in `Administrator.Update`**
 
 In `apps/fleet-service/internal/maintenanceschedule/administrator.go`, extend the `Updates` map inside `Update`:
 
@@ -1522,7 +1522,7 @@ In `apps/fleet-service/internal/maintenanceschedule/administrator.go`, extend th
 		}).Error; err != nil {
 ```
 
-- [ ] **Step 4: Add the guard, the anchor clearing and the deactivation to `AdvanceTx`**
+- [x] **Step 4: Add the guard, the anchor clearing and the deactivation to `AdvanceTx`**
 
 Replace the whole `AdvanceTx` method with:
 
@@ -1584,12 +1584,12 @@ func (a *dbAdministrator) AdvanceTx(tx *gorm.DB, id string, date time.Time, mile
 
 Add `"github.com/jtumidanski/myfleet/packages/shared-go/server"` to the file's imports.
 
-- [ ] **Step 5: Run the whole package**
+- [x] **Step 5: Run the whole package**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -v`
 Expected: PASS, including the pre-existing `TestCompleteInTransaction`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/fleet-service/internal/maintenanceschedule/administrator.go \
@@ -1615,7 +1615,7 @@ It is implemented in Go, not as a single `UPDATE ... FROM`. The date arithmetic 
 - Consumes: `NextDue`, `DueState`, `Severity`, `Thresholds` (Tasks 2–3).
 - Produces: `func Backfill(db *gorm.DB) error` — called once from `cmd/main.go`. `func backfill(db *gorm.DB, now time.Time) error` is the package-private, time-injectable body the tests drive.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/fleet-service/internal/maintenanceschedule/backfill_test.go`:
 
@@ -1812,12 +1812,12 @@ func TestBackfill_noMatchingRows(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -run TestBackfill -v`
 Expected: FAIL to compile — `backfill` and `Backfill` undefined.
 
-- [ ] **Step 3: Write the backfill**
+- [x] **Step 3: Write the backfill**
 
 Create `apps/fleet-service/internal/maintenanceschedule/backfill.go`:
 
@@ -1914,12 +1914,12 @@ func backfill(db *gorm.DB, now time.Time) error {
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -v`
 Expected: PASS.
 
-- [ ] **Step 5: Wire it into startup**
+- [x] **Step 5: Wire it into startup**
 
 In `apps/fleet-service/cmd/main.go`, immediately after the `maintenancecategory.Seed` block, insert:
 
@@ -1932,12 +1932,12 @@ In `apps/fleet-service/cmd/main.go`, immediately after the `maintenancecategory.
 	}
 ```
 
-- [ ] **Step 6: Verify the service still builds**
+- [x] **Step 6: Verify the service still builds**
 
 Run: `make vet && make build`
 Expected: both succeed.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/fleet-service/internal/maintenanceschedule/backfill.go \
@@ -1958,7 +1958,7 @@ git commit -m "feat(fleet): backfill a first-due anchor for uncompleted legacy s
 - Consumes: `server.Nullable[string]` (Task 1), the builder setters (Task 4), `Model.OneTime()/DueDate()/DueMileage()` (Task 2).
 - Produces: `Attributes` gains `OneTime bool \`json:"oneTime"\``, `DueDate string \`json:"dueDate,omitempty"\``, `DueMileage int \`json:"dueMileage,omitempty"\``. Task 10's TypeScript read model mirrors these keys exactly.
 
-- [ ] **Step 1: Extend the resource representation**
+- [x] **Step 1: Extend the resource representation**
 
 In `apps/fleet-service/internal/maintenanceschedule/rest.go`, add three fields to `Attributes` after `IntervalMiles`:
 
@@ -1989,7 +1989,7 @@ and, beside the existing date formatting:
 
 `nextDueDate` / `nextDueMileage` continue to carry the *effective* due point, which for a one-time schedule is now the stored anchor — that is what lets the frontend's `deriveNextService`, `rankSchedule` and the vehicle status banner go untouched. Do not change them.
 
-- [ ] **Step 2: Extend the create route**
+- [x] **Step 2: Extend the create route**
 
 In `apps/fleet-service/internal/maintenanceschedule/resource.go`, replace the `POST /vehicles/{id}/maintenance-schedules` attrs struct and builder call. The attrs struct becomes:
 
@@ -2038,7 +2038,7 @@ Then extend the builder chain:
 				Build()
 ```
 
-- [ ] **Step 3: Extend the PATCH route**
+- [x] **Step 3: Extend the PATCH route**
 
 Replace the PATCH attrs struct with:
 
@@ -2095,7 +2095,7 @@ Extend the mutation closure — everything before `if attrs.Active != nil` stays
 				m = m.WithDuePoint(dueDate, dueMileage)
 ```
 
-- [ ] **Step 4: Add the inactive pre-check to the complete route**
+- [x] **Step 4: Add the inactive pre-check to the complete route**
 
 In the `POST /maintenance-schedules/{id}/complete` handler, immediately after the `authz.RequireWrite` check and before the date parsing, insert:
 
@@ -2110,12 +2110,12 @@ In the `POST /maintenance-schedules/{id}/complete` handler, immediately after th
 			}
 ```
 
-- [ ] **Step 5: Verify it builds and the package still passes**
+- [x] **Step 5: Verify it builds and the package still passes**
 
 Run: `make vet && go test ./apps/fleet-service/... -v`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/fleet-service/internal/maintenanceschedule/resource.go \
@@ -2136,7 +2136,7 @@ The PRD's open question about runaway reminders resolves against the source, not
 - Consumes: `Transform`, `TransformInternalDue`, `DueCycleToken` (unchanged), `Administrator.Recompute` (unchanged).
 - Produces: nothing.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/fleet-service/internal/maintenanceschedule/rest_test.go`:
 
@@ -2262,22 +2262,22 @@ func TestTransformInternalDue_oneTimeTokenIsStableAcrossRecomputes(t *testing.T)
 }
 ```
 
-- [ ] **Step 2: Run the test to verify it passes**
+- [x] **Step 2: Run the test to verify it passes**
 
 Run: `go test ./apps/fleet-service/internal/maintenanceschedule/... -run 'TestTransform' -v`
 Expected: PASS — these tests pin behaviour Tasks 3 and 8 already delivered. If any fail, the defect is in Task 3 or Task 8, not here.
 
-- [ ] **Step 3: Confirm notification-service is genuinely untouched**
+- [x] **Step 3: Confirm notification-service is genuinely untouched**
 
 Run: `git status --short apps/notification-service`
 Expected: empty output. The contract is unchanged; the work was to *verify* that, not to touch it.
 
-- [ ] **Step 4: Run the whole Go suite**
+- [x] **Step 4: Run the whole Go suite**
 
 Run: `make vet && make test`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/fleet-service/internal/maintenanceschedule/rest_test.go
@@ -2304,7 +2304,7 @@ The schema stays **one object with an extended `superRefine`**, gaining a `kind:
   - `MaintenanceScheduleFormInput` gains `kind: 'recurring' | 'oneTime'`, `dueDate?: string`, `dueMileage?: number`.
   - `convertToRecurrenceSchema` / `ConvertToRecurrenceFormInput` — Task 15 consumes these.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Replace the entire contents of `apps/web/src/lib/schemas/maintenanceSchedule.test.ts` with:
 
@@ -2536,12 +2536,12 @@ describe('convertToRecurrenceSchema', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/lib/schemas/maintenanceSchedule.test.ts --root apps/web`
 Expected: FAIL — `convertToRecurrenceSchema` is not exported, and the `kind`/due-point cases do not behave as asserted.
 
-- [ ] **Step 3: Extend the types**
+- [x] **Step 3: Extend the types**
 
 In `apps/web/src/types/models/maintenanceSchedule.ts`, add to `MaintenanceScheduleAttributes` after `intervalMiles`:
 
@@ -2586,7 +2586,7 @@ export interface UpdateMaintenanceScheduleAttributes {
 }
 ```
 
-- [ ] **Step 4: Extend the schema**
+- [x] **Step 4: Extend the schema**
 
 Replace `maintenanceScheduleSchema` in `apps/web/src/lib/schemas/maintenanceSchedule.ts` and add the conversion schema (leave `completeScheduleSchema` alone):
 
@@ -2734,14 +2734,14 @@ export const convertToRecurrenceSchema = z
 export type ConvertToRecurrenceFormInput = z.infer<typeof convertToRecurrenceSchema>;
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [x] **Step 5: Run the test to verify it passes**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/lib/schemas/maintenanceSchedule.test.ts --root apps/web`
 Expected: PASS.
 
 Note: `MaintenanceScheduleForm.tsx` and `AddScheduleDialog.tsx` will not type-check until Task 11 — `kind` is now a required field on `MaintenanceScheduleFormInput`. That is expected; do not patch them here.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/types/models/maintenanceSchedule.ts \
@@ -2768,7 +2768,7 @@ For a recurring schedule the first-due fields appear *alongside* the intervals, 
 - Consumes: `maintenanceScheduleSchema`, `MaintenanceScheduleFormInput` (Task 10).
 - Produces: `MaintenanceScheduleForm` gains a `currentMileage?: number` prop; `AddScheduleDialog` gains a `currentMileage?: number` prop.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/features/vehicles/maintenance/MaintenanceScheduleForm.test.tsx`:
 
@@ -2950,12 +2950,12 @@ describe('MaintenanceScheduleForm — submission', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/components/features/vehicles/maintenance/MaintenanceScheduleForm.test.tsx --root apps/web`
 Expected: FAIL — there is no "Schedule type" select, no due-date field, and no `currentMileage` prop.
 
-- [ ] **Step 3: Rewrite the form**
+- [x] **Step 3: Rewrite the form**
 
 Replace `apps/web/src/components/features/vehicles/maintenance/MaintenanceScheduleForm.tsx` with:
 
@@ -3248,7 +3248,7 @@ export function MaintenanceScheduleForm({
 }
 ```
 
-- [ ] **Step 4: Map the form values onto the create attributes**
+- [x] **Step 4: Map the form values onto the create attributes**
 
 In `apps/web/src/components/features/vehicles/dialogs/AddScheduleDialog.tsx`, add `currentMileage` to the props interface and the destructuring:
 
@@ -3300,7 +3300,7 @@ and pass the prop through to the form:
           />
 ```
 
-- [ ] **Step 5: Pass the odometer from the page**
+- [x] **Step 5: Pass the odometer from the page**
 
 In `apps/web/src/pages/VehicleDetailPage.tsx`, add the prop to the `AddScheduleDialog` element:
 
@@ -3313,12 +3313,12 @@ In `apps/web/src/pages/VehicleDetailPage.tsx`, add the prop to the `AddScheduleD
       />
 ```
 
-- [ ] **Step 6: Run the tests and the type check**
+- [x] **Step 6: Run the tests and the type check**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && make fe-test && make fe-build`
 Expected: PASS for both.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/features/vehicles/maintenance/MaintenanceScheduleForm.tsx \
@@ -3355,7 +3355,7 @@ export function ScheduleCard(props: ScheduleCardProps): JSX.Element;
 ```
 Task 13 renders it; Task 15 supplies `onConvert` from the page.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/features/vehicles/maintenance/ScheduleCard.test.tsx`:
 
@@ -3500,12 +3500,12 @@ describe('ScheduleCard — completed one-time', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/components/features/vehicles/maintenance/ScheduleCard.test.tsx --root apps/web`
 Expected: FAIL — `ScheduleCard` does not exist.
 
-- [ ] **Step 3: Write the component**
+- [x] **Step 3: Write the component**
 
 Create `apps/web/src/components/features/vehicles/maintenance/ScheduleCard.tsx`:
 
@@ -3634,12 +3634,12 @@ export function ScheduleCard({
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/components/features/vehicles/maintenance/ScheduleCard.test.tsx --root apps/web`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/features/vehicles/maintenance/ScheduleCard.tsx \
@@ -3661,7 +3661,7 @@ git commit -m "feat(web): extract ScheduleCard with one-time and completed state
 - Consumes: `ScheduleCard` (Task 12), `rankSchedule` (unchanged).
 - Produces: `UpcomingScheduleStripProps` gains `onConvert: (schedule: MaintenanceSchedule) => void`. Task 15 supplies it.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/features/vehicles/detail/UpcomingScheduleStrip.test.tsx`:
 
@@ -3776,12 +3776,12 @@ describe('UpcomingScheduleStrip ordering', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/components/features/vehicles/detail/UpcomingScheduleStrip.test.tsx --root apps/web`
 Expected: FAIL — `onConvert` is not a prop and the inactive rows are not tiered.
 
-- [ ] **Step 3: Rewrite the strip**
+- [x] **Step 3: Rewrite the strip**
 
 Replace `apps/web/src/components/features/vehicles/detail/UpcomingScheduleStrip.tsx` with:
 
@@ -3882,12 +3882,12 @@ export function UpcomingScheduleStrip({
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/components/features/vehicles/detail/UpcomingScheduleStrip.test.tsx --root apps/web`
 Expected: PASS. `VehicleDetailPage.tsx` will not type-check until Task 15 supplies `onConvert`; that is expected.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/features/vehicles/detail/UpcomingScheduleStrip.tsx \
@@ -3921,7 +3921,7 @@ export function ConvertToRecurrenceDialog(props: ConvertToRecurrenceDialogProps)
 ```
 Task 15 mounts it from the page.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/features/vehicles/dialogs/ConvertToRecurrenceDialog.test.tsx`:
 
@@ -4044,12 +4044,12 @@ describe('ConvertToRecurrenceDialog', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/components/features/vehicles/dialogs/ConvertToRecurrenceDialog.test.tsx --root apps/web`
 Expected: FAIL — the component does not exist.
 
-- [ ] **Step 3: Write the component**
+- [x] **Step 3: Write the component**
 
 Create `apps/web/src/components/features/vehicles/dialogs/ConvertToRecurrenceDialog.tsx`:
 
@@ -4254,12 +4254,12 @@ export function ConvertToRecurrenceDialog({
 }
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/components/features/vehicles/dialogs/ConvertToRecurrenceDialog.test.tsx --root apps/web`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/web/src/components/features/vehicles/dialogs/ConvertToRecurrenceDialog.tsx \
@@ -4282,7 +4282,7 @@ FR-CONV-1, FR-CONV-5, FR-UI-4. The complete-schedule dialog is otherwise unchang
 - Consumes: `ConvertToRecurrenceDialog` (Task 14), `UpcomingScheduleStrip`'s `onConvert` (Task 13).
 - Produces: `CompleteScheduleDialogProps` gains `onRequestConvert: (schedule: MaintenanceSchedule) => void`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `apps/web/src/components/features/vehicles/dialogs/CompleteScheduleDialog.test.tsx`:
 
@@ -4400,12 +4400,12 @@ describe('CompleteScheduleDialog success toast', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && npx vitest run src/components/features/vehicles/dialogs/CompleteScheduleDialog.test.tsx --root apps/web`
 Expected: FAIL — `onRequestConvert` is not a prop and the toast carries no action.
 
-- [ ] **Step 3: Add the toast action**
+- [x] **Step 3: Add the toast action**
 
 In `apps/web/src/components/features/vehicles/dialogs/CompleteScheduleDialog.tsx`, extend the props interface and destructuring:
 
@@ -4448,7 +4448,7 @@ Replace the success branch of `handleSubmit`:
       onOpenChange(false);
 ```
 
-- [ ] **Step 4: Wire the page**
+- [x] **Step 4: Wire the page**
 
 In `apps/web/src/pages/VehicleDetailPage.tsx`:
 
@@ -4527,12 +4527,12 @@ And mount the conversion dialog immediately after that block:
       )}
 ```
 
-- [ ] **Step 5: Run the frontend suite and the type check**
+- [x] **Step 5: Run the frontend suite and the type check**
 
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && make fe-test && make fe-build`
 Expected: PASS for both.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web/src/components/features/vehicles/dialogs/CompleteScheduleDialog.tsx \
@@ -4554,7 +4554,13 @@ git commit -m "feat(web): offer recurrence setup after completing a one-time sch
 Run: `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm use 22 && make ci`
 Expected: PASS for `lint-check`, `vet`, `test`, `build`, `fe-test`, `fe-build`. Fix anything that fails and re-run the whole target — a partial pass is not a pass.
 
-- [ ] **Step 2: Render both deployment overlays**
+Left unticked deliberately. `vet`, `test`, `build`, `fe-test` and `fe-build` all
+pass and were run individually. `lint-check` is red: six Go modules fail on a
+golangci-lint go1.27-vs-go1.26 toolchain mismatch, reproduced identically on a
+pristine merge-base checkout. It is pre-existing and belongs to
+`task-029-go-127-migration`, so this branch cannot make the whole target green.
+
+- [x] **Step 2: Render both deployment overlays**
 
 Run:
 
@@ -4569,16 +4575,16 @@ diff /tmp/base-main.yaml /tmp/task030-main.yaml
 
 Expected: both diffs empty. No manifest change is expected in this task, and a diff means something leaked. If the working tree is clean at this point (everything committed), compare against `main` with `git worktree`/`git show` instead of `git stash`.
 
-- [ ] **Step 3: Confirm the untouched-service claim**
+- [x] **Step 3: Confirm the untouched-service claim**
 
 Run: `git diff --name-only main... | sort`
 Expected: no path under `apps/notification-service/` and no path under `deploy/`.
 
-- [ ] **Step 4: Run the code review**
+- [x] **Step 4: Run the code review**
 
 Per `CLAUDE.md`, run `/audit-plan` or `superpowers:requesting-code-review` before opening a PR. It dispatches `plan-adherence-reviewer`, `backend-guidelines-reviewer` (Go changed) and `frontend-guidelines-reviewer` (TS changed); findings land in `docs/tasks/task-030-one-time-maintenance-schedules/audit.md`.
 
-- [ ] **Step 5: Commit any review fixes**
+- [x] **Step 5: Commit any review fixes**
 
 ```bash
 git add -A
