@@ -63,13 +63,18 @@ func (s stubTargets) Resolve(admin.Root) (string, []string, error) {
 func newProcessor(t *testing.T, db *gorm.DB, auth admin.AuthVerifier, down ...admin.Downstream) *admin.Processor {
 	t.Helper()
 	return admin.NewProcessor(logrus.New(), admin.Deps{
-		DB:            db,
-		Provider:      admin.NewProvider(db),
-		Administrator: admin.NewAdministrator(db),
-		Auth:          auth,
-		Downstream:    down,
-		Window:        admin.DefaultRecoveryWindow,
-		Now:           func() time.Time { return testNow },
+		// Purge-only: these tests never transfer a vehicle, so the two
+		// reassigners are explicitly no-ops rather than nil — NewProcessor
+		// refuses nil, because a nil one silently skipped half a transfer.
+		MediaReassign:        admin.NoopMediaReassign{},
+		NotificationReassign: admin.NoopNotificationReassign{},
+		DB:                   db,
+		Provider:             admin.NewProvider(db),
+		Administrator:        admin.NewAdministrator(db),
+		Auth:                 auth,
+		Downstream:           down,
+		Window:               admin.DefaultRecoveryWindow,
+		Now:                  func() time.Time { return testNow },
 	}, stubTargets{label: "Fleet fleet-1"})
 }
 

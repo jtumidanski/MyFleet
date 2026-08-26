@@ -458,7 +458,7 @@ func TestTransferRoute_revokedAdminIs403(t *testing.T) {
 	log.SetOutput(io.Discard)
 	h.proc = admin.NewProcessor(log, admin.Deps{
 		DB: h.db, Provider: admin.NewProvider(h.db), Administrator: admin.NewAdministrator(h.db),
-		Auth: fakeAuth{ok: false}, MediaReassign: h.media, NotificationReassign: h.notif,
+		Auth: fakeAuth{ok: false}, MediaReassign: h.media, NotificationReassign: notifAdapter{inner: h.notif},
 	}, admin.NewTargetResolver(h.db))
 	r := transferRouter(t, h, adminIdentity)
 

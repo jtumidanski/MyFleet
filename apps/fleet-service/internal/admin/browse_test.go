@@ -47,11 +47,16 @@ func (failingUserResolver) ListUsers(context.Context, server.Page) ([]adminclien
 func newBrowseProcessorWithUsers(t *testing.T, db *gorm.DB, r admin.UserResolver) *admin.Processor {
 	t.Helper()
 	return admin.NewProcessor(logrus.New(), admin.Deps{
-		DB:            db,
-		Provider:      admin.NewProvider(db),
-		Administrator: admin.NewAdministrator(db),
-		AuthUsers:     r,
-		Now:           func() time.Time { return testNow },
+		// Purge-only: these tests never transfer a vehicle, so the two
+		// reassigners are explicitly no-ops rather than nil — NewProcessor
+		// refuses nil, because a nil one silently skipped half a transfer.
+		MediaReassign:        admin.NoopMediaReassign{},
+		NotificationReassign: admin.NoopNotificationReassign{},
+		DB:                   db,
+		Provider:             admin.NewProvider(db),
+		Administrator:        admin.NewAdministrator(db),
+		AuthUsers:            r,
+		Now:                  func() time.Time { return testNow },
 	}, stubTargets{})
 }
 
