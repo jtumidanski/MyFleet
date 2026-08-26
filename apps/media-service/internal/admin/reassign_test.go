@@ -63,7 +63,7 @@ func TestReassign_movesTheNamedObjects(t *testing.T) {
 	srv := reassignServer(t, db)
 
 	status, affected := postReassign(t, srv,
-		`{"media_ids":["mo-1"],"destination_fleet_id":"fleet-9"}`)
+		`{"media_ids":["mo-1"],"source_fleet_id":"fleet-1","destination_fleet_id":"fleet-9"}`)
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
 	}
@@ -85,7 +85,7 @@ func TestReassign_movesTheNamedObjects(t *testing.T) {
 func TestReassign_replayIsANoOpWithTheSameCount(t *testing.T) {
 	db := newMediaDB(t)
 	srv := reassignServer(t, db)
-	body := `{"media_ids":["mo-1"],"destination_fleet_id":"fleet-9"}`
+	body := `{"media_ids":["mo-1"],"source_fleet_id":"fleet-1","destination_fleet_id":"fleet-9"}`
 
 	_, first := postReassign(t, srv, body)
 	_, second := postReassign(t, srv, body)
@@ -104,7 +104,7 @@ func TestReassign_ignoresUnknownIDs(t *testing.T) {
 	srv := reassignServer(t, db)
 
 	status, affected := postReassign(t, srv,
-		`{"media_ids":["mo-1","does-not-exist"],"destination_fleet_id":"fleet-9"}`)
+		`{"media_ids":["mo-1","does-not-exist"],"source_fleet_id":"fleet-1","destination_fleet_id":"fleet-9"}`)
 	if status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", status)
 	}
@@ -123,7 +123,7 @@ func TestReassign_skipsSoftDeletedObjects(t *testing.T) {
 	}
 	srv := reassignServer(t, db)
 
-	_, affected := postReassign(t, srv, `{"media_ids":["mo-1"],"destination_fleet_id":"fleet-9"}`)
+	_, affected := postReassign(t, srv, `{"media_ids":["mo-1"],"source_fleet_id":"fleet-1","destination_fleet_id":"fleet-9"}`)
 	if affected["media_objects"] != 0 {
 		t.Errorf("affected = %v, want media_objects 0", affected)
 	}
@@ -132,13 +132,43 @@ func TestReassign_skipsSoftDeletedObjects(t *testing.T) {
 	}
 }
 
+// The ownership predicate. fleet-service cannot vouch for the media ids it
+// sends: POST /vehicles/{id}/media takes an arbitrary mediaId from a fleet
+// member with no cross-service ownership check, so a member of fleet-1 who
+// learns fleet-2's media UUID can attach it to their own vehicle and have it
+// swept into an admin transfer. Without `AND fleet_id = ?` that transfer would
+// hand fleet-9's members read access to fleet-2's object.
+func TestReassign_refusesAnObjectOwnedByAThirdFleet(t *testing.T) {
+	db := newMediaDB(t)
+	srv := reassignServer(t, db)
+	// mo-2 belongs to fleet-2; the transfer is fleet-1 -> fleet-9 and names it
+	// anyway, exactly as a poisoned vehicle_media row would.
+	status, affected := postReassign(t, srv,
+		`{"media_ids":["mo-1","mo-2"],"source_fleet_id":"fleet-1","destination_fleet_id":"fleet-9"}`)
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	if got := fleetOf(t, db, "mo-2"); got != "fleet-2" {
+		t.Errorf("mo-2 fleet_id = %q — a third fleet's object was moved into fleet-9", got)
+	}
+	if got := fleetOf(t, db, "mo-1"); got != "fleet-9" {
+		t.Errorf("mo-1 fleet_id = %q, want fleet-9 — the legitimate object must still move", got)
+	}
+	if affected["media_objects"] != 1 {
+		t.Errorf("affected = %v, want media_objects 1 (only the object fleet-1 owns)", affected)
+	}
+}
+
 func TestReassign_rejectsEmptyInput(t *testing.T) {
 	db := newMediaDB(t)
 	srv := reassignServer(t, db)
 
 	for _, body := range []string{
-		`{"media_ids":[],"destination_fleet_id":"fleet-9"}`,
-		`{"media_ids":["mo-1"],"destination_fleet_id":""}`,
+		`{"media_ids":[],"source_fleet_id":"fleet-1","destination_fleet_id":"fleet-9"}`,
+		`{"media_ids":["mo-1"],"source_fleet_id":"fleet-1","destination_fleet_id":""}`,
+		// A missing source fleet id is 422, not a silent no-op: without the
+		// ownership predicate this endpoint would move anyone's media.
+		`{"media_ids":["mo-1"],"destination_fleet_id":"fleet-9"}`,
 	} {
 		if status, _ := postReassign(t, srv, body); status != http.StatusUnprocessableEntity {
 			t.Errorf("body %s: status = %d, want 422", body, status)
@@ -207,7 +237,7 @@ func TestReassign_flipsTheAccessDecision(t *testing.T) {
 	}
 
 	if status, _ := postReassign(t, srv,
-		`{"media_ids":["mo-1"],"destination_fleet_id":"fleet-9"}`); status != http.StatusOK {
+		`{"media_ids":["mo-1"],"source_fleet_id":"fleet-1","destination_fleet_id":"fleet-9"}`); status != http.StatusOK {
 		t.Fatalf("reassign status = %d", status)
 	}
 

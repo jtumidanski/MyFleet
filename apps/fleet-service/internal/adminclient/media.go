@@ -68,9 +68,14 @@ func (c *MediaClient) Reap(ctx context.Context, opID string) (map[string]int, er
 // The ids are sent unchunked, like Purge's. MaxLookupIDs bounds QUERY-PARAMETER
 // lookups; this is a POST body. Chunking would reintroduce partial application
 // across chunks, which is the one outcome this operation must not have.
-func (c *MediaClient) Reassign(ctx context.Context, mediaIDs []string, destFleetID string) (map[string]int, error) {
+// srcFleetID is sent so media-service can refuse to move an object that is not
+// actually in that fleet. fleet-service cannot vouch for the ids it produces —
+// they come from vehicle_media rows a fleet member attached by id, with no
+// cross-service ownership check — so the predicate is enforced by the service
+// that owns the column.
+func (c *MediaClient) Reassign(ctx context.Context, mediaIDs []string, srcFleetID, destFleetID string) (map[string]int, error) {
 	var body affectedResponse
-	req := ReassignRequest{MediaIDs: mediaIDs, DestinationFleetID: destFleetID}
+	req := ReassignRequest{MediaIDs: mediaIDs, SourceFleetID: srcFleetID, DestinationFleetID: destFleetID}
 	if err := c.t.expectOK(ctx, http.MethodPost, "/internal/admin/reassign-fleet", req, &body); err != nil {
 		return nil, err
 	}

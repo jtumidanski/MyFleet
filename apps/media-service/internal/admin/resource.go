@@ -105,7 +105,7 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB, store ObjectR
 			var affected map[string]int
 			if terr := db.Transaction(func(tx *gorm.DB) error {
 				var rerr error
-				affected, rerr = Reassign(tx, body.MediaIDs, body.DestinationFleetID)
+				affected, rerr = Reassign(tx, body.MediaIDs, body.SourceFleetID, body.DestinationFleetID)
 				return rerr
 			}); terr != nil {
 				log.WithError(terr).WithField("destination_fleet_id", body.DestinationFleetID).

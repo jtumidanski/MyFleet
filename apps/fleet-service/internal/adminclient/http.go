@@ -41,9 +41,16 @@ type PurgeRequest struct {
 // service reads only its own id list — media-service MediaIDs, notification
 // -service VehicleIDs — and omitempty keeps the other out of the wire entirely
 // rather than sending a null the receiver has to ignore.
+//
+// SourceFleetID is media-service's OWNERSHIP PREDICATE: it refuses to move an
+// object that is not currently in that fleet. It is omitempty for the same
+// reason the id lists are — notification-service neither sends nor reads it,
+// and it stays off that request entirely. media-service requires it and answers
+// 422 when it is absent, so "omitempty" never silently weakens the check.
 type ReassignRequest struct {
 	MediaIDs           []string `json:"media_ids,omitempty"`
 	VehicleIDs         []string `json:"vehicle_ids,omitempty"`
+	SourceFleetID      string   `json:"source_fleet_id,omitempty"`
 	DestinationFleetID string   `json:"destination_fleet_id"`
 }
 

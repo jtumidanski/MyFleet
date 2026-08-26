@@ -23,7 +23,7 @@ func TestMediaClient_Reassign_postsIDsAndParsesAffected(t *testing.T) {
 	defer srv.Close()
 
 	got, err := adminclient.NewMediaClient(srv.URL).
-		Reassign(context.Background(), []string{"m1", "m2"}, "fleet-b")
+		Reassign(context.Background(), []string{"m1", "m2"}, "fleet-a", "fleet-b")
 	if err != nil {
 		t.Fatalf("reassign: %v", err)
 	}
@@ -32,6 +32,11 @@ func TestMediaClient_Reassign_postsIDsAndParsesAffected(t *testing.T) {
 	}
 	if len(gotBody.MediaIDs) != 2 || gotBody.DestinationFleetID != "fleet-b" {
 		t.Errorf("body = %+v", gotBody)
+	}
+	// The source fleet is media-service's ownership predicate. Omitting it
+	// would let the endpoint move an object belonging to any fleet at all.
+	if gotBody.SourceFleetID != "fleet-a" {
+		t.Errorf("source_fleet_id = %q, want fleet-a", gotBody.SourceFleetID)
 	}
 	if got["media_objects"] != 9 {
 		t.Errorf("affected = %v, want media_objects 9", got)
@@ -57,6 +62,11 @@ func TestNotificationClient_Reassign_sendsVehicleIDs(t *testing.T) {
 	if len(gotBody.MediaIDs) != 0 {
 		t.Errorf("media_ids should be omitted for notification-service, got %v", gotBody.MediaIDs)
 	}
+	// source_fleet_id is media-service's field. notification-service neither
+	// sends nor reads it, and omitempty must keep it off this request entirely.
+	if gotBody.SourceFleetID != "" {
+		t.Errorf("source_fleet_id should be omitted for notification-service, got %q", gotBody.SourceFleetID)
+	}
 	if got["notifications"] != 4 {
 		t.Errorf("affected = %v", got)
 	}
@@ -71,7 +81,7 @@ func TestMediaClient_Reassign_nonOKIsAnError(t *testing.T) {
 	defer srv.Close()
 
 	if _, err := adminclient.NewMediaClient(srv.URL).
-		Reassign(context.Background(), []string{"m1"}, "fleet-b"); err == nil {
+		Reassign(context.Background(), []string{"m1"}, "fleet-a", "fleet-b"); err == nil {
 		t.Fatal("expected an error for a 422 response")
 	}
 }
@@ -88,7 +98,7 @@ func TestTransport_propagatesCorrelationID(t *testing.T) {
 
 	ctx := telemetry.ContextWithCorrelationID(context.Background(), "corr-42")
 	if _, err := adminclient.NewMediaClient(srv.URL).
-		Reassign(ctx, []string{"m1"}, "fleet-b"); err != nil {
+		Reassign(ctx, []string{"m1"}, "fleet-a", "fleet-b"); err != nil {
 		t.Fatalf("reassign: %v", err)
 	}
 	if got != "corr-42" {
@@ -105,7 +115,7 @@ func TestTransport_omitsCorrelationIDWhenAbsent(t *testing.T) {
 	defer srv.Close()
 
 	if _, err := adminclient.NewMediaClient(srv.URL).
-		Reassign(context.Background(), []string{"m1"}, "fleet-b"); err != nil {
+		Reassign(context.Background(), []string{"m1"}, "fleet-a", "fleet-b"); err != nil {
 		t.Fatalf("reassign: %v", err)
 	}
 	if present {
