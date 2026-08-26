@@ -24,6 +24,7 @@ import { LogFuelDialog } from '../components/features/vehicles/dialogs/LogFuelDi
 import { LogMaintenanceDialog } from '../components/features/vehicles/dialogs/LogMaintenanceDialog';
 import { AddScheduleDialog } from '../components/features/vehicles/dialogs/AddScheduleDialog';
 import { CompleteScheduleDialog } from '../components/features/vehicles/dialogs/CompleteScheduleDialog';
+import { ConvertToRecurrenceDialog } from '../components/features/vehicles/dialogs/ConvertToRecurrenceDialog';
 import { DeleteVehicleDialog } from '../components/features/vehicles/dialogs/DeleteVehicleDialog';
 import { PhotoGalleryDialog } from '../components/features/vehicles/dialogs/PhotoGalleryDialog';
 import { Skeleton } from '../components/ui/skeleton';
@@ -34,7 +35,7 @@ import type { VehicleRecordRow } from '../lib/vehicleRecords';
 import type { MaintenanceSchedule } from '../types/models/maintenanceSchedule';
 
 /** Which single dialog, if any, is open. Only one at a time — opening a new one replaces whatever was open. */
-type OpenDialog = QuickAction | 'edit' | 'gallery' | 'complete' | null;
+type OpenDialog = QuickAction | 'edit' | 'gallery' | 'complete' | 'convert' | null;
 
 /**
  * Shared by all three render branches. Task-015 requires the title's box to
@@ -53,6 +54,7 @@ export function VehicleDetailPage() {
   const [openDialog, setOpenDialog] = useState<OpenDialog>(null);
   const [selectedRow, setSelectedRow] = useState<VehicleRecordRow | null>(null);
   const [completingSchedule, setCompletingSchedule] = useState<MaintenanceSchedule | null>(null);
+  const [convertingSchedule, setConvertingSchedule] = useState<MaintenanceSchedule | null>(null);
 
   const schedulesQuery = useMaintenanceSchedules(vehicle?.id);
   const categoriesQuery = useMaintenanceCategories();
@@ -84,6 +86,11 @@ export function VehicleDetailPage() {
   const handleComplete = (schedule: MaintenanceSchedule) => {
     setCompletingSchedule(schedule);
     setOpenDialog('complete');
+  };
+
+  const handleConvert = (schedule: MaintenanceSchedule) => {
+    setConvertingSchedule(schedule);
+    setOpenDialog('convert');
   };
 
   const handleRestore = async () => {
@@ -194,6 +201,7 @@ export function VehicleDetailPage() {
             canWrite={canWrite}
             onAddSchedule={() => setOpenDialog('schedule')}
             onComplete={handleComplete}
+            onConvert={handleConvert}
           />
           <VehicleRecordsTable
             rows={recordsState.rows}
@@ -236,6 +244,7 @@ export function VehicleDetailPage() {
         open={openDialog === 'schedule'}
         onOpenChange={(open) => !open && closeDialog()}
         vehicleId={vehicle.id}
+        currentMileage={odometer}
       />
       {completingSchedule && (
         <CompleteScheduleDialog
@@ -247,6 +256,23 @@ export function VehicleDetailPage() {
             }
           }}
           schedule={completingSchedule}
+          onRequestConvert={handleConvert}
+        />
+      )}
+      {convertingSchedule && (
+        <ConvertToRecurrenceDialog
+          open={openDialog === 'convert'}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeDialog();
+              setConvertingSchedule(null);
+            }
+          }}
+          schedule={convertingSchedule}
+          categoryName={
+            categoryNames.get(convertingSchedule.attributes.categoryId) ??
+            convertingSchedule.attributes.categoryId
+          }
         />
       )}
       <DeleteVehicleDialog

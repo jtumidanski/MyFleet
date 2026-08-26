@@ -234,3 +234,125 @@ func TestDueBreaches_agreesWithDueState(t *testing.T) {
 		}
 	}
 }
+
+// The due-point override is per AXIS, not per schedule: a hybrid row can hold a
+// date anchor and no mileage anchor mid-migration, and each axis must resolve
+// independently rather than one anchor suppressing the other's arithmetic.
+//
+// The !OneTime guard is what makes a one-time axis terminal. Without it, a
+// completed one-time schedule whose anchor was cleared falls back to
+// lastCompleted + 0 — "due again the instant it was completed".
+func TestNextDue_duePointAndOneTime(t *testing.T) {
+	anchorDate := time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC)
+
+	cases := []struct {
+		name      string
+		s         Schedule
+		wantDate  time.Time
+		wantMiles int
+	}{
+		{
+			name:      "one-time time: the anchor verbatim",
+			s:         Schedule{RecurrenceType: "time", OneTime: true, DueDate: anchorDate},
+			wantDate:  anchorDate,
+			wantMiles: 0,
+		},
+		{
+			name:      "one-time mileage: the anchor verbatim",
+			s:         Schedule{RecurrenceType: "mileage", OneTime: true, DueMileage: 60000},
+			wantDate:  time.Time{},
+			wantMiles: 60000,
+		},
+		{
+			name:      "one-time hybrid: both anchors verbatim",
+			s:         Schedule{RecurrenceType: "hybrid", OneTime: true, DueDate: anchorDate, DueMileage: 60000},
+			wantDate:  anchorDate,
+			wantMiles: 60000,
+		},
+		{
+			name: "completed one-time with a cleared anchor yields the zero due point",
+			s: Schedule{
+				RecurrenceType:       "hybrid",
+				OneTime:              true,
+				LastCompletedDate:    base,
+				LastCompletedMileage: 42000,
+			},
+			wantDate:  time.Time{},
+			wantMiles: 0,
+		},
+		{
+			name: "recurring anchored: the anchor wins over interval arithmetic",
+			s: Schedule{
+				RecurrenceType: "hybrid",
+				IntervalMonths: 12,
+				IntervalMiles:  5000,
+				DueDate:        anchorDate,
+				DueMileage:     60000,
+			},
+			wantDate:  anchorDate,
+			wantMiles: 60000,
+		},
+		{
+			name: "recurring unanchored: interval arithmetic from the completion point",
+			s: Schedule{
+				RecurrenceType:       "hybrid",
+				IntervalMonths:       12,
+				IntervalMiles:        5000,
+				LastCompletedDate:    base,
+				LastCompletedMileage: 30000,
+			},
+			wantDate:  base.AddDate(0, 12, 0),
+			wantMiles: 35000,
+		},
+		{
+			name: "recurring half-anchored: each axis resolves independently",
+			s: Schedule{
+				RecurrenceType:       "hybrid",
+				IntervalMonths:       12,
+				IntervalMiles:        5000,
+				DueDate:              anchorDate,
+				LastCompletedDate:    base,
+				LastCompletedMileage: 30000,
+			},
+			wantDate:  anchorDate,
+			wantMiles: 35000,
+		},
+		{
+			name: "a mileage anchor is ignored on a pure-time schedule",
+			s: Schedule{
+				RecurrenceType:    "time",
+				IntervalMonths:    12,
+				DueMileage:        60000,
+				LastCompletedDate: base,
+			},
+			wantDate:  base.AddDate(0, 12, 0),
+			wantMiles: 0,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			nd, nm := NextDue(c.s)
+			if !nd.Equal(c.wantDate) {
+				t.Errorf("next_due_date = %v want %v", nd, c.wantDate)
+			}
+			if nm != c.wantMiles {
+				t.Errorf("next_due_mileage = %d want %d", nm, c.wantMiles)
+			}
+		})
+	}
+}
+
+// A one-time time-axis schedule with no anchor resolves to the zero time, which
+// DueState reads as overdue. Validation (Task 4) makes this unreachable on any
+// row this service can create and the backfill (Task 7) repairs legacy rows;
+// this test pins the behaviour so neither safeguard is quietly relied upon.
+func TestNextDue_oneTimeWithoutAnchorIsZero(t *testing.T) {
+	nd, nm := NextDue(Schedule{RecurrenceType: "hybrid", OneTime: true})
+	if !nd.IsZero() || nm != 0 {
+		t.Fatalf("want the zero due point, got %v / %d", nd, nm)
+	}
+	if got := DueState(Schedule{RecurrenceType: "time", OneTime: true}, base, 0, DefaultThresholds); got != "overdue" {
+		t.Fatalf("an unanchored one-time time axis reads as %s, want overdue", got)
+	}
+}

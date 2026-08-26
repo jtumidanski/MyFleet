@@ -337,8 +337,20 @@ export function useCreateMaintenanceSchedule(vehicleId: string) {
   });
 }
 
-/** PATCH /api/fleet/maintenance-schedules/{id} */
-export function useUpdateMaintenanceSchedule() {
+/**
+ * PATCH /api/fleet/maintenance-schedules/{id}
+ *
+ * On settle invalidates:
+ *  - maintenanceScheduleKeys.lists() — the vehicle's schedule list
+ *  - maintenanceScheduleKeys.detail(id) — the row itself
+ *  - maintenanceScheduleKeys.queues() — a PATCH can move a schedule into or out
+ *    of the fleet's upcoming/overdue queues, and reactivating one (the
+ *    conversion path) puts it back in scope for them
+ *  - vehicleKeys.detail(vehicleId) — nextDue is server-derived from the row, so
+ *    the vehicle view goes stale too. Same key set as the sibling completion
+ *    mutation.
+ */
+export function useUpdateMaintenanceSchedule(vehicleId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -353,6 +365,8 @@ export function useUpdateMaintenanceSchedule() {
       void queryClient.invalidateQueries({
         queryKey: maintenanceScheduleKeys.detail(variables.id),
       });
+      void queryClient.invalidateQueries({ queryKey: maintenanceScheduleKeys.queues() });
+      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
     },
   });
 }

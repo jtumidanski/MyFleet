@@ -60,8 +60,11 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 		r.Post("/vehicles/{id}/maintenance-schedules", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			CategoryID     string `json:"categoryId"`
 			RecurrenceType string `json:"recurrenceType"`
+			OneTime        bool   `json:"oneTime"`
 			IntervalMonths int    `json:"intervalMonths"`
 			IntervalMiles  int    `json:"intervalMiles"`
+			DueDate        string `json:"dueDate"`
+			DueMileage     int    `json:"dueMileage"`
 		},
 		) {
 			identity := auth.IdentityFromContext(req.Context())
@@ -79,12 +82,27 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
+			// An empty dueDate is passed through as the zero time and left to
+			// validate; an unparseable one is a 400 here, mirroring the
+			// complete route's date handling.
+			var dueDate time.Time
+			if attrs.DueDate != "" {
+				parsed, perr := time.Parse(time.RFC3339, attrs.DueDate)
+				if perr != nil {
+					server.WriteError(w, server.ErrValidation)
+					return
+				}
+				dueDate = parsed
+			}
 			m, err := NewBuilder().
 				SetVehicleID(vehicleID).
 				SetCategoryID(attrs.CategoryID).
 				SetRecurrenceType(attrs.RecurrenceType).
+				SetOneTime(attrs.OneTime).
 				SetIntervalMonths(attrs.IntervalMonths).
 				SetIntervalMiles(attrs.IntervalMiles).
+				SetDuePoint(dueDate, attrs.DueMileage).
+				SetCurrentMileage(v.CurrentMileage()).
 				Build()
 			if err != nil {
 				server.WriteError(w, err)
@@ -108,7 +126,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			if err := requireScheduleFleet(identity, vehicleAccessor, m); err != nil {
+			if _, err := requireScheduleFleet(identity, vehicleAccessor, m); err != nil {
 				server.WriteError(w, err)
 				return
 			}
@@ -118,9 +136,17 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 		// PATCH /maintenance-schedules/{id} — partial update.
 		r.Patch("/maintenance-schedules/{id}", server.RegisterInputHandler(func(w http.ResponseWriter, req *http.Request, attrs struct {
 			RecurrenceType *string `json:"recurrenceType"`
+			OneTime        *bool   `json:"oneTime"`
 			IntervalMonths *int    `json:"intervalMonths"`
 			IntervalMiles  *int    `json:"intervalMiles"`
-			Active         *bool   `json:"active"`
+			// dueDate needs Nullable because its cleared state is a NULL
+			// column, which a *string cannot tell apart from an absent key.
+			// dueMileage stays a *int: 0 is already its "unset" encoding at the
+			// column, the model and NextDue, so {"dueMileage": 0} is
+			// unambiguous without new machinery (FR-UPD-3).
+			DueDate    server.Nullable[string] `json:"dueDate"`
+			DueMileage *int                    `json:"dueMileage"`
+			Active     *bool                   `json:"active"`
 		},
 		) {
 			identity := auth.IdentityFromContext(req.Context())
@@ -130,7 +156,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			if err := requireScheduleFleet(identity, vehicleAccessor, current); err != nil {
+			v, err := requireScheduleFleet(identity, vehicleAccessor, current)
+			if err != nil {
 				server.WriteError(w, err)
 				return
 			}
@@ -138,7 +165,19 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			updated, err := proc.Update(id, func(m Model) Model {
+			var parsedDueDate time.Time
+			if attrs.DueDate.Present && attrs.DueDate.Valid {
+				parsed, perr := time.Parse(time.RFC3339, attrs.DueDate.Value)
+				if perr != nil {
+					server.WriteError(w, server.ErrValidation)
+					return
+				}
+				parsedDueDate = parsed
+			}
+			// The vehicle's live odometer, not the schedule's last-completed
+			// mileage: the recomputed status has to agree with what the hourly
+			// recompute job will derive a moment later.
+			updated, err := proc.Update(id, v.CurrentMileage(), func(m Model) Model {
 				rt := m.RecurrenceType()
 				months := m.IntervalMonths()
 				miles := m.IntervalMiles()
@@ -152,6 +191,22 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 					miles = *attrs.IntervalMiles
 				}
 				m = m.WithRecurrence(rt, months, miles)
+				if attrs.OneTime != nil {
+					m = m.WithOneTime(*attrs.OneTime)
+				}
+				dueDate := m.DueDate()
+				dueMileage := m.DueMileage()
+				if attrs.DueDate.Present {
+					// Present-but-not-valid is an explicit null: clear it.
+					dueDate = time.Time{}
+					if attrs.DueDate.Valid {
+						dueDate = parsedDueDate
+					}
+				}
+				if attrs.DueMileage != nil {
+					dueMileage = *attrs.DueMileage
+				}
+				m = m.WithDuePoint(dueDate, dueMileage)
 				if attrs.Active != nil {
 					m = m.WithActive(*attrs.Active)
 				}
@@ -174,7 +229,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			if err := requireScheduleFleet(identity, vehicleAccessor, current); err != nil {
+			if _, err := requireScheduleFleet(identity, vehicleAccessor, current); err != nil {
 				server.WriteError(w, err)
 				return
 			}
@@ -213,6 +268,15 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			}
 			if err := authz.RequireWrite(identity); err != nil {
 				server.WriteError(w, err)
+				return
+			}
+
+			// FR-COMPLETE-4. AdvanceTx re-checks this inside the transaction,
+			// which is the authoritative check; this one exists so a caller
+			// gets a 400 without a transaction ever being opened. Placed after
+			// the authz checks so a non-member still gets 403/404, not 400.
+			if !sched.Active() {
+				server.WriteError(w, server.ErrValidation)
 				return
 			}
 
@@ -316,10 +380,16 @@ func queueHandler(log logrus.FieldLogger, proc *Processor, state string) http.Ha
 
 // requireScheduleFleet resolves a schedule's vehicle and enforces same-fleet
 // access (404 no-leak). Used by GET/PATCH/DELETE on a schedule by ID.
-func requireScheduleFleet(identity auth.Identity, vehicleAccessor VehicleAccessor, m Model) error {
+//
+// It returns the resolved vehicle so a caller that also needs the odometer
+// baseline (PATCH, which recomputes status) does not fetch it twice.
+func requireScheduleFleet(identity auth.Identity, vehicleAccessor VehicleAccessor, m Model) (vehicle.Model, error) {
 	v, err := vehicleAccessor.GetByID(m.VehicleID())
 	if err != nil {
-		return err
+		return vehicle.Model{}, err
 	}
-	return authz.RequireSameFleet(identity, v.FleetID())
+	if err := authz.RequireSameFleet(identity, v.FleetID()); err != nil {
+		return vehicle.Model{}, err
+	}
+	return v, nil
 }

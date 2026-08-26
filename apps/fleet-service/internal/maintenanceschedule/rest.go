@@ -24,11 +24,17 @@ func DueCycleToken(m Model) string {
 
 // Attributes is the JSON:API attributes payload for a maintenance schedule.
 type Attributes struct {
-	VehicleID            string `json:"vehicleId"`
-	CategoryID           string `json:"categoryId"`
-	RecurrenceType       string `json:"recurrenceType"`
-	IntervalMonths       int    `json:"intervalMonths,omitempty"`
-	IntervalMiles        int    `json:"intervalMiles,omitempty"`
+	VehicleID      string `json:"vehicleId"`
+	CategoryID     string `json:"categoryId"`
+	RecurrenceType string `json:"recurrenceType"`
+	IntervalMonths int    `json:"intervalMonths,omitempty"`
+	IntervalMiles  int    `json:"intervalMiles,omitempty"`
+	// oneTime carries no omitempty on purpose: with it, a false would be
+	// indistinguishable from a server that predates the field, and the
+	// frontend keys the whole one-time treatment off this value.
+	OneTime              bool   `json:"oneTime"`
+	DueDate              string `json:"dueDate,omitempty"`
+	DueMileage           int    `json:"dueMileage,omitempty"`
 	LastCompletedDate    string `json:"lastCompletedDate,omitempty"`
 	LastCompletedMileage int    `json:"lastCompletedMileage,omitempty"`
 	NextDueDate          string `json:"nextDueDate,omitempty"`
@@ -46,6 +52,8 @@ func Transform(m Model) server.Resource {
 		RecurrenceType:       m.RecurrenceType(),
 		IntervalMonths:       m.IntervalMonths(),
 		IntervalMiles:        m.IntervalMiles(),
+		OneTime:              m.OneTime(),
+		DueMileage:           m.DueMileage(),
 		LastCompletedMileage: m.LastCompletedMileage(),
 		NextDueMileage:       m.NextDueMileage(),
 		Status:               m.Status(),
@@ -57,6 +65,9 @@ func Transform(m Model) server.Resource {
 	}
 	if !m.NextDueDate().IsZero() {
 		a.NextDueDate = m.NextDueDate().Format(timeFormat)
+	}
+	if !m.DueDate().IsZero() {
+		a.DueDate = m.DueDate().Format(timeFormat)
 	}
 	return server.Resource{Type: "maintenanceSchedules", ID: m.ID(), Attributes: a}
 }

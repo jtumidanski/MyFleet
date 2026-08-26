@@ -34,6 +34,7 @@ function schedule(
       vehicleId: VEHICLE_ID,
       categoryId: CATEGORY_ID,
       recurrenceType: 'time',
+      oneTime: false,
       status: 'overdue',
       severity: 'urgent',
       active: true,

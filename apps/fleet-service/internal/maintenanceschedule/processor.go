@@ -67,16 +67,31 @@ func (pr *Processor) Create(m Model) (Model, error) {
 }
 
 // Update applies a partial update to an existing schedule, recomputing next-due.
-func (pr *Processor) Update(id string, apply func(Model) Model) (Model, error) {
+//
+// The RESULTING model is validated before anything is recomputed or written
+// (FR-UPD-2). Validation precedes the recompute so an invalid intermediate
+// never reaches NextDue, and precedes the write so a rejected PATCH leaves the
+// stored row exactly as it was.
+//
+// currentMileage is the owning VEHICLE's odometer, the same value Builder.
+// SetCurrentMileage supplies on create and the recompute job supplies on its
+// sweep. It is not the schedule's last-completed mileage: judging a PATCHed
+// schedule against the last completion's odometer stores a status the very next
+// recompute contradicts, and reports a mileage schedule as "ok" no matter how
+// far past its due point the vehicle already is.
+func (pr *Processor) Update(id string, currentMileage int, apply func(Model) Model) (Model, error) {
 	m, err := pr.GetByID(id)
 	if err != nil {
 		return Model{}, err
 	}
 	updated := apply(m)
+	if err := validate(updated); err != nil {
+		return Model{}, err
+	}
 	// Recompute next-due + status from the (possibly changed) recurrence params.
 	nd, nm := NextDue(updated.AsSchedule())
 	updated = updated.WithNextDue(nd, nm)
-	state := DueState(updated.AsSchedule(), time.Now().UTC(), updated.LastCompletedMileage(), DefaultThresholds)
+	state := DueState(updated.AsSchedule(), time.Now().UTC(), currentMileage, DefaultThresholds)
 	updated = updated.WithStatus(state, Severity(state))
 	return pr.a.Update(updated)
 }

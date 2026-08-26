@@ -10,6 +10,9 @@ type Model struct {
 	recurrenceType       string // time | mileage | hybrid
 	intervalMonths       int
 	intervalMiles        int
+	oneTime              bool
+	dueDate              time.Time
+	dueMileage           int
 	lastCompletedDate    time.Time
 	lastCompletedMileage int
 	nextDueDate          time.Time
@@ -27,6 +30,9 @@ func (m Model) CategoryID() string           { return m.categoryID }
 func (m Model) RecurrenceType() string       { return m.recurrenceType }
 func (m Model) IntervalMonths() int          { return m.intervalMonths }
 func (m Model) IntervalMiles() int           { return m.intervalMiles }
+func (m Model) OneTime() bool                { return m.oneTime }
+func (m Model) DueDate() time.Time           { return m.dueDate }
+func (m Model) DueMileage() int              { return m.dueMileage }
 func (m Model) LastCompletedDate() time.Time { return m.lastCompletedDate }
 func (m Model) LastCompletedMileage() int    { return m.lastCompletedMileage }
 func (m Model) NextDueDate() time.Time       { return m.nextDueDate }
@@ -43,6 +49,9 @@ func (m Model) AsSchedule() Schedule {
 		RecurrenceType:       m.recurrenceType,
 		IntervalMonths:       m.intervalMonths,
 		IntervalMiles:        m.intervalMiles,
+		OneTime:              m.oneTime,
+		DueDate:              m.dueDate,
+		DueMileage:           m.dueMileage,
 		LastCompletedDate:    m.lastCompletedDate,
 		LastCompletedMileage: m.lastCompletedMileage,
 	}
@@ -53,6 +62,18 @@ func (m Model) WithRecurrence(recurrenceType string, months, miles int) Model {
 	m.recurrenceType = recurrenceType
 	m.intervalMonths = months
 	m.intervalMiles = miles
+	return m
+}
+
+// WithOneTime returns a copy with the one-time flag changed.
+func (m Model) WithOneTime(v bool) Model { m.oneTime = v; return m }
+
+// WithDuePoint returns a copy with the absolute due point set (or, with a zero
+// date and 0 miles, cleared). Both axes move together because the completion
+// flow clears both together (FR-ANCHOR-3).
+func (m Model) WithDuePoint(date time.Time, miles int) Model {
+	m.dueDate = date
+	m.dueMileage = miles
 	return m
 }
 

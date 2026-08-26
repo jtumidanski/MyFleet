@@ -8,12 +8,21 @@ import (
 
 // Entity maps to fleet.maintenance_schedules (PRD §6, design §8.2, §10.1).
 type Entity struct {
-	ID                   string `gorm:"type:uuid;primaryKey"`
-	VehicleID            string `gorm:"type:uuid;not null;index"`
-	CategoryID           string `gorm:"type:uuid;not null"`
-	RecurrenceType       string `gorm:"not null"` // time | mileage | hybrid
-	IntervalMonths       int
-	IntervalMiles        int
+	ID             string `gorm:"type:uuid;primaryKey"`
+	VehicleID      string `gorm:"type:uuid;not null;index"`
+	CategoryID     string `gorm:"type:uuid;not null"`
+	RecurrenceType string `gorm:"not null"` // time | mileage | hybrid
+	IntervalMonths int
+	IntervalMiles  int
+	// OneTime marks a schedule that is due once and never repeats (FR-OT-1).
+	// It is orthogonal to RecurrenceType, which continues to say which AXES
+	// the schedule is judged on rather than how often it repeats.
+	OneTime bool `gorm:"not null;default:false"`
+	// DueDate / DueMileage are the absolute due point. For a one-time schedule
+	// they are permanent; for a recurring schedule they are the first-due
+	// anchor, cleared on the first completion (FR-ANCHOR-3).
+	DueDate              *time.Time
+	DueMileage           int
 	LastCompletedDate    *time.Time
 	LastCompletedMileage int
 	NextDueDate          *time.Time
@@ -33,12 +42,15 @@ func Migration(db *gorm.DB) error { return db.AutoMigrate(&Entity{}) }
 
 // Make converts an Entity to a Model.
 func Make(e Entity) Model {
-	var lastDate, nextDate time.Time
+	var lastDate, nextDate, dueDate time.Time
 	if e.LastCompletedDate != nil {
 		lastDate = *e.LastCompletedDate
 	}
 	if e.NextDueDate != nil {
 		nextDate = *e.NextDueDate
+	}
+	if e.DueDate != nil {
+		dueDate = *e.DueDate
 	}
 	return Model{
 		id:                   e.ID,
@@ -47,6 +59,9 @@ func Make(e Entity) Model {
 		recurrenceType:       e.RecurrenceType,
 		intervalMonths:       e.IntervalMonths,
 		intervalMiles:        e.IntervalMiles,
+		oneTime:              e.OneTime,
+		dueDate:              dueDate,
+		dueMileage:           e.DueMileage,
 		lastCompletedDate:    lastDate,
 		lastCompletedMileage: e.LastCompletedMileage,
 		nextDueDate:          nextDate,
@@ -61,7 +76,7 @@ func Make(e Entity) Model {
 
 // ToEntity converts a Model to an Entity for persistence.
 func (m Model) ToEntity() Entity {
-	var lastDate, nextDate *time.Time
+	var lastDate, nextDate, dueDate *time.Time
 	if !m.lastCompletedDate.IsZero() {
 		d := m.lastCompletedDate
 		lastDate = &d
@@ -70,6 +85,10 @@ func (m Model) ToEntity() Entity {
 		d := m.nextDueDate
 		nextDate = &d
 	}
+	if !m.dueDate.IsZero() {
+		d := m.dueDate
+		dueDate = &d
+	}
 	return Entity{
 		ID:                   m.id,
 		VehicleID:            m.vehicleID,
@@ -77,6 +96,9 @@ func (m Model) ToEntity() Entity {
 		RecurrenceType:       m.recurrenceType,
 		IntervalMonths:       m.intervalMonths,
 		IntervalMiles:        m.intervalMiles,
+		OneTime:              m.oneTime,
+		DueDate:              dueDate,
+		DueMileage:           m.dueMileage,
 		LastCompletedDate:    lastDate,
 		LastCompletedMileage: m.lastCompletedMileage,
 		NextDueDate:          nextDate,
