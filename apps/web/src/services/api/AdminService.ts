@@ -9,6 +9,10 @@ import type {
   CreatePurgeInput,
   DeletedFilter,
   PurgeOperationAttributes,
+  TransferVehicleInput,
+  VehicleTransferAttributes,
+  VehicleTransferMeta,
+  VehicleTransferPreviewAttributes,
 } from '../../types/models/admin';
 
 /**
@@ -34,6 +38,21 @@ export interface AdminListMeta {
 export interface AdminListResult<A> {
   data: Array<JsonApiResource<A>>;
   meta?: AdminListMeta;
+}
+
+/**
+ * A completed transfer, with its document `meta` kept alongside the resource.
+ *
+ * The `meta.count_semantics` annotation is the only place the response says
+ * that `affected_counts.media_objects` and `.notifications` are "rows now on
+ * the destination" rather than "rows this transfer moved". Returning bare
+ * `doc.data` here — as every other method on this class does — would drop it at
+ * the last hop and leave the console rendering two numbers under a label they
+ * contradict, so this one method returns the envelope.
+ */
+export interface VehicleTransferResult {
+  data: JsonApiResource<VehicleTransferAttributes>;
+  meta?: VehicleTransferMeta;
 }
 
 function pageParams(search: URLSearchParams, page?: number, size?: number): void {
@@ -80,6 +99,61 @@ class AdminService {
       JsonApiDocument<JsonApiResource<AdminFleetDetailAttributes>>
     >(`${this.basePath}/fleets/${id}`);
     return doc.data;
+  }
+
+  /**
+   * GET /api/fleet/admin/vehicles/{id}/transfer-preview?destination_fleet_id=
+   *
+   * Read-only and cheap: the server counts with aggregates and calls no other
+   * service, so this is safe to re-run whenever the chosen destination changes.
+   *
+   * The destination is optional. Without it the server returns the source-side
+   * picture only — the destination fields and `categories_to_create` come back
+   * empty, because neither can be computed without knowing where the car goes.
+   */
+  async previewVehicleTransfer(
+    vehicleId: string,
+    destinationFleetId?: string,
+  ): Promise<JsonApiResource<VehicleTransferPreviewAttributes>> {
+    const search = new URLSearchParams();
+    if (destinationFleetId) search.set('destination_fleet_id', destinationFleetId);
+    const doc = await apiClient.request<
+      JsonApiDocument<JsonApiResource<VehicleTransferPreviewAttributes>>
+    >(
+      withQuery(
+        `${this.basePath}/vehicles/${encodeURIComponent(vehicleId)}/transfer-preview`,
+        search,
+      ),
+    );
+    return doc.data;
+  }
+
+  /**
+   * POST /api/fleet/admin/vehicles/{id}/transfer
+   *
+   * `confirmation` must be WHAT THE OPERATOR TYPED. The server compares it
+   * exactly — no trimming, no case folding — so sending the expected phrase
+   * instead would make its 409 unreachable and the disabled button the only
+   * gate.
+   *
+   * 409 covers a confirmation mismatch, a pending-purge vehicle or source
+   * fleet, and an unavailable destination; 422 covers a missing, malformed or
+   * same-fleet destination; 503 means a downstream refused and the transfer was
+   * rolled back whole. Every one carries an actionable `detail`, which is why
+   * the rejection is propagated untouched rather than remapped to a generic
+   * message here.
+   */
+  async transferVehicle(
+    vehicleId: string,
+    attributes: TransferVehicleInput,
+  ): Promise<VehicleTransferResult> {
+    const doc = await apiClient.request<
+      JsonApiDocument<JsonApiResource<VehicleTransferAttributes>> & { meta?: VehicleTransferMeta }
+    >(`${this.basePath}/vehicles/${encodeURIComponent(vehicleId)}/transfer`, {
+      method: 'POST',
+      body: JSON.stringify({ data: { type: 'vehicle-transfers', attributes } }),
+    });
+    return { data: doc.data, meta: doc.meta };
   }
 
   /** GET /api/fleet/admin/users?page[number]=&page[size]= */

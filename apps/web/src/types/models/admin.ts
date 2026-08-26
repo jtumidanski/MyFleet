@@ -108,7 +108,8 @@ export interface PurgeOperationAttributes {
   failed_services: string[];
 }
 
-export type AuditAction = 'purge.created' | 'purge.cancelled' | 'purge.retried' | 'purge.reaped';
+export type AuditAction =
+  'purge.created' | 'purge.cancelled' | 'purge.retried' | 'purge.reaped' | 'vehicle.transferred';
 
 export interface AuditEventAttributes {
   actor_user_id: string;
@@ -120,6 +121,9 @@ export interface AuditEventAttributes {
   target_label: string;
   purge_operation_id: string;
   affected_counts: Record<string, number>;
+  /** Populated only for `vehicle.transferred`; empty string otherwise. */
+  source_fleet_id: string;
+  destination_fleet_id: string;
   correlation_id: string;
   created_at: string;
 }
@@ -145,4 +149,70 @@ export interface CreatePurgeInput {
   target_type?: string;
   target_id?: string;
   confirmation?: string;
+}
+
+/** A category the transfer would add to the destination fleet. */
+export interface CategoryToCreate {
+  name: string;
+  kind: string;
+}
+
+/**
+ * GET /api/fleet/admin/vehicles/{id}/transfer-preview.
+ *
+ * `vehicle_label` is the EXACT string the confirmation input must match. It is
+ * computed server-side and echoed here precisely so the console never derives
+ * its own copy of a phrase that has to match byte for byte.
+ *
+ * The destination fields and `categories_to_create` are empty until a
+ * destination is chosen — neither can be computed without one.
+ *
+ * `counts.media_objects` is "media references held by this vehicle". The
+ * completed transfer reports media-service's own read-back, which is lower only
+ * when a reference was already dangling before the transfer.
+ *
+ * `counts` carries no `notifications` key: notification-service owns that
+ * relationship and the preview deliberately calls no other service.
+ */
+export interface VehicleTransferPreviewAttributes {
+  vehicle_label: string;
+  source_fleet_id: string;
+  source_fleet_name: string;
+  destination_fleet_id: string;
+  destination_fleet_name: string;
+  counts: Record<string, number>;
+  categories_to_create: CategoryToCreate[];
+  warnings: string[];
+}
+
+/** POST /api/fleet/admin/vehicles/{id}/transfer — the completed move. */
+export interface VehicleTransferAttributes {
+  vehicle_id: string;
+  source_fleet_id: string;
+  destination_fleet_id: string;
+  transferred_at: string;
+  affected_counts: Record<string, number>;
+}
+
+/**
+ * `meta` on the transfer response.
+ *
+ * `count_semantics` maps an `affected_counts` key to a sentence correcting what
+ * that number actually measures. The server populates it for exactly
+ * `media_objects` and `notifications`: both are read back from the downstream
+ * service as "live rows now on the destination fleet", so a row that was
+ * already there is included and was NOT moved by this call. Every other key is
+ * genuinely "rows this transfer moved" and is deliberately left unannotated —
+ * annotating all of them would bury the two that need it.
+ *
+ * Optional at every level because the server omits `meta` entirely when neither
+ * key is present (see admin.TransferMeta, which returns nil).
+ */
+export interface VehicleTransferMeta {
+  count_semantics?: Record<string, string>;
+}
+
+export interface TransferVehicleInput {
+  destination_fleet_id: string;
+  confirmation: string;
 }
