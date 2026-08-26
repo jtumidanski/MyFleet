@@ -67,7 +67,8 @@ inventory — the `**Files:**` and `**Interfaces:**` blocks. A brief without
 them makes the implementer re-derive scope it should have been handed, which
 inflates its context before a single edit happens. If a task's plan section is
 missing that inventory, add it to the brief file yourself, once, in your own
-context, before dispatching.
+context, before dispatching. When you write that addition, name the slice,
+not the document — see [`docs/slice-first.md`](../../docs/slice-first.md).
 
 ### Step 4c — Verification runs outside the implementer
 
@@ -83,6 +84,14 @@ tools/verify.sh --quick
 Running the gate in `task-verifier`'s own clean context instead of inside the
 implementer costs a fraction of the tokens, and the build/vet/lint output
 never lands in the implementer's window.
+
+**Launch the gate, then keep going — never idle-wait or poll for it.** Once
+`task-verifier` is dispatched, continue with other local work (the per-task
+review below, or brief prep for the next task) instead of blocking on its
+return. Reconcile the verdict at the next natural pause — the notification
+from whatever you dispatched next. Keep at most one gate in flight at a time;
+if the next task finishes before the current gate reconciles, wait for that
+reconciliation before dispatching another `task-verifier`.
 
 **A `--quick` PASS is a per-task gate, not authorization to call the branch
 done.** `--quick` skips the container-build gate and both cluster dry-runs.
@@ -109,8 +118,9 @@ its `blocking` lines. `task-reviewer` is distinct from the whole-branch
 ### Step 4d — Handle `PARTIAL`
 
 `task-implementer`'s tool-call cap is **120**, matching `CAP=120` in
-`.claude/hooks/turn-budget.sh`; `.claude/hooks/turn-budget-guard.sh` denies
-further tool calls once the count reaches **125**. `PARTIAL` is the designed
+`.claude/hooks/turn-budget.sh`, which also warns at **100** (`WARN=100`);
+`.claude/hooks/turn-budget-guard.sh` denies further tool calls once the count
+reaches **125**. `PARTIAL` is the designed
 outcome when that cap is reached with work remaining — the implementer
 commits what already works and hands back the rest. It is a signal the task
 was mis-sized, not a failure to retry blindly, and not something to re-dispatch
@@ -121,9 +131,14 @@ On `PARTIAL`:
 1. Read what landed. If it is coherent, it is already committed — leave it.
 2. Ledger the `PARTIAL` status, the commit range, and what remains.
 3. Write a narrowed continuation brief for just the remaining work (its own
-   file inventory, not the whole original brief) and dispatch a **fresh**
-   `task-implementer` with it, or amend the plan if the remaining scope no
-   longer fits the task as written.
+   file inventory, not the whole original brief), and dispatch a **fresh**
+   `task-implementer` with it, passing the **same report-file path** the
+   first implementer used plus the interfaces and decisions it recorded
+   there — a fresh implementer has no other route to what its predecessor
+   already decided. Before dispatching a second `task-implementer` at the
+   same transformation, stop and consider writing a codemod instead — see
+   [`docs/codemod-vs-agents.md`](../../docs/codemod-vs-agents.md). Otherwise
+   amend the plan if the remaining scope no longer fits the task as written.
 4. Verification and review still run once over the whole task's commit
    range, not once per segment.
 
