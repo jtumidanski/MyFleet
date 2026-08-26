@@ -80,6 +80,12 @@ var (
 		"vehicle already belongs to that fleet")
 	errDestinationRequired = server.Detailed(server.ErrValidation,
 		"destination_fleet_id is required")
+	// The 403 is Detailed for the same reason the 404s are: server.ErrForbidden
+	// is a bare sentinel with no Detail(), so an operator whose platform-admin
+	// grant was revoked mid-session would otherwise see an empty message and no
+	// way to tell "you lost the role" from "the service is broken".
+	errTransferForbidden = server.Detailed(server.ErrForbidden,
+		"you are no longer a platform administrator; ask an existing platform administrator to restore the role, then sign in again")
 )
 
 // transferVehicleRow is the slice of fleet.vehicles the transfer reads.
@@ -310,6 +316,14 @@ func (p *Processor) PreviewVehicleTransfer(ctx context.Context, vehicleID, destF
 // operation is platform-admin-only and rare, and the alternative ordering
 // leaves a concurrency gap the vehicle lock exists to close. If it ever becomes
 // a problem the fix is a queue, not a reordering.
+//
+// The transaction deliberately runs on p.d.DB and NOT p.d.DB.WithContext(ctx),
+// the opposite of PreviewVehicleTransfer: the preview is a throwaway read that
+// should stop costing the database the moment the console abandons it, whereas
+// this is a write that has already moved rows and may have moved media in
+// another service. A cancellation mid-transaction would abort the local
+// statements — including the compensating path's ability to run — so the write
+// is allowed to finish or fail on its own terms.
 func (p *Processor) TransferVehicle(ctx context.Context, in TransferInput) (TransferResult, error) {
 	now := p.d.Now()
 
@@ -320,7 +334,7 @@ func (p *Processor) TransferVehicle(ctx context.Context, in TransferInput) (Tran
 		return TransferResult{}, err
 	}
 	if !ok {
-		return TransferResult{}, server.ErrForbidden
+		return TransferResult{}, errTransferForbidden
 	}
 	if in.DestFleetID == "" {
 		return TransferResult{}, errDestinationRequired
@@ -558,7 +572,20 @@ func mergeDownstreamCount(counts map[string]int, key string, got map[string]int)
 // this process can do, so it logs at error naming both fleets and every id — an
 // operator with that line can finish the repair by hand, which they cannot do
 // from a bare "transfer failed".
+//
+// The compensating calls run on a context DETACHED from the request's
+// cancellation. The commonest reason the notification call failed is that the
+// client disconnected or the request deadline expired — and that is exactly the
+// context that would be handed to the repair, which would then fail instantly
+// with context.Canceled and strand media on the destination fleet in the one
+// scenario compensation exists for. context.WithoutCancel (not
+// context.Background) because the request's VALUES must survive: the
+// correlation id rides on the context and the downstream clients propagate it,
+// so a fresh Background context would make the repair unattributable in the
+// logs of the very service that has the stranded rows.
 func (p *Processor) compensate(ctx context.Context, spec TransferSpec, mediaIDs []string, done downstreamState) {
+	ctx = context.WithoutCancel(ctx)
+
 	if done.media && p.d.MediaReassign != nil {
 		if _, err := p.d.MediaReassign.Reassign(ctx, mediaIDs, spec.SourceFleetID); err != nil {
 			p.log.WithError(err).WithFields(logrus.Fields{

@@ -161,25 +161,40 @@ func TestTransferVehicle_writesTheAuditRow(t *testing.T) {
 
 // FR-XFER-CONF-3, asserted as three NEGATIVES: nothing local changed, no audit
 // row exists, and neither downstream was called at all.
+// The confirmation comparison is EXACT: neither case folding nor trimming. Both
+// halves of that rule are pinned, because a "helpful" strings.TrimSpace added
+// later would pass a case-only test and silently weaken the guard.
 func TestTransferVehicle_confirmationMismatchWritesNothing(t *testing.T) {
-	h := newTransferHarness(t)
+	cases := []struct {
+		name         string
+		confirmation string
+	}{
+		{name: "wrong case", confirmation: "2020 toyota corolla"},
+		{name: "leading whitespace is not trimmed", confirmation: " " + seededLabel},
+		{name: "trailing whitespace is not trimmed", confirmation: seededLabel + " "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newTransferHarness(t)
 
-	_, err := h.proc.TransferVehicle(context.Background(), h.input("2020 toyota corolla"))
-	if !errors.Is(err, server.ErrConflict) {
-		t.Fatalf("err = %v, want a 409 conflict", err)
-	}
-	if got := scanOne[string](t, h.db, `SELECT fleet_id FROM fleet.vehicles WHERE id = ?`,
-		h.src.VehicleID); got != "fleet-a" {
-		t.Errorf("fleet_id = %q, want the untouched fleet-a", got)
-	}
-	if n := scanOne[int](t, h.db, `SELECT count(*) FROM fleet.admin_audit_events`); n != 0 {
-		t.Errorf("audit rows = %d, want 0", n)
-	}
-	if len(h.media.calls) != 0 {
-		t.Errorf("media was called %d times, want 0", len(h.media.calls))
-	}
-	if len(h.notif.calls) != 0 {
-		t.Errorf("notification was called %d times, want 0", len(h.notif.calls))
+			_, err := h.proc.TransferVehicle(context.Background(), h.input(tc.confirmation))
+			if !errors.Is(err, server.ErrConflict) {
+				t.Fatalf("err = %v, want a 409 conflict", err)
+			}
+			if got := scanOne[string](t, h.db, `SELECT fleet_id FROM fleet.vehicles WHERE id = ?`,
+				h.src.VehicleID); got != "fleet-a" {
+				t.Errorf("fleet_id = %q, want the untouched fleet-a", got)
+			}
+			if n := scanOne[int](t, h.db, `SELECT count(*) FROM fleet.admin_audit_events`); n != 0 {
+				t.Errorf("audit rows = %d, want 0", n)
+			}
+			if len(h.media.calls) != 0 {
+				t.Errorf("media was called %d times, want 0", len(h.media.calls))
+			}
+			if len(h.notif.calls) != 0 {
+				t.Errorf("notification was called %d times, want 0", len(h.notif.calls))
+			}
+		})
 	}
 }
 
@@ -192,8 +207,15 @@ func TestTransferVehicle_revokedAdminIsForbidden(t *testing.T) {
 		Auth: fakeAuth{ok: false}, MediaReassign: h.media, NotificationReassign: h.notif,
 	}, admin.NewTargetResolver(h.db))
 
-	if _, err := proc.TransferVehicle(context.Background(), h.input(seededLabel)); !errors.Is(err, server.ErrForbidden) {
+	_, err := proc.TransferVehicle(context.Background(), h.input(seededLabel))
+	if !errors.Is(err, server.ErrForbidden) {
 		t.Fatalf("err = %v, want forbidden", err)
+	}
+	// The 403 is the one branch the eligibility table cannot reach, so its
+	// actionable detail is asserted here instead.
+	var d interface{ Detail() string }
+	if !errors.As(err, &d) || d.Detail() == "" {
+		t.Fatalf("403 carried no actionable detail: %v", err)
 	}
 	if len(h.media.calls) != 0 {
 		t.Error("media was called for a revoked admin")
@@ -394,6 +416,71 @@ func TestTransferVehicle_notificationFailureCompensatesTheMediaMove(t *testing.T
 	}
 	if len(h.media.calls[1]) == 0 || h.media.calls[1][0] != h.src.MediaID {
 		t.Errorf("compensating call carried ids %v, want the vehicle's media ids", h.media.calls[1])
+	}
+}
+
+// ctxSensitiveReassigner behaves like a real HTTP client: a call made with an
+// already-cancelled context fails BEFORE any request is issued, so it is never
+// recorded. That is what makes "the compensating call happened" an honest
+// assertion rather than a restatement of "compensate was entered".
+type ctxSensitiveReassigner struct {
+	calls  [][]string
+	dests  []string
+	ret    map[string]int
+	err    error
+	before func()
+}
+
+func (f *ctxSensitiveReassigner) Reassign(ctx context.Context, ids []string, dest string) (map[string]int, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	f.calls = append(f.calls, ids)
+	f.dests = append(f.dests, dest)
+	if f.before != nil {
+		f.before()
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.ret, nil
+}
+
+// The realistic failure: the client disconnects (or the deadline expires) while
+// the notification call is in flight, which is BOTH why that call failed and
+// why the request context is now dead. Compensation must still reverse the
+// media move — it runs on a context detached from the request's cancellation.
+func TestTransferVehicle_compensatesWhenTheRequestContextIsCancelled(t *testing.T) {
+	h := newTransferHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	media := &ctxSensitiveReassigner{ret: map[string]int{"media_objects": 1}}
+	notif := &ctxSensitiveReassigner{
+		ret:    map[string]int{"notifications": 2},
+		err:    errors.New("notification-service went away with the client"),
+		before: cancel,
+	}
+	proc := newProcessorWith(t, h.db, media, notif)
+
+	_, err := proc.TransferVehicle(ctx, h.input(seededLabel))
+	if !errors.Is(err, server.ErrServiceUnavailable) {
+		t.Fatalf("err = %v, want service unavailable", err)
+	}
+	if len(media.calls) != 2 {
+		t.Fatalf("media calls = %d, want 2 (the move and its reversal); the "+
+			"compensating call was refused by the cancelled request context",
+			len(media.calls))
+	}
+	if media.dests[1] != "fleet-a" {
+		t.Errorf("compensating call sent destination %q, want the SOURCE fleet-a", media.dests[1])
+	}
+	if len(media.calls[1]) == 0 || media.calls[1][0] != h.src.MediaID {
+		t.Errorf("compensating call carried ids %v, want the vehicle's media ids", media.calls[1])
+	}
+	if got := scanOne[string](t, h.db, `SELECT fleet_id FROM fleet.vehicles WHERE id = ?`,
+		h.src.VehicleID); got != "fleet-a" {
+		t.Errorf("fleet_id = %q, want the rolled-back fleet-a", got)
 	}
 }
 
