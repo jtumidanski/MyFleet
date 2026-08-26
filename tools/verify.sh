@@ -207,13 +207,19 @@ fi
 if [ "$QUICK" -eq 1 ] || [ "$NO_DOCKER" -eq 1 ]; then
     printf '\n\033[33mAll gates that ran passed, but slow gates were skipped by a flag:\n'
     printf 'this run does NOT authorize calling the branch done. Re-run flagless.\033[0m\n'
-    exit 0
 fi
 
+# This block must run on EVERY exit path that has loud skips, flagged or not —
+# a --no-docker/--quick run that also hit an environment-forced skip (e.g. no
+# reachable cluster) must not lose this warning to an early exit above.
 if [ "${#LOUD_SKIPPED[@]}" -gt 0 ]; then
     printf '\n\033[33m⚠ %d gate(s) were skipped for lack of an environment — see the ⚠ lines above.\n' \
         "${#LOUD_SKIPPED[@]}"
     printf '  Everything that could run passed; the skipped gates were never evaluated.\033[0m\n'
+fi
+
+if [ "$QUICK" -eq 1 ] || [ "$NO_DOCKER" -eq 1 ]; then
+    exit 0
 fi
 
 printf '\n\033[32mAll gates passed — the branch may be called done.\033[0m\n'

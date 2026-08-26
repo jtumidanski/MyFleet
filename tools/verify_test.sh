@@ -37,7 +37,7 @@ assert_eq() {
 }
 
 NONAUTH='does NOT authorize calling the branch done'
-AUTH='the branch may be called done'
+AUTH='All gates passed — the branch may be called done.'
 
 # --- argument parsing ------------------------------------------------------
 
@@ -72,14 +72,35 @@ case "$flagless_out" in
     *)            ok  "flagless does not print the non-authorization sentence" ;;
 esac
 
-# --- gate selection --------------------------------------------------------
+# --- gate selection ----------------------------------------------------
+#
+# Each assertion pins the PASSED-line or SKIPPED-line rendering the summary
+# actually emits (see verify.sh's step()/skip() label text and its summary
+# printf formats), not just the gate name, so an assertion here fails if the
+# gate lands in the wrong bucket — e.g. if --quick stopped skipping the
+# container builds and ran them instead, the PASSED-line text below would
+# appear in $quick_out and the SKIPPED-line assertion would fail.
 
-assert_contains "flagless selects the container-build gate" 'container builds' "$flagless_out"
-assert_contains "flagless selects the main dry-run"  'main overlay'  "$flagless_out"
-assert_contains "flagless selects the local dry-run" 'local overlay' "$flagless_out"
-assert_contains "--quick skips the container builds" 'container builds' "$quick_out"
-assert_contains "--no-docker still selects the main dry-run"  'main overlay'  "$nodocker_out"
-assert_contains "--no-docker still selects the local dry-run" 'local overlay' "$nodocker_out"
+assert_contains "flagless runs the container-build gate (PASSED)" \
+    'container builds (5 images, context = repo root) PASSED' "$flagless_out"
+assert_contains "flagless runs the main dry-run (PASSED)" \
+    'cluster dry-run, main overlay PASSED' "$flagless_out"
+assert_contains "flagless runs the local dry-run (PASSED)" \
+    'cluster dry-run, local overlay PASSED' "$flagless_out"
+
+assert_contains "--quick skips the container builds (SKIPPED)" \
+    'container builds (--quick) SKIPPED' "$quick_out"
+assert_contains "--quick skips the main dry-run (SKIPPED)" \
+    'cluster dry-run, main overlay (--quick) SKIPPED' "$quick_out"
+assert_contains "--quick skips the local dry-run (SKIPPED)" \
+    'cluster dry-run, local overlay (--quick) SKIPPED' "$quick_out"
+
+assert_contains "--no-docker skips the container builds (SKIPPED)" \
+    'container builds (--no-docker) SKIPPED' "$nodocker_out"
+assert_contains "--no-docker still runs the main dry-run (PASSED)" \
+    'cluster dry-run, main overlay PASSED' "$nodocker_out"
+assert_contains "--no-docker still runs the local dry-run (PASSED)" \
+    'cluster dry-run, local overlay PASSED' "$nodocker_out"
 
 # --- structural: outcomes are recorded in exactly one place each ------------
 
