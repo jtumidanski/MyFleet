@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -365,4 +366,140 @@ func PruneWidgets(tx *gorm.DB, ids []string) (int, error) {
 		return 0, fmt.Errorf("prune dashboard widgets: %w", res.Error)
 	}
 	return int(res.RowsAffected), nil
+}
+
+// Activity event types the transfer emits (FR-XFER-SRC-4).
+//
+// Declared here, local to internal/admin, rather than in a shared constants
+// block: the eight existing event types are inline literals in the six domains
+// that emit them, a shared block would have to live in internal/activity and be
+// imported by all six, and doing that as a side effect of a transfer feature is
+// unrelated refactoring. These two are emitted here, so they live here.
+const (
+	EventVehicleTransferredOut = "vehicle.transferred_out"
+	EventVehicleTransferredIn  = "vehicle.transferred_in"
+)
+
+// transferPayload is the activity event body for both halves of a transfer.
+type transferPayload struct {
+	CounterpartFleetID string `json:"counterpart_fleet_id"`
+	VehicleLabel       string `json:"vehicle_label"`
+}
+
+// validate rejects a spec whose ids are empty.
+//
+// This is not defensive boilerplate. An empty vehicle id is a WILDCARD, not a
+// no-op: WidgetsPinnedToVehicle compares the PARSED config's vehicleId against
+// it, so every widget whose config pins no vehicle would match and PruneWidgets
+// would HARD DELETE widgets that have nothing to do with this transfer. An
+// empty destination fleet id would likewise strand the vehicle in no fleet at
+// all. Checked before the first statement runs, so a bad spec writes nothing.
+func (s TransferSpec) validate() error {
+	switch {
+	case s.VehicleID == "":
+		return errors.New("transfer spec: vehicle id is required")
+	case s.SourceFleetID == "":
+		return errors.New("transfer spec: source fleet id is required")
+	case s.DestFleetID == "":
+		return errors.New("transfer spec: destination fleet id is required")
+	}
+	return nil
+}
+
+// ApplyTransfer performs every LOCAL write a vehicle transfer needs and returns
+// the affected counts.
+//
+// It must be called inside the caller's transaction — every statement below
+// joins it, so any failure, including the downstream calls the processor makes
+// afterwards, unwinds all of this (design D4).
+//
+// media_objects and notifications are NOT set here: those counts come from the
+// downstream services' read-backs, and the processor merges them in.
+func ApplyTransfer(tx *gorm.DB, spec TransferSpec) (map[string]int, error) {
+	if err := spec.validate(); err != nil {
+		return nil, err
+	}
+
+	// Counted FIRST, before any write. The two transfer events inserted at the
+	// end match the activity_events predicate, and counting after them would
+	// report two more rows than the operator was shown in the preview.
+	counts, err := CountTransfer(tx, spec.VehicleID)
+	if err != nil {
+		return nil, err
+	}
+
+	// The single UPDATE the whole operation exists to perform. It names
+	// fleet_id and updated_at and nothing else — in particular it never
+	// mentions created_at, which is a stronger guarantee than GORM's
+	// `<-:create` tag, since that only protects db.Save (FR-XFER-MOVE-1).
+	if err := tx.Exec(`UPDATE fleet.vehicles SET fleet_id = ?, updated_at = ? WHERE id = ?`,
+		spec.DestFleetID, spec.Now, spec.VehicleID).Error; err != nil {
+		return nil, fmt.Errorf("move vehicle: %w", err)
+	}
+
+	// Every plan step that carries a Set clause. The count-only steps are
+	// skipped by the same emptiness test that documents them.
+	for _, s := range TransferPlan {
+		if s.Set == "" {
+			continue
+		}
+		q := "UPDATE " + s.Table + " SET " + s.Set +
+			" WHERE (" + s.Where + ") AND deleted_at IS NULL"
+		if err := tx.Exec(q, spec.DestFleetID, spec.VehicleID).Error; err != nil {
+			return nil, fmt.Errorf("apply transfer %s: %w", s.Table, err)
+		}
+	}
+
+	created, err := ResolveCategories(tx, spec)
+	if err != nil {
+		return nil, err
+	}
+	counts["categories_created"] = created
+
+	widgetIDs, err := WidgetsPinnedToVehicle(tx, spec.SourceFleetID, spec.VehicleID)
+	if err != nil {
+		return nil, err
+	}
+	removed, err := PruneWidgets(tx, widgetIDs)
+	if err != nil {
+		return nil, err
+	}
+	counts["widgets_removed"] = removed
+
+	// AFTER the bulk fleet_id rewrite, deliberately. The OUT event carries the
+	// SOURCE fleet id and its vehicle_id matches the rewrite predicate, so
+	// inserting it earlier would sweep it into the destination fleet and the
+	// source fleet would have no record that the car left.
+	if err := recordTransferEvent(tx, spec, EventVehicleTransferredOut,
+		spec.SourceFleetID, spec.DestFleetID); err != nil {
+		return nil, err
+	}
+	if err := recordTransferEvent(tx, spec, EventVehicleTransferredIn,
+		spec.DestFleetID, spec.SourceFleetID); err != nil {
+		return nil, err
+	}
+
+	return counts, nil
+}
+
+// recordTransferEvent appends one activity row. It writes raw SQL rather than
+// calling internal/activity, because internal/admin never touches another
+// domain's internals — and because internal/activity deliberately exposes no
+// way to write a row with an arbitrary fleet id.
+func recordTransferEvent(tx *gorm.DB, spec TransferSpec, eventType, fleetID, counterpartID string) error {
+	payload, err := json.Marshal(transferPayload{
+		CounterpartFleetID: counterpartID,
+		VehicleLabel:       spec.Label,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal %s payload: %w", eventType, err)
+	}
+	q := `INSERT INTO fleet.activity_events
+	        (id, fleet_id, vehicle_id, actor_user_id, type, payload, created_at)
+	      VALUES (?, ?, ?, ?, ?, ?, ?)`
+	if err := tx.Exec(q, uuid.NewString(), fleetID, spec.VehicleID,
+		spec.ActorUserID, eventType, payload, spec.Now).Error; err != nil {
+		return fmt.Errorf("record %s: %w", eventType, err)
+	}
+	return nil
 }
