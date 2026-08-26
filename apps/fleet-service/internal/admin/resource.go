@@ -6,9 +6,11 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/authz"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/systemactor"
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
@@ -364,9 +366,24 @@ func InitializeRoutes(log logrus.FieldLogger, proc *Processor) func(chi.Router) 
 				return
 			}
 			page := server.ParsePage(req)
+			// The filter compares against a uuid column, so the value has to be
+			// one. "system" is the word the console DISPLAYS for the sentinel
+			// (systemactor.Display), and an operator reading the table will
+			// reasonably type it back into the filter box — Resolve turns it
+			// into the id actually stored. Anything else that is not a uuid is
+			// the caller's mistake and earns a 422, not the 500 Postgres would
+			// otherwise raise from inside the query.
+			actor := systemactor.Resolve(req.URL.Query().Get("actor"))
+			if actor != "" {
+				if _, perr := uuid.Parse(actor); perr != nil {
+					server.WriteError(w, server.Detailed(server.ErrValidation,
+						"actor must be a user id or \""+systemactor.Label+"\""))
+					return
+				}
+			}
 			events, total, err := proc.ListAuditEvents(AuditFilter{
 				Action: req.URL.Query().Get("action"),
-				Actor:  req.URL.Query().Get("actor"),
+				Actor:  actor,
 			}, page)
 			if err != nil {
 				log.WithError(err).Error("admin list audit events")

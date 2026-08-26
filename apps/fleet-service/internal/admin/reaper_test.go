@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/admin"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/admin/admintest"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/systemactor"
 )
 
 func TestReapDue_hardDeletesPastTheWindowAndMarksReaped(t *testing.T) {
@@ -49,8 +52,23 @@ func TestReapDue_hardDeletesPastTheWindowAndMarksReaped(t *testing.T) {
 	var actor string
 	db.Raw(`SELECT actor_user_id FROM fleet.admin_audit_events WHERE action = ?`,
 		admin.ActionPurgeReaped).Scan(&actor)
-	if actor != admin.ActorSystem {
-		t.Errorf("reaper audit actor = %q, want %q", actor, admin.ActorSystem)
+	if actor != systemactor.ID {
+		t.Errorf("reaper audit actor = %q, want the system sentinel %q", actor, systemactor.ID)
+	}
+	// admin_audit_events.actor_user_id is `uuid NOT NULL`. This harness is
+	// SQLite, which stores anything in such a column; Postgres rejects a
+	// non-uuid and rolls the whole reap back with it, which is exactly how the
+	// reaper spent eighteen days failing every hour in silence. Assert the
+	// property the column enforces, since the harness cannot.
+	if _, err := uuid.Parse(actor); err != nil {
+		t.Errorf("reaper audit actor %q is not a uuid: %v — Postgres will reject the "+
+			"insert and roll back the hard delete and the status update with it", actor, err)
+	}
+	var email string
+	db.Raw(`SELECT actor_email FROM fleet.admin_audit_events WHERE action = ?`,
+		admin.ActionPurgeReaped).Scan(&email)
+	if email != systemactor.Label {
+		t.Errorf("reaper audit actor_email = %q, want %q", email, systemactor.Label)
 	}
 	// FR-ADMIN-AUDIT-2: the audit trail survives its own purge.
 	if n := admintest.CountRows(t, db, "fleet.admin_audit_events"); n < 2 {

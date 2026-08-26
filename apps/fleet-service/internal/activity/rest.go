@@ -3,6 +3,7 @@ package activity
 import (
 	"encoding/json"
 
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/systemactor"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
@@ -20,6 +21,11 @@ type Attributes struct {
 
 // Transform converts a Model to a JSON:API Resource. The stored JSON payload is
 // decoded back into a map for transport; an unparseable payload yields a nil map.
+//
+// The actor id goes through systemactor.Display. actor_user_id is a uuid column,
+// so a system-generated event (schedule.overdue) stores the sentinel, while the
+// feed — which resolves every other actor to a display name via auth-service —
+// already special-cases the word "system" and must keep receiving it.
 func Transform(m Model) (server.Resource, error) {
 	var payload map[string]any
 	if len(m.Payload()) > 0 {
@@ -37,7 +43,7 @@ func Transform(m Model) (server.Resource, error) {
 		Attributes: Attributes{
 			FleetID:     m.FleetID(),
 			VehicleID:   vehicleID,
-			ActorUserID: m.ActorUserID(),
+			ActorUserID: systemactor.Display(m.ActorUserID()),
 			Type:        m.Type(),
 			Payload:     payload,
 			CreatedAt:   m.CreatedAt().Format(timeFormat),
