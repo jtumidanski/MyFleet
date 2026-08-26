@@ -28,8 +28,9 @@ project's authority on code patterns, grounding, and git discipline.
 
 ## Inputs You Are Given
 
-- **Brief file** — `task-N-brief.md`. Read this first. It is your
-  requirements, with the exact values to use verbatim.
+- **Brief file** — `task-N-brief.md`, produced by `tools/task-brief.sh`.
+  Read this first. It is your requirements, with the exact values to use
+  verbatim.
 - **Report file** — `task-N-report.md`. You write your full report here.
 - **Worktree absolute path** — every Bash call is prefixed
   `cd <worktree> && ...`.
@@ -73,21 +74,21 @@ You run **module-local checks only**, from the directory of the Go module you
 changed:
 
 ```sh
-cd <worktree>/apps/<svc> && go build ./... && go vet ./... && go test -race ./...
-tools/lint.sh --check --go apps/<svc>     # module-scoped lint
+cd <worktree>/apps/<svc> && go build ./... && go test ./...
 npm run -w apps/web test                  # frontend module-local
 ```
 
-For a `packages/` change, run the same three Go commands from that package's
+For a `packages/` change, run the same two Go commands from that package's
 module root.
 
 **Do NOT run any of these — they are not yours:**
 
 - `tools/verify.sh` (any flag, including `--quick`)
-- `tools/lint.sh` unscoped (no `--go apps/<svc>` / package restriction)
+- `tools/lint.sh`
+- `go test -race`
+- `go vet` sweeps
 - `make ci`
-- container builds (`docker build -f apps/<svc>/Dockerfile .`)
-- repo-wide sweeps across modules you did not change
+- the container build (`docker build -f apps/<svc>/Dockerfile .`)
 
 Repo-wide verification runs in the `task-verifier` agent's own clean
 context, dispatched by the controller after you report. A `--quick` run
@@ -96,7 +97,7 @@ its output — build logs, vet noise, lint diffs — is the single biggest
 avoidable consumer of an implementer's window. If verification fails, the
 controller sends you the failures as review findings and you fix them then.
 
-The exception: if your own module-local build/vet/test/lint fails, that IS
+The exception: if your own module-local build/test fails, that IS
 yours — fix it before reporting.
 
 ## Contract 3 — Brief-First Discovery
