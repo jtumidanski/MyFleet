@@ -167,10 +167,12 @@ Concretely, in a debugging session:
 - **After each bug file is written and its fix dispatched**, ask the question.
   If the next bug is unrelated to the one you just fixed, it is a fresh unit —
   dispatch it against its own bug file rather than continuing to accumulate.
-- **Past a high context fraction, stop starting new investigations in this
-  context.** Write the remaining leads into the task folder and hand off. The
-  `/execute-task` ceiling applies here for the same reason it applies there:
-  the marker on disk is meaningless if the session that wrote it keeps going.
+- **Past ~150k tokens, stop starting new investigations in this context.**
+  Write the remaining leads into the task folder and hand off. This is the
+  same backstop `docs/agent-dispatch.md` sets for a controller (~150k tokens,
+  or 4 completed plan tasks, whichever comes first); the `/execute-task`
+  ceiling applies here for the same reason it applies there: the marker on
+  disk is meaningless if the session that wrote it keeps going.
 
 ---
 

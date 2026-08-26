@@ -24,7 +24,7 @@ comment, a domain-specific choice).
 
 ### The arithmetic that sets the trigger at the second dispatch
 
-An `task-implementer` dispatch is capped at **120 tool calls** before it must
+A `task-implementer` dispatch is capped at **120 tool calls** before it must
 hand back `PARTIAL` (`docs/agent-dispatch.md` §The implementer budget). That
 cap is a standing contract, not a measurement, and it is what makes the
 threshold computable without waiting for a transformation to run away first:

@@ -72,6 +72,16 @@ its verdict into the same tool call — reading `docs/tasks/<task>/audit.md` and
 then separately calling `tools/agent-ledger.sh append` is two round trips for
 one decision; issue them together.
 
+**A deterministic tool defeated by a wrapper is a net loss.** When a
+token-optimizing shell wrapper swallows a script's stdout, the saved bytes
+cost a whole extra turn to recover the output — the wrapper's tee log then
+has to be read separately to get back what it hid. The hazard is live here:
+a token-optimizing shell wrapper is configured for this repository through
+the user's global Claude config, and `tools/verify.sh`, `tools/task-brief.sh`,
+`tools/doc-slice.sh`, `tools/agent-ledger.sh` and `tools/task-numbers.sh` all
+emit a compact one-line or `key=value` result with nothing left to trim. Any
+such wrapper must pass `tools/*.sh` output through unfiltered.
+
 ## Shell and editing conventions
 
 Prefer portable POSIX shell; avoid zsh/direnv-specific constructs and batch

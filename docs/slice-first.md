@@ -64,7 +64,7 @@ tools/doc-slice.sh docs/verification.md --outline
 tools/doc-slice.sh docs/verification.md --section 'unreachable-cluster skip'
 
 # The rows for the services in this brief — table header preserved.
-tools/doc-slice.sh docs/TODO.md --rows fleet-service --rows media-service
+tools/doc-slice.sh docs/roadmap.md --rows fleet-service --rows media-service
 
 # A needle in an offloaded tool result, rather than re-reading it whole.
 tools/doc-slice.sh <session>/tool-results/bd3sc8ctl.txt --grep 'PANIC' --context 3
