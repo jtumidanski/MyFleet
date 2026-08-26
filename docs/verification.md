@@ -120,10 +120,14 @@ deliberately.
 
 If `tools/verify.sh` ever passes on something CI fails, or vice versa, **CI is
 the authority and the script is the bug** — fix `tools/verify.sh`, not the
-expectation. MyFleet's CI is `.github/workflows/pr.yml`. That workflow builds
-the five container images even though `make ci` does not; that gap is exactly
-why gate 2 exists locally — without it, a Dockerfile-breaking change would
-pass every local `make` target and only fail once it reached CI.
+expectation. MyFleet's CI is `.github/workflows/pr.yml`. Its `containers` job
+builds only four images — `auth-service`, `fleet-service`, `media-service`,
+`notification-service` — and excludes `apps/web`; `web`'s container image is
+first built only after merge, by `.github/workflows/main.yml`. `make ci` does
+not build any container images at all, so `tools/verify.sh` gate 2 is the
+only pre-merge check that the `apps/web` image builds — without it, a
+Dockerfile-breaking change to `apps/web` would pass every local `make`
+target and every PR check, and only fail once it reached `main`.
 
 ## Individual `make` targets, for narrowing a failure
 
