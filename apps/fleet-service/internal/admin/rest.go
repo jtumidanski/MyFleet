@@ -207,17 +207,19 @@ func TransformOperations(ops []Operation) []server.Resource {
 }
 
 type auditAttributes struct {
-	ActorUserID      string         `json:"actor_user_id"`
-	ActorEmail       string         `json:"actor_email"`
-	Action           string         `json:"action"`
-	Scope            string         `json:"scope"`
-	TargetType       string         `json:"target_type"`
-	TargetID         string         `json:"target_id"`
-	TargetLabel      string         `json:"target_label"`
-	PurgeOperationID string         `json:"purge_operation_id"`
-	AffectedCounts   map[string]int `json:"affected_counts"`
-	CorrelationID    string         `json:"correlation_id"`
-	CreatedAt        time.Time      `json:"created_at"`
+	ActorUserID        string         `json:"actor_user_id"`
+	ActorEmail         string         `json:"actor_email"`
+	Action             string         `json:"action"`
+	Scope              string         `json:"scope"`
+	TargetType         string         `json:"target_type"`
+	TargetID           string         `json:"target_id"`
+	TargetLabel        string         `json:"target_label"`
+	PurgeOperationID   string         `json:"purge_operation_id"`
+	AffectedCounts     map[string]int `json:"affected_counts"`
+	SourceFleetID      string         `json:"source_fleet_id"`
+	DestinationFleetID string         `json:"destination_fleet_id"`
+	CorrelationID      string         `json:"correlation_id"`
+	CreatedAt          time.Time      `json:"created_at"`
 }
 
 // TransformAuditEvents renders a page of audit rows.
@@ -228,17 +230,19 @@ func TransformAuditEvents(events []AuditEvent) []server.Resource {
 			Type: TypeAuditEvent,
 			ID:   a.ID,
 			Attributes: auditAttributes{
-				ActorUserID:      a.ActorUserID,
-				ActorEmail:       a.ActorEmail,
-				Action:           a.Action,
-				Scope:            a.Scope,
-				TargetType:       a.TargetType,
-				TargetID:         a.TargetID,
-				TargetLabel:      a.TargetLabel,
-				PurgeOperationID: a.PurgeOperationID,
-				AffectedCounts:   a.AffectedCounts,
-				CorrelationID:    a.CorrelationID,
-				CreatedAt:        a.CreatedAt,
+				ActorUserID:        a.ActorUserID,
+				ActorEmail:         a.ActorEmail,
+				Action:             a.Action,
+				Scope:              a.Scope,
+				TargetType:         a.TargetType,
+				TargetID:           a.TargetID,
+				TargetLabel:        a.TargetLabel,
+				PurgeOperationID:   a.PurgeOperationID,
+				AffectedCounts:     a.AffectedCounts,
+				SourceFleetID:      a.SourceFleetID,
+				DestinationFleetID: a.DestinationFleetID,
+				CorrelationID:      a.CorrelationID,
+				CreatedAt:          a.CreatedAt,
 			},
 		})
 	}
