@@ -55,3 +55,24 @@ func (c *MediaClient) Reap(ctx context.Context, opID string) (map[string]int, er
 	}
 	return body.Affected, nil
 }
+
+// Reassign re-homes the named media objects to another fleet, which is what
+// keeps a transferred vehicle's photos and receipts readable by the destination
+// fleet's members — media-service gates access on fleet_id equality and
+// otherwise answers 404.
+//
+// Idempotent (FR-XFER-MEDIA-4): media-service reads the count back rather than
+// taking RowsAffected, so a replay changes nothing and reports the same number.
+// That is what makes the compensating reverse call safe to attempt.
+//
+// The ids are sent unchunked, like Purge's. MaxLookupIDs bounds QUERY-PARAMETER
+// lookups; this is a POST body. Chunking would reintroduce partial application
+// across chunks, which is the one outcome this operation must not have.
+func (c *MediaClient) Reassign(ctx context.Context, mediaIDs []string, destFleetID string) (map[string]int, error) {
+	var body affectedResponse
+	req := ReassignRequest{MediaIDs: mediaIDs, DestinationFleetID: destFleetID}
+	if err := c.t.expectOK(ctx, http.MethodPost, "/internal/admin/reassign-fleet", req, &body); err != nil {
+		return nil, err
+	}
+	return body.Affected, nil
+}

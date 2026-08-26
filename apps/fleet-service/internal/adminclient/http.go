@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/telemetry"
 )
 
 // clientTimeout bounds every call. Two of these run on a user-facing request
@@ -33,6 +35,16 @@ type PurgeRequest struct {
 	Scope       string   `json:"scope"`
 	FleetIDs    []string `json:"fleet_ids,omitempty"`
 	MediaIDs    []string `json:"media_ids,omitempty"`
+}
+
+// ReassignRequest is the body both reassign-fleet endpoints accept. Each
+// service reads only its own id list — media-service MediaIDs, notification
+// -service VehicleIDs — and omitempty keeps the other out of the wire entirely
+// rather than sending a null the receiver has to ignore.
+type ReassignRequest struct {
+	MediaIDs           []string `json:"media_ids,omitempty"`
+	VehicleIDs         []string `json:"vehicle_ids,omitempty"`
+	DestinationFleetID string   `json:"destination_fleet_id"`
 }
 
 // affectedResponse is the shape both services return from purge/restore/reap.
@@ -66,6 +78,14 @@ func (t transport) do(ctx context.Context, method, path string, body, dst any) (
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	// One user action, one id, across every service it touches. Without this
+	// the receiving service's CorrelationID middleware mints a FRESH id and the
+	// two halves of a transfer — or of a purge fan-out — cannot be joined in the
+	// logs. Set only when the context actually carries one, so an absent id
+	// stays absent rather than becoming the empty string.
+	if cid := telemetry.CorrelationIDFromContext(ctx); cid != "" {
+		req.Header.Set(telemetry.HeaderCorrelationID, cid)
 	}
 	res, err := t.hc.Do(req)
 	if err != nil {

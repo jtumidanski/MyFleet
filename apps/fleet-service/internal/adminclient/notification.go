@@ -57,3 +57,21 @@ func (c *NotificationClient) Reap(ctx context.Context, opID string) (map[string]
 	}
 	return body.Affected, nil
 }
+
+// Reassign re-points the fleet_id on notifications about the named vehicles.
+//
+// It takes VEHICLE ids, not notification ids: notification-service owns the
+// vehicle -> notification relationship, and enumerating it in fleet-service
+// would mean a cross-service read of another service's rows.
+//
+// A stale fleet_id here breaks no read — notifications are per-user — but it
+// would mis-scope a later fleet-scoped admin purge selecting on that column,
+// which is precisely why the column is indexed (design D12).
+func (c *NotificationClient) Reassign(ctx context.Context, vehicleIDs []string, destFleetID string) (map[string]int, error) {
+	var body affectedResponse
+	req := ReassignRequest{VehicleIDs: vehicleIDs, DestinationFleetID: destFleetID}
+	if err := c.t.expectOK(ctx, http.MethodPost, "/internal/admin/reassign-fleet", req, &body); err != nil {
+		return nil, err
+	}
+	return body.Affected, nil
+}
