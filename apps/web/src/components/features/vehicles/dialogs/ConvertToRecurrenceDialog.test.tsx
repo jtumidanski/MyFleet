@@ -146,7 +146,9 @@ describe('ConvertToRecurrenceDialog', () => {
 
     expect(screen.queryByText(/repeats from the completion/i)).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByText(/repeats from the completion you just recorded/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/repeats from the completion you just recorded/i),
+      ).toBeInTheDocument(),
     );
     expect(screen.getByText(/42,000/)).toBeInTheDocument();
   });

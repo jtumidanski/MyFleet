@@ -39,12 +39,7 @@ function renderDialog() {
   const onOpenChange = vi.fn();
   render(
     <QueryClientProvider client={client}>
-      <AddScheduleDialog
-        open
-        onOpenChange={onOpenChange}
-        vehicleId="v1"
-        currentMileage={40000}
-      />
+      <AddScheduleDialog open onOpenChange={onOpenChange} vehicleId="v1" currentMileage={40000} />
     </QueryClientProvider>,
   );
   return { onOpenChange };
@@ -65,9 +60,7 @@ async function chooseCategory() {
 
 /** The single attributes object handed to the create endpoint. */
 async function submittedAttributes() {
-  await waitFor(() =>
-    expect(maintenanceScheduleService.createForVehicle).toHaveBeenCalledTimes(1),
-  );
+  await waitFor(() => expect(maintenanceScheduleService.createForVehicle).toHaveBeenCalledTimes(1));
   const call = vi.mocked(maintenanceScheduleService.createForVehicle).mock.calls[0];
   if (!call) throw new Error('createForVehicle was not called');
   const [vehicleId, attributes] = call;
@@ -143,7 +136,7 @@ describe('AddScheduleDialog — create payload', () => {
     await selectOption(/schedule type/i, /one-time/i);
     await selectOption(/recurrence type/i, /hybrid/i);
 
-    const dueDate = await screen.findByLabelText(/^due date$/i);
+    const dueDate = await screen.findByLabelText(/^due date\b/i);
     await user.clear(dueDate);
     await user.type(dueDate, '2027-01-15');
 
@@ -177,7 +170,7 @@ describe('AddScheduleDialog — create payload', () => {
     await chooseCategory();
     await selectOption(/schedule type/i, /one-time/i);
 
-    const dueDate = await screen.findByLabelText(/^due date$/i);
+    const dueDate = await screen.findByLabelText(/^due date\b/i);
     await user.clear(dueDate);
     await user.type(dueDate, '2027-01-15');
 

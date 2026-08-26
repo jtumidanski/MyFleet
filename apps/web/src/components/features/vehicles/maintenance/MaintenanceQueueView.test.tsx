@@ -27,6 +27,7 @@ function schedule(overrides: Partial<MaintenanceSchedule['attributes']> = {}): M
       vehicleId: 'v1',
       categoryId: CATEGORY_ID,
       recurrenceType: 'time',
+      oneTime: false,
       status: 'overdue',
       severity: 'urgent',
       active: true,

@@ -135,7 +135,7 @@ export function MaintenanceScheduleForm({
           control={form.control}
           name="kind"
           render={({ field }) => (
-            <FormItem>
+            <FormItem required>
               <FormLabel>Schedule Type</FormLabel>
               <Select onValueChange={field.onChange} value={field.value}>
                 <FormControl>
@@ -239,7 +239,9 @@ export function MaintenanceScheduleForm({
             control={form.control}
             name="dueDate"
             render={({ field }) => (
-              <FormItem>
+              /* Required whenever the schedule covers time — the same boolean
+                 that decides whether the field renders at all. */
+              <FormItem required={showMonths}>
                 <FormLabel>{dueDateLabel}</FormLabel>
                 <FormControl>
                   <Input
@@ -265,7 +267,9 @@ export function MaintenanceScheduleForm({
             control={form.control}
             name="dueMileage"
             render={({ field }) => (
-              <FormItem>
+              /* Required whenever the schedule covers mileage — same boolean
+                 as the field's visibility. */
+              <FormItem required={showMiles}>
                 <FormLabel>{dueMileageLabel}</FormLabel>
                 <FormControl>
                   <Input

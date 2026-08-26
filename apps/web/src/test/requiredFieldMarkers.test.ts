@@ -56,12 +56,17 @@ const EXPECTED: Record<string, Record<string, Expectation>> = {
   },
   'components/features/vehicles/maintenance/MaintenanceScheduleForm.tsx': {
     categoryId: true,
+    kind: true,
     recurrenceType: true,
     // Deviation (FR-19): required only for some recurrence types. Bound to the
     // same booleans that decide whether the field renders at all, so the
     // schema's superRefine, the visibility rule and the marker are one rule.
     intervalMonths: 'showMonths',
     intervalMiles: 'showMiles',
+    // Same deviation: the due point is required on whichever axes the schedule
+    // covers, for both kinds.
+    dueDate: 'showMonths',
+    dueMileage: 'showMiles',
   },
   'components/features/vehicles/mileage/MileageForm.tsx': {
     mileage: true,
