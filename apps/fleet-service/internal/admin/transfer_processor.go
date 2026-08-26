@@ -485,10 +485,23 @@ func (p *Processor) checkEligibility(tx *gorm.DB, in TransferInput) (transferVeh
 	return v, nil
 }
 
-// downstreamState records which downstream moves actually landed, so a later
+// downstreamState records which downstream reassigns were ISSUED, so a later
 // failure knows exactly what to compensate. It is returned even on error —
 // that is the whole point: the media move can have succeeded and the
 // notification move failed.
+//
+// ISSUED, not "returned success", and the distinction is the whole safety
+// argument. A transport-level failure — a deadline expiring, a connection
+// reset, a response lost on the way back — can happen AFTER the downstream has
+// already committed its UPDATE. Keying compensation on the RESULT would leave
+// that flag false, roll the fleet-service transaction back, issue no reversal,
+// and strand media or notifications on the destination fleet while telling the
+// operator nothing moved. So the flag is set BEFORE the call goes out.
+//
+// The cost of being wrong in the other direction is nil: both reassign
+// endpoints are idempotent, and reversing a move that never happened matches no
+// row (the reversal carries the destination fleet as its source predicate) and
+// is a read-back away from a no-op.
 type downstreamState struct {
 	media bool
 	notif bool
@@ -504,8 +517,10 @@ func (p *Processor) callDownstreams(ctx context.Context, in TransferInput, spec 
 	// A vehicle with no media must not send an empty list: both reassign
 	// endpoints answer 422 to one, which would read as a failed service.
 	counts["media_objects"] = 0
-	if p.d.MediaReassign != nil && len(mediaIDs) > 0 {
-		got, merr := p.d.MediaReassign.Reassign(ctx, mediaIDs, spec.DestFleetID)
+	if len(mediaIDs) > 0 {
+		// Marked BEFORE the call, not after it succeeds. See downstreamState.
+		done.media = true
+		got, merr := p.d.MediaReassign.Reassign(ctx, mediaIDs, spec.SourceFleetID, spec.DestFleetID)
 		if merr != nil {
 			p.log.WithError(merr).WithFields(logrus.Fields{
 				"vehicle_id": spec.VehicleID, "correlation_id": in.CorrelationID,
@@ -513,7 +528,6 @@ func (p *Processor) callDownstreams(ctx context.Context, in TransferInput, spec 
 			return done, server.Detailed(server.ErrServiceUnavailable,
 				"media-service could not reassign the vehicle's media; the transfer was rolled back")
 		}
-		done.media = true
 		mergeDownstreamCount(counts, "media_objects", got)
 		if got["media_objects"] != len(mediaIDs) {
 			// A pre-existing dangling reference, surfaced rather than
@@ -527,19 +541,18 @@ func (p *Processor) callDownstreams(ctx context.Context, in TransferInput, spec 
 		}
 	}
 
+	// Marked BEFORE the call, not after it succeeds. See downstreamState.
 	counts["notifications"] = 0
-	if p.d.NotificationReassign != nil {
-		got, nerr := p.d.NotificationReassign.Reassign(ctx, []string{spec.VehicleID}, spec.DestFleetID)
-		if nerr != nil {
-			p.log.WithError(nerr).WithFields(logrus.Fields{
-				"vehicle_id": spec.VehicleID, "correlation_id": in.CorrelationID,
-			}).Error("notification reassign failed; rolling the transfer back")
-			return done, server.Detailed(server.ErrServiceUnavailable,
-				"notification-service could not reassign the vehicle's notifications; the transfer was rolled back")
-		}
-		done.notif = true
-		mergeDownstreamCount(counts, "notifications", got)
+	done.notif = true
+	got, nerr := p.d.NotificationReassign.Reassign(ctx, []string{spec.VehicleID}, spec.DestFleetID)
+	if nerr != nil {
+		p.log.WithError(nerr).WithFields(logrus.Fields{
+			"vehicle_id": spec.VehicleID, "correlation_id": in.CorrelationID,
+		}).Error("notification reassign failed; rolling the transfer back")
+		return done, server.Detailed(server.ErrServiceUnavailable,
+			"notification-service could not reassign the vehicle's notifications; the transfer was rolled back")
 	}
+	mergeDownstreamCount(counts, "notifications", got)
 	return done, nil
 }
 
@@ -564,8 +577,13 @@ func mergeDownstreamCount(counts map[string]int, key string, got map[string]int)
 	counts[key] = got[key]
 }
 
-// compensate reverses whichever downstream moves succeeded before the
+// compensate reverses whichever downstream reassigns were ISSUED before the
 // transaction failed, sending everything back to the SOURCE fleet.
+//
+// Issued, not "succeeded" — see downstreamState. A call whose response was lost
+// after the downstream committed is indistinguishable from one that never
+// landed, so both get the reversal, and the one that never landed matches
+// nothing.
 //
 // Safe to attempt because both reassign endpoints are idempotent
 // (FR-XFER-MEDIA-4). If a compensating call ALSO fails there is nothing further
@@ -586,15 +604,17 @@ func mergeDownstreamCount(counts map[string]int, key string, got map[string]int)
 func (p *Processor) compensate(ctx context.Context, spec TransferSpec, mediaIDs []string, done downstreamState) {
 	ctx = context.WithoutCancel(ctx)
 
-	if done.media && p.d.MediaReassign != nil {
-		if _, err := p.d.MediaReassign.Reassign(ctx, mediaIDs, spec.SourceFleetID); err != nil {
+	if done.media {
+		// The reversal's source predicate is the DESTINATION fleet: that is
+		// where the objects are being moved back from.
+		if _, err := p.d.MediaReassign.Reassign(ctx, mediaIDs, spec.DestFleetID, spec.SourceFleetID); err != nil {
 			p.log.WithError(err).WithFields(logrus.Fields{
 				"vehicle_id": spec.VehicleID, "source_fleet": spec.SourceFleetID,
 				"dest_fleet": spec.DestFleetID, "media_ids": mediaIDs,
 			}).Error("compensating media reassign FAILED; media is stranded in the destination fleet")
 		}
 	}
-	if done.notif && p.d.NotificationReassign != nil {
+	if done.notif {
 		if _, err := p.d.NotificationReassign.Reassign(ctx, []string{spec.VehicleID}, spec.SourceFleetID); err != nil {
 			p.log.WithError(err).WithFields(logrus.Fields{
 				"vehicle_id": spec.VehicleID, "source_fleet": spec.SourceFleetID,

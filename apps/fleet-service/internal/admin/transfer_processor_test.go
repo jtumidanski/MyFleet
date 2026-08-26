@@ -19,18 +19,30 @@ import (
 // reached — never merely "not yet", which is what task-019 is about.
 type fakeReassigner struct {
 	calls [][]string
+	srcs  []string
 	dests []string
 	ret   map[string]int
 	err   error
 }
 
-func (f *fakeReassigner) Reassign(_ context.Context, ids []string, dest string) (map[string]int, error) {
+// Reassign has the MediaReassigner shape. The notification port takes no source
+// fleet, so notifAdapter narrows this one recorder for that side.
+func (f *fakeReassigner) Reassign(_ context.Context, ids []string, src, dest string) (map[string]int, error) {
 	f.calls = append(f.calls, ids)
+	f.srcs = append(f.srcs, src)
 	f.dests = append(f.dests, dest)
 	if f.err != nil {
 		return nil, f.err
 	}
 	return f.ret, nil
+}
+
+// notifAdapter drops the source-fleet argument so a fakeReassigner can stand in
+// for a NotificationReassigner, whose endpoint has no ownership predicate.
+type notifAdapter struct{ inner admin.MediaReassigner }
+
+func (a notifAdapter) Reassign(ctx context.Context, ids []string, dest string) (map[string]int, error) {
+	return a.inner.Reassign(ctx, ids, "", dest)
 }
 
 type fakeAuth struct {
@@ -65,7 +77,7 @@ func newTransferHarness(t *testing.T) transferHarness {
 		Administrator:        admin.NewAdministrator(db),
 		Auth:                 fakeAuth{ok: true},
 		MediaReassign:        media,
-		NotificationReassign: notif,
+		NotificationReassign: notifAdapter{inner: notif},
 		Now:                  func() time.Time { return time.Date(2026, 8, 25, 18, 0, 0, 0, time.UTC) },
 	}, admin.NewTargetResolver(db))
 
@@ -109,6 +121,11 @@ func TestTransferVehicle_happyPath(t *testing.T) {
 	}
 	if len(h.media.calls) != 1 || h.media.dests[0] != "fleet-b" {
 		t.Errorf("media calls = %v to %v", h.media.calls, h.media.dests)
+	}
+	// The SOURCE fleet is sent too: it is media-service's ownership predicate,
+	// and without it the endpoint would move any named object out of any fleet.
+	if h.media.srcs[0] != "fleet-a" {
+		t.Errorf("media call source fleet = %q, want fleet-a", h.media.srcs[0])
 	}
 	if len(h.notif.calls) != 1 || h.notif.calls[0][0] != h.src.VehicleID {
 		t.Errorf("notification call = %v, want the vehicle id", h.notif.calls)
@@ -204,7 +221,7 @@ func TestTransferVehicle_revokedAdminIsForbidden(t *testing.T) {
 	log.SetOutput(io.Discard)
 	proc := admin.NewProcessor(log, admin.Deps{
 		DB: h.db, Provider: admin.NewProvider(h.db), Administrator: admin.NewAdministrator(h.db),
-		Auth: fakeAuth{ok: false}, MediaReassign: h.media, NotificationReassign: h.notif,
+		Auth: fakeAuth{ok: false}, MediaReassign: h.media, NotificationReassign: notifAdapter{inner: h.notif},
 	}, admin.NewTargetResolver(h.db))
 
 	_, err := proc.TransferVehicle(context.Background(), h.input(seededLabel))
@@ -419,6 +436,93 @@ func TestTransferVehicle_notificationFailureCompensatesTheMediaMove(t *testing.T
 	}
 }
 
+// commitThenFailReassigner is the failure mode that "compensate what SUCCEEDED"
+// cannot see: the downstream COMMITS its UPDATE and the caller still gets an
+// error, because the deadline expired, the connection reset, or the response
+// was lost on the way back. The write landed; the caller cannot know it.
+//
+// Only the FIRST call fails, so the compensating reversal is allowed to work —
+// otherwise the test would prove nothing beyond "the second call errored too".
+type commitThenFailReassigner struct {
+	inner *fakeReassigner
+	n     int
+}
+
+func (f *commitThenFailReassigner) Reassign(ctx context.Context, ids []string, src, dest string) (map[string]int, error) {
+	f.n++
+	// Recorded FIRST: the downstream committed before the response was lost.
+	got, err := f.inner.Reassign(ctx, ids, src, dest)
+	if f.n == 1 {
+		return nil, errors.New("the response was lost after the downstream committed")
+	}
+	return got, err
+}
+
+// A media reassign whose response is lost AFTER media-service committed must
+// still be reversed. Keying compensation on "the call returned success" leaves
+// this exact case uncompensated: the flag stays false, the fleet-service
+// transaction rolls back, no reversal is issued, and the media is stranded on
+// the destination fleet while the operator is told nothing moved.
+func TestTransferVehicle_compensatesAMediaCallWhoseResponseWasLost(t *testing.T) {
+	h := newTransferHarness(t)
+	media := &commitThenFailReassigner{inner: h.media}
+	proc := newProcessorWith(t, h.db, media, h.notif)
+
+	_, err := proc.TransferVehicle(context.Background(), h.input(seededLabel))
+	if !errors.Is(err, server.ErrServiceUnavailable) {
+		t.Fatalf("err = %v, want service unavailable", err)
+	}
+	if len(h.media.calls) != 2 {
+		t.Fatalf("media calls = %d, want 2 (the move and its reversal); a call whose "+
+			"response was lost after media-service committed was never compensated, "+
+			"so the media is stranded in fleet-b", len(h.media.calls))
+	}
+	if h.media.srcs[1] != "fleet-b" || h.media.dests[1] != "fleet-a" {
+		t.Errorf("compensating call moved %q -> %q, want fleet-b -> fleet-a",
+			h.media.srcs[1], h.media.dests[1])
+	}
+	if len(h.media.calls[1]) == 0 || h.media.calls[1][0] != h.src.MediaID {
+		t.Errorf("compensating call carried ids %v, want the vehicle's media ids", h.media.calls[1])
+	}
+	if got := scanOne[string](t, h.db, `SELECT fleet_id FROM fleet.vehicles WHERE id = ?`,
+		h.src.VehicleID); got != "fleet-a" {
+		t.Errorf("fleet_id = %q, want the rolled-back fleet-a", got)
+	}
+}
+
+// The same hazard on the notification half, which is the last call inside the
+// transaction and therefore the likeliest one to have its response lost.
+func TestTransferVehicle_compensatesANotificationCallWhoseResponseWasLost(t *testing.T) {
+	h := newTransferHarness(t)
+	notif := &commitThenFailReassigner{inner: h.notif}
+	proc := newProcessorWith(t, h.db, h.media, notif)
+
+	_, err := proc.TransferVehicle(context.Background(), h.input(seededLabel))
+	if !errors.Is(err, server.ErrServiceUnavailable) {
+		t.Fatalf("err = %v, want service unavailable", err)
+	}
+	if len(h.notif.calls) != 2 {
+		t.Fatalf("notification calls = %d, want 2 (the move and its reversal); a call "+
+			"whose response was lost after notification-service committed was never "+
+			"compensated, so the notifications are stranded in fleet-b", len(h.notif.calls))
+	}
+	if h.notif.dests[1] != "fleet-a" {
+		t.Errorf("compensating notification call sent destination %q, want the SOURCE fleet-a",
+			h.notif.dests[1])
+	}
+	if len(h.notif.calls[1]) == 0 || h.notif.calls[1][0] != h.src.VehicleID {
+		t.Errorf("compensating call carried ids %v, want the vehicle id", h.notif.calls[1])
+	}
+	// The media move, which returned cleanly, is reversed as before.
+	if len(h.media.calls) != 2 {
+		t.Errorf("media calls = %d, want 2 (the move and its reversal)", len(h.media.calls))
+	}
+	if got := scanOne[string](t, h.db, `SELECT fleet_id FROM fleet.vehicles WHERE id = ?`,
+		h.src.VehicleID); got != "fleet-a" {
+		t.Errorf("fleet_id = %q, want the rolled-back fleet-a", got)
+	}
+}
+
 // ctxSensitiveReassigner behaves like a real HTTP client: a call made with an
 // already-cancelled context fails BEFORE any request is issued, so it is never
 // recorded. That is what makes "the compensating call happened" an honest
@@ -431,7 +535,7 @@ type ctxSensitiveReassigner struct {
 	before func()
 }
 
-func (f *ctxSensitiveReassigner) Reassign(ctx context.Context, ids []string, dest string) (map[string]int, error) {
+func (f *ctxSensitiveReassigner) Reassign(ctx context.Context, ids []string, _, dest string) (map[string]int, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -515,23 +619,26 @@ type failAfterFirst struct {
 	n     int
 }
 
-func (f *failAfterFirst) Reassign(ctx context.Context, ids []string, dest string) (map[string]int, error) {
+func (f *failAfterFirst) Reassign(ctx context.Context, ids []string, src, dest string) (map[string]int, error) {
 	f.n++
-	got, err := f.inner.Reassign(ctx, ids, dest)
+	got, err := f.inner.Reassign(ctx, ids, src, dest)
 	if f.n > 1 {
 		return nil, errors.New("media-service is down")
 	}
 	return got, err
 }
 
-func newProcessorWith(t *testing.T, db *gorm.DB, media admin.MediaReassigner, notif admin.NotificationReassigner) *admin.Processor {
+// notif takes the MediaReassigner shape purely so the tests can reuse one
+// recorder type for both ports; notifAdapter narrows it at the boundary.
+func newProcessorWith(t *testing.T, db *gorm.DB, media, notif admin.MediaReassigner) *admin.Processor {
 	t.Helper()
 	log := logrus.New()
 	log.SetOutput(io.Discard)
 	return admin.NewProcessor(log, admin.Deps{
 		DB: db, Provider: admin.NewProvider(db), Administrator: admin.NewAdministrator(db),
-		Auth: fakeAuth{ok: true}, MediaReassign: media, NotificationReassign: notif,
-		Now: func() time.Time { return time.Date(2026, 8, 25, 18, 0, 0, 0, time.UTC) },
+		Auth: fakeAuth{ok: true}, MediaReassign: media,
+		NotificationReassign: notifAdapter{inner: notif},
+		Now:                  func() time.Time { return time.Date(2026, 8, 25, 18, 0, 0, 0, time.UTC) },
 	}, admin.NewTargetResolver(db))
 }
 
@@ -685,5 +792,47 @@ func TestPreviewVehicleTransfer_prefersTheNickname(t *testing.T) {
 	}
 	if pv.VehicleLabel != "The Green Bean" {
 		t.Errorf("vehicle_label = %q, want The Green Bean", pv.VehicleLabel)
+	}
+}
+
+// A missing reassigner is a WIRING regression, and it used to be silent: the
+// transfer skipped that service's half of the move, committed anyway, and
+// reported `0` to the operator with no error logged anywhere. Construction
+// refuses it instead, so the process dies at startup rather than producing a
+// half-moved vehicle in production.
+func TestNewProcessor_refusesAMissingReassigner(t *testing.T) {
+	db := admintest.NewDB(t)
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+
+	base := func() admin.Deps {
+		return admin.Deps{
+			DB: db, Provider: admin.NewProvider(db), Administrator: admin.NewAdministrator(db),
+			Auth:                 fakeAuth{ok: true},
+			MediaReassign:        admin.NoopMediaReassign{},
+			NotificationReassign: admin.NoopNotificationReassign{},
+		}
+	}
+
+	for name, drop := range map[string]func(*admin.Deps){
+		"media":        func(d *admin.Deps) { d.MediaReassign = nil },
+		"notification": func(d *admin.Deps) { d.NotificationReassign = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := base()
+			drop(&d)
+			defer func() {
+				if recover() == nil {
+					t.Errorf("NewProcessor accepted a nil %s reassigner", name)
+				}
+			}()
+			admin.NewProcessor(log, d, admin.NewTargetResolver(db))
+		})
+	}
+
+	// The control: the same Deps with both no-ops present must construct, or
+	// the assertions above would pass for the wrong reason.
+	if admin.NewProcessor(log, base(), admin.NewTargetResolver(db)) == nil {
+		t.Error("NewProcessor returned nil for a fully wired Deps")
 	}
 }
