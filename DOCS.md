@@ -170,9 +170,13 @@ Document the public HTTP interface only, as implemented by the hand-rolled
 JSON:API transport in `packages/shared-go/server` (see `jsonapi.go`,
 `handler.go`, `errors.go`, `pagination.go`). This is not a generic REST
 description: MyFleet services expose JSON:API resources, not ad-hoc JSON
-payloads, so this file documents resource types, attribute sets,
-relationships, and included compound documents rather than free-form
-request/response shapes.
+payloads, so this file documents resource types and attribute sets rather
+than free-form request/response shapes. The transport's `Document` carries
+only `data`, `meta`, and `links` (`jsonapi.go`) — there is no `included`
+member and no compound documents, so a service's `rest.md` must not
+document either. A `Resource` does carry a `relationships` field, but no
+MyFleet service currently populates it; document relationships only where
+a service actually emits them.
 
 ### Required Structure
 
@@ -182,8 +186,7 @@ request/response shapes.
 ### <resource-type>
 
 - Attributes
-- Relationships
-- Included resources (compound documents), if any
+- Relationships, if the service populates them
 
 ## Endpoints
 
@@ -198,9 +201,10 @@ request/response shapes.
 ### Allowed Content
 
 - HTTP methods and paths (`resource.go`, `rest.go`)
-- JSON:API resource types, attributes, and relationships
-- Which endpoints return compound documents (`included`) and what they
-  include
+- JSON:API resource types and attributes
+- Relationships (`Resource.Relationships`), only where a service actually
+  populates them — the field exists but is unpopulated in every service
+  today
 - Validation rules
 - Error codes and meanings (as produced by
   `packages/shared-go/server/errors.go`)
