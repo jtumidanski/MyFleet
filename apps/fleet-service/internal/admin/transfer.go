@@ -386,7 +386,8 @@ type transferPayload struct {
 	VehicleLabel       string `json:"vehicle_label"`
 }
 
-// validate rejects a spec whose ids are empty.
+// validate rejects a spec whose ids are empty, or whose source and destination
+// are the same fleet.
 //
 // This is not defensive boilerplate. An empty vehicle id is a WILDCARD, not a
 // no-op: WidgetsPinnedToVehicle compares the PARSED config's vehicleId against
@@ -394,6 +395,14 @@ type transferPayload struct {
 // would HARD DELETE widgets that have nothing to do with this transfer. An
 // empty destination fleet id would likewise strand the vehicle in no fleet at
 // all. Checked before the first statement runs, so a bad spec writes nothing.
+//
+// The same-fleet check is defense in depth, not the primary control: the API
+// contract already specifies a 422 for a same-fleet destination, and Task 9
+// rejects it earlier in the request path. It is repeated here because this is
+// the destructive call site — a same-fleet spec would resolve every category
+// to itself, insert two nonsense activity events, and hard-delete the fleet's
+// own widgets pinned to the vehicle via PruneWidgets — and this guard should
+// never be the one a user actually sees fire.
 func (s TransferSpec) validate() error {
 	switch {
 	case s.VehicleID == "":
@@ -402,6 +411,8 @@ func (s TransferSpec) validate() error {
 		return errors.New("transfer spec: source fleet id is required")
 	case s.DestFleetID == "":
 		return errors.New("transfer spec: destination fleet id is required")
+	case s.SourceFleetID == s.DestFleetID:
+		return errors.New("transfer spec: source and destination fleet must differ")
 	}
 	return nil
 }

@@ -2,6 +2,7 @@ package admin_test
 
 import (
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/admin"
@@ -31,6 +32,16 @@ func TestTransferPlan_countOnlyStepsHaveNoSetClause(t *testing.T) {
 		}
 		if !countOnlyKeys[s.Key] && s.Set == "" {
 			t.Errorf("%s has no Set clause; if that is intended, add it to countOnlyKeys", s.Key)
+		}
+		// R16: ApplyTransfer's Exec(q, spec.DestFleetID, spec.VehicleID) hardcodes
+		// "exactly one ? in Set, exactly one ? in Where, in that order" — pin that
+		// contract here so a future step that violates it fails in the test suite
+		// rather than at runtime.
+		if n := strings.Count(s.Set, "?"); n > 1 {
+			t.Errorf("%s: Set has %d placeholders, want at most 1", s.Key, n)
+		}
+		if n := strings.Count(s.Where, "?"); n != 1 {
+			t.Errorf("%s: Where has %d placeholders, want exactly 1", s.Key, n)
 		}
 	}
 	for k := range countOnlyKeys {

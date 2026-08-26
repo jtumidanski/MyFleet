@@ -252,6 +252,34 @@ func TestApplyTransfer_rejectsAnEmptyIDBeforeTouchingAnything(t *testing.T) {
 	}
 }
 
+// R15: a same-fleet spec must be rejected before anything is written or
+// deleted. Distinct from the empty-id cases above because a same-fleet spec
+// has no empty field at all — every id is well-formed, so this guard has to
+// be its own check, not a side effect of the emptiness checks.
+func TestApplyTransfer_rejectsASameFleetSpecBeforeTouchingAnything(t *testing.T) {
+	db, f, _ := applyFixture(t)
+	addWidget(t, db, "w-unpinned", f.DashboardID, `{}`)
+	spec := transferSpec(f.VehicleID, "fleet-a", "fleet-a")
+
+	// Errorf, not Fatalf: when the guard is missing the assertions below are
+	// the ones that show what the same-fleet spec actually did.
+	if _, err := admin.ApplyTransfer(db, spec); err == nil {
+		t.Error("apply with source == destination fleet returned no error")
+	}
+	if n := scanOne[int](t, db,
+		`SELECT count(*) FROM fleet.dashboard_widgets WHERE id = ?`, "w-unpinned"); n != 1 {
+		t.Error("an unrelated widget was pruned by a same-fleet spec that should have been rejected")
+	}
+	if got := scanOne[string](t, db,
+		`SELECT fleet_id FROM fleet.vehicles WHERE id = ?`, f.VehicleID); got != "fleet-a" {
+		t.Errorf("fleet_id = %q, want fleet-a: nothing may be written", got)
+	}
+	if n := scanOne[int](t, db, `SELECT count(*) FROM fleet.activity_events WHERE type = ?`,
+		admin.EventVehicleTransferredOut); n != 0 {
+		t.Error("a transfer activity event was written for a rejected same-fleet spec")
+	}
+}
+
 // The whole operation must be atomic. A failure anywhere inside the caller's
 // transaction leaves the vehicle where it was.
 func TestApplyTransfer_rollsBackWithTheCallersTransaction(t *testing.T) {
