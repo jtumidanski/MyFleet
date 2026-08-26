@@ -60,7 +60,7 @@ carve-out.
 | AC-12 | `grep -n '^## ' CLAUDE.md` | 8 headings in order: `Never do this`, `Evidence & grounding`, `Development workflow`, `Done means verified`, `Dispatching agents`, `Handing off context`, `Repository conventions`, `Where the procedures live` |
 | AC-13 | Every `](...)` link in `CLAUDE.md` resolved via `test -e` | All 12 targets exist (9 `docs/*.md`, `DOCS.md`, `docs/runbooks/`, `docs/process-parity.md`); no `DANGLING` |
 | AC-14 | `test -f docs/<name>.md` for all 9 owner docs | All 9 present: `agent-dispatch`, `verification`, `superpowers-integration`, `review-protocol`, `post-implementation`, `codemod-vs-agents`, `slice-first`, `tooling-conventions`, `git-workflow` |
-| AC-16 | `grep -rl 'subjects\[0\]\.namespace: Required value' docs/ CLAUDE.md` | Present in `docs/verification.md` (durable owner doc) and 3 task-history files |
+| AC-16 | `grep -rl 'subjects\[0\]\.namespace: Required value' docs/ CLAUDE.md` | Present in `docs/verification.md` (durable owner doc) and 4 task-history files (`docs/tasks/task-032-process-parity-phase-2/prd.md`, `docs/tasks/task-032-process-parity-phase-2/plan.md`, `docs/tasks/task-029-go-127-migration/plan.md`, `docs/tasks/task-002-k3s-cluster-deployment/audit-plan-adherence.md`) |
 | AC-17 | `grep -ohE '(tools\|scripts)/[A-Za-z0-9._/-]+' ... \| sort -u`, existence-checked individually | All MyFleet-owned tool paths exist (`tools/agent-ledger.sh`, `tools/check-manifests.sh`, `tools/doc-slice.sh`, `tools/lint.sh`, `tools/lint.versions`, `tools/task-brief.sh`, `tools/task-numbers.sh`, `tools/verify.sh`). Four names did not resolve as MyFleet paths: `scripts/ci-build.sh`, `scripts/ci-test.sh`, `scripts/lint-all.sh`, `scripts/local-up.sh`, `tools/toolchain.versions` — all five are traced to `docs/process-parity.md` / `docs/process-parity-brief.md`, describing **atlas's or home-hub's own** tooling in a cross-repo comparison table, not a MyFleet path claim. No true MISSING. |
 | AC-18 | satisfied by AC-5's run, since gate 1 of `verify.sh` is `make ci` | `make ci` ran as gate 1 and PASSED (see §3) |
 | scope | `git diff --name-only main...HEAD \| grep -E '^(apps\|packages)/'` | No output (grep exit 1) — `scope ok: no apps/ or packages/ change` |
@@ -178,8 +178,25 @@ resolve (§2, AC-13). Whether the other repositories carry the same nine was not
 12. A lost rule was restored to `docs/tooling-conventions.md` (ruling R6): "any such wrapper must
     pass `tools/*.sh` output through unfiltered", dropped because its example cited the unported
     `task-resolve.sh`.
-13. Per-document shrink: every ported document came in at 84%-132% of its atlas line count, so
-    no document fell below the 60% floor and none required a shrink justification.
+13. Per-document shrink: measured live with `wc -l` on every ported owner document plus `DOCS.md`
+    against its `$ATLAS` source (percentages are MyFleet lines / atlas lines):
+    `docs/agent-dispatch.md` 249/244 = 102%, `docs/verification.md` 188/368 = **51%**,
+    `docs/superpowers-integration.md` 177/185 = 96%, `docs/review-protocol.md` 224/178 = 126%,
+    `docs/post-implementation.md` 186/160 = 116%, `docs/codemod-vs-agents.md` 117/138 = 85%,
+    `docs/slice-first.md` 109/107 = 102%, `docs/tooling-conventions.md` 107/95 = 113%,
+    `docs/git-workflow.md` 69/52 = 133%, `DOCS.md` 361/261 = 138%. One document,
+    `docs/verification.md`, falls below the plan's 60% floor (plan.md:871: "Any document below
+    60% of its atlas line count needs a one-line written justification"), and no such
+    justification was recorded at commit time (`67d1802`) — the plan gave Task 4 no shrink step
+    (only Tasks 5 and 6 had one), so the requirement was never triggered for it. The
+    justification, recorded here: the plan directs `docs/verification.md` to be rebuilt around
+    MyFleet's four gates rather than translated section by section, because atlas's 368 lines are
+    organised around change detection and per-guard escape hatches that MyFleet's gate set does
+    not have. The shrink is dropped machinery, not dropped rules — and that was verified, not
+    inferred from the document's length: Task 4's review (`.superpowers/sdd/plan/task-4-report.md`,
+    "Ten required content items — mapping") confirmed all ten required content items present with
+    file:line citations, and separately found and fixed a Critical accuracy defect in the
+    document. No owner document was changed to produce this finding.
 
 Additionally: five text-port tasks each lost at least one rule during transcription, and every
 one was caught by review and restored (deviations 8, 9, 12 above are examples of this) — that is
