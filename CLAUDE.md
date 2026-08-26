@@ -36,6 +36,8 @@ Phase commands accept fuzzy task identifiers: `task-001-slug`, `task-001`, `001`
 
 Task numbers are assigned by `tools/task-numbers.sh next` (single source of truth); see `docs/superpowers-integration.md` for the full phase-command and skill-invocation mechanics, including the `docs/tasks/task-NNN-slug/` artifact-location override for `superpowers:brainstorming` and `superpowers:writing-plans`.
 
+Tasks live in git worktrees (siblings of the main repo under `.worktrees/`). Before planning/designing/executing a task, verify cwd is the correct worktree; if not, `cd` into it yourself rather than asking the user.
+
 When searching for task PRDs/plans/designs, search across all worktrees (`git worktree list`) before concluding a file is missing.
 
 When producing `design.md` or `plan.md` documents, write the full document directly to the file. Do NOT walk through sections interactively or ask for per-section approval — the user reads the committed file.

@@ -162,7 +162,7 @@ working regardless of that setting.
 
 ## When NOT to Use Superpowers
 
-- **Trivial fixes** (typo, version bump, one-line change) — no workflow needed; commit directly.
+- **Trivial fixes** (typo, version bump, one-line change) — skip `/spec-task`; no PRD needed, but document the change directly via a brainstorming session before committing.
 - **Documentation-only updates** that don't need a PRD — go straight to editing.
 
 ## File Locations Cheat Sheet
