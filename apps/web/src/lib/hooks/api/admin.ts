@@ -2,7 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { createErrorFromUnknown } from '@myfleet/shared-ts';
 import { adminService } from '../../../services/api/AdminService';
-import type { CreatePurgeInput, DeletedFilter } from '../../../types/models/admin';
+import type {
+  CreatePurgeInput,
+  DeletedFilter,
+  TransferVehicleInput,
+} from '../../../types/models/admin';
 
 /**
  * Query keys for the admin console, hierarchical so a mutation can invalidate a
@@ -22,6 +26,8 @@ export const adminKeys = {
   purge: (id: string) => [...adminKeys.purges(), 'detail', id] as const,
   audit: (params: { action: string; actor: string; page: number }) =>
     [...adminKeys.all, 'audit', params] as const,
+  transferPreview: (vehicleId: string, destinationFleetId: string) =>
+    [...adminKeys.all, 'transfer-preview', vehicleId, destinationFleetId] as const,
 };
 
 /**
@@ -168,6 +174,87 @@ export function useRetryPurge() {
     onError: (err) => {
       const apiError = createErrorFromUnknown(err);
       toast.error(apiError.message || 'Could not retry the purge');
+    },
+  });
+}
+
+/**
+ * GET /api/fleet/admin/vehicles/{id}/transfer-preview.
+ *
+ * `enabled` is passed in rather than derived, because the dialog wants the
+ * query to run only while it is open — a preview fetched behind a closed dialog
+ * is wasted work whose result nobody reads. It is ANDed with a chosen
+ * destination: the endpoint accepts an absent destination as a valid "not
+ * chosen yet" state and answers with the source-side picture only, so firing
+ * without one would spend a request on a half-answer the dialog cannot use.
+ *
+ * The destination is part of the key, so choosing a different one refetches
+ * rather than reusing counts computed against the previous fleet.
+ *
+ * staleTime is 0, deliberately, unlike every other admin query here. These
+ * counts sit directly above a confirmation input for an operation with no
+ * one-click undo; a cached figure from thirty seconds ago is exactly the wrong
+ * thing to show an operator about to type a phrase.
+ */
+export function useVehicleTransferPreview(
+  vehicleId: string | undefined,
+  destinationFleetId: string,
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: adminKeys.transferPreview(vehicleId ?? '', destinationFleetId),
+    queryFn: () => adminService.previewVehicleTransfer(vehicleId as string, destinationFleetId),
+    enabled: enabled && !!vehicleId && !!destinationFleetId,
+    staleTime: 0,
+  });
+}
+
+/**
+ * POST /api/fleet/admin/vehicles/{id}/transfer.
+ *
+ * Resolves to the whole `VehicleTransferResult` — `{ data, meta }` — rather
+ * than just the resource. `meta.count_semantics` explains that the
+ * `media_objects` and `notifications` figures are live rows now ON the
+ * destination fleet, not rows this call moved; dropping it here would leave the
+ * dialog presenting two numbers that mean something other than they appear to.
+ *
+ * Invalidates the WHOLE admin subtree on settle. A transfer changes the source
+ * fleet's detail, the destination fleet's detail, both fleets' vehicle counts
+ * in the list, the platform stats and the audit log — all at once. Naming them
+ * individually would be a list to keep in sync forever, and a stale count in
+ * this console is worse than a redundant fetch (FR-XFER-UI-6). On settle rather
+ * than on success because a 503 means a downstream refused and the server rolled
+ * back, which is still a round trip the cached picture should not be trusted
+ * across.
+ *
+ * onError surfaces the server's `detail` VERBATIM, departing from
+ * useCreatePurge's fixed strings. A purge has exactly one 409 meaning; a
+ * transfer has four distinct 409/422 conditions whose whole value is the
+ * specific sentence — "vehicle is pending purge" and "destination fleet is not
+ * available" call for different actions from the operator (FR-XFER-UI-7).
+ *
+ * onSuccess shows a toast naming the destination. No other admin hook does,
+ * and this one needs it: a purge lands the operator on a queue page that
+ * confirms it happened, whereas a transfer closes a dialog over an unchanged
+ * screen.
+ */
+export function useTransferVehicle() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      vehicleId: string;
+      attributes: TransferVehicleInput;
+      destinationName: string;
+    }) => adminService.transferVehicle(vars.vehicleId, vars.attributes),
+    onSuccess: (_data, vars) => {
+      toast.success(`Vehicle transferred to ${vars.destinationName}.`);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: adminKeys.all });
+    },
+    onError: (err) => {
+      const apiError = createErrorFromUnknown(err);
+      toast.error(apiError.detail || apiError.message || 'Could not transfer the vehicle');
     },
   });
 }

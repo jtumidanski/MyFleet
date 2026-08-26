@@ -107,14 +107,12 @@ describe('InviteAcceptPage', () => {
 
   // FR-INVITE-3: adding a control must not disturb the screen it is added to.
   //
-  // The asserted text is the ApiError's `message`, not its `detail`. That is
-  // current behaviour, verified rather than assumed: InviteAcceptPage re-wraps
-  // an already-wrapped ApiError through createErrorFromUnknown, which only
-  // reads `detail` off a raw { status, body } envelope — an ApiError instance
-  // falls to the `e instanceof Error` branch and arrives with
-  // detail === undefined. So `detail || message` yields the envelope's title.
-  // Pre-existing, out of scope here (this task must not touch this screen's
-  // error handling), and recorded in context.md as a follow-up candidate.
+  // The asserted text is the ApiError's `detail`, which is what the page has
+  // always asked for — `detail || message`. It used to be unreachable:
+  // createErrorFromUnknown rebuilt an already-wrapped ApiError through its
+  // `e instanceof Error` branch and dropped `detail`, so the title won by
+  // default. That was the follow-up recorded in context.md; it is fixed now, so
+  // this asserts the intended copy rather than the symptom.
   it('leaves the existing error copy and Go to Dashboard button intact', async () => {
     vi.mocked(inviteService.acceptInvite).mockRejectedValue(
       new ApiError(409, 'conflict', 'Wrong account for this invite', 'sent to another address'),
@@ -122,7 +120,7 @@ describe('InviteAcceptPage', () => {
 
     renderAcceptPage();
 
-    expect(await screen.findByText('Wrong account for this invite')).toBeInTheDocument();
+    expect(await screen.findByText('sent to another address')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Go to Dashboard' })).toBeInTheDocument();
   });
 
