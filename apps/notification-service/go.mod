@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55
 	github.com/prometheus/client_golang v1.24.1
-	github.com/sirupsen/logrus v1.10.0
+	github.com/sirupsen/logrus v1.10.1
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
 )
