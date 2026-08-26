@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -292,4 +293,76 @@ func remapCategory(tx *gorm.DB, vehicleID, fromID, toID string) error {
 		}
 	}
 	return nil
+}
+
+// widgetConfig is the only part of a dashboard widget's jsonb config this
+// package reads. A widget that pins no vehicle unmarshals to the empty string
+// and is skipped.
+type widgetConfig struct {
+	VehicleID string `json:"vehicleId"`
+}
+
+// WidgetsPinnedToVehicle returns the ids of live SOURCE-fleet dashboard widgets
+// whose config pins the moved vehicle (FR-XFER-SRC-1/2/3).
+//
+// fleet.dashboard_widgets has no fleet_id of its own; it joins to
+// fleet.dashboards, which does. That join is what scopes the candidate set to
+// the source fleet, so destination-fleet and third-fleet widgets are never even
+// considered.
+//
+// The vehicle match is made in Go, on the PARSED config, rather than in SQL.
+// Postgres would express it as config->>'vehicleId' = ?, but every DB-backed
+// test in this package runs on SQLite, which has no ->> operator. A dialect
+// branch on a PREDICATE would mean the tested path and the production path are
+// different SQL — exactly the class of bug that hid a broken local overlay for
+// ten reviews. A one-off DDL branch is a different thing; this is not that.
+//
+// The candidate set is bounded by (members × widgets per dashboard) — one live
+// dashboard per (fleet, user) is enforced by a partial unique index — so this is
+// tens of rows, not thousands. The NFR's "never a row-by-row loop" is about the
+// WRITE, and PruneWidgets is a single set-based DELETE.
+//
+// A malformed config is skipped rather than fatal, matching how MakeAudit
+// tolerates malformed affected_counts.
+func WidgetsPinnedToVehicle(db *gorm.DB, sourceFleetID, vehicleID string) ([]string, error) {
+	var rows []struct {
+		ID     string
+		Config []byte
+	}
+	q := `SELECT w.id, w.config
+	        FROM fleet.dashboard_widgets w
+	        JOIN fleet.dashboards d ON d.id = w.dashboard_id
+	       WHERE d.fleet_id = ? AND w.deleted_at IS NULL AND d.deleted_at IS NULL`
+	if err := db.Raw(q, sourceFleetID).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list source dashboard widgets: %w", err)
+	}
+	var ids []string
+	for _, r := range rows {
+		var cfg widgetConfig
+		if err := json.Unmarshal(r.Config, &cfg); err != nil {
+			continue
+		}
+		if cfg.VehicleID == vehicleID {
+			ids = append(ids, r.ID)
+		}
+	}
+	return ids, nil
+}
+
+// PruneWidgets hard-deletes the named widgets and returns how many rows went.
+//
+// A HARD delete, deliberately: FR-XFER-SRC-1 says "deleted", these rows carry
+// no history, and a soft-deleted widget would still occupy its slot in the
+// layout's position grid. This is the one place a transfer destroys data. It is
+// bounded, it is reported as widgets_removed, and the operator sees the number
+// in the blast-radius panel before they confirm.
+func PruneWidgets(tx *gorm.DB, ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	res := tx.Exec(`DELETE FROM fleet.dashboard_widgets WHERE id IN ?`, ids)
+	if res.Error != nil {
+		return 0, fmt.Errorf("prune dashboard widgets: %w", res.Error)
+	}
+	return int(res.RowsAffected), nil
 }
