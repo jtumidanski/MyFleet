@@ -78,6 +78,15 @@ function confirmButton() {
   return screen.getByRole('button', { name: /transfer vehicle/i });
 }
 
+// Minor #3: a failed fleet search must not read as "nothing matches" — that
+// is the opposite of the truth on the control that picks the destination.
+it('tells the operator the fleet search failed, not that nothing matches', () => {
+  useAdminFleets.mockReturnValue({ data: undefined, isLoading: false, isError: true });
+  renderDialog();
+  expect(screen.getByRole('alert')).toHaveTextContent(/could not search fleets/i);
+  expect(screen.queryByText('No other fleets match.')).toBeNull();
+});
+
 // FR-XFER-UI-3: the source fleet is never an option, and the query asks for
 // live fleets only.
 it('excludes the source fleet and requests live fleets only', () => {
@@ -282,5 +291,105 @@ describe('the completed transfer', () => {
     expect(screen.queryByRole('button', { name: /transfer vehicle/i })).toBeNull();
     expect(screen.queryByLabelText(/type the vehicle name/i)).toBeNull();
     expect(screen.getByRole('button', { name: /done/i })).toBeInTheDocument();
+  });
+
+  // Ruling R21: this dialog can now stay mounted across vehicles (Task 14
+  // keeps it around so count_semantics survives). A `result` the caller
+  // never reset — from a DIFFERENT vehicle's transfer — must not read as
+  // THIS vehicle's success screen.
+  it("does not treat a result belonging to a different vehicle as this dialog's outcome", () => {
+    const staleResult = result();
+    staleResult.data.attributes.vehicle_id = 'some-other-vehicle';
+    renderDialog({ vehicleId: 'v1', result: staleResult });
+    expect(screen.queryByText('Vehicle transferred')).toBeNull();
+    expect(screen.getByLabelText(/search fleets by name/i)).toBeInTheDocument();
+  });
+});
+
+// Ruling R21: same risk for `error` as for `result` above — a caller who
+// forgets `mutation.reset()` between opening the dialog for two different
+// vehicles must not have vehicle A's rejection paint over vehicle B's
+// freshly-opened dialog.
+describe('stale caller state across a reopen (ruling R21)', () => {
+  it('does not render a stale error left over from a previous session on a freshly reopened dialog', () => {
+    const staleError = new ApiError(409, 'conflict', 'Conflict', 'Mismatch for the first vehicle.');
+    const { rerender } = renderWithProviders(
+      <VehicleTransferDialog
+        open={false}
+        onOpenChange={vi.fn()}
+        vehicleId="v1"
+        sourceFleetId="fleet-a"
+        onConfirm={vi.fn()}
+        isPending={false}
+        error={staleError}
+      />,
+    );
+
+    // Reopened for a different vehicle. The caller never reset the mutation,
+    // so `error` is still the same object as before.
+    rerender(
+      <VehicleTransferDialog
+        open
+        onOpenChange={vi.fn()}
+        vehicleId="v2"
+        sourceFleetId="fleet-a"
+        onConfirm={vi.fn()}
+        isPending={false}
+        error={staleError}
+      />,
+    );
+
+    expect(screen.queryByTestId('transfer-error')).toBeNull();
+    expect(screen.queryByText(/mismatch for the first vehicle/i)).toBeNull();
+  });
+
+  it('still shows a genuinely new error raised within the current session', () => {
+    const staleError = new ApiError(409, 'conflict', 'Conflict', 'Mismatch for the first vehicle.');
+    const { rerender } = renderWithProviders(
+      <VehicleTransferDialog
+        open={false}
+        onOpenChange={vi.fn()}
+        vehicleId="v1"
+        sourceFleetId="fleet-a"
+        onConfirm={vi.fn()}
+        isPending={false}
+        error={staleError}
+      />,
+    );
+
+    rerender(
+      <VehicleTransferDialog
+        open
+        onOpenChange={vi.fn()}
+        vehicleId="v2"
+        sourceFleetId="fleet-a"
+        onConfirm={vi.fn()}
+        isPending={false}
+        error={undefined}
+      />,
+    );
+    expect(screen.queryByTestId('transfer-error')).toBeNull();
+
+    // A NEW rejection arrives for the vehicle this dialog is now open for.
+    const freshError = new ApiError(
+      409,
+      'conflict',
+      'Conflict',
+      'Mismatch for the second vehicle.',
+    );
+    rerender(
+      <VehicleTransferDialog
+        open
+        onOpenChange={vi.fn()}
+        vehicleId="v2"
+        sourceFleetId="fleet-a"
+        onConfirm={vi.fn()}
+        isPending={false}
+        error={freshError}
+      />,
+    );
+    expect(
+      within(screen.getByTestId('transfer-error')).getByText(/mismatch for the second vehicle/i),
+    ).toBeInTheDocument();
   });
 });

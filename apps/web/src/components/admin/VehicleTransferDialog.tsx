@@ -122,6 +122,14 @@ function orderedKeys(counts: Record<string, number>): string[] {
 /** Debounce delay for the fleet search, in ms. */
 const SEARCH_DEBOUNCE_MS = 250;
 
+/**
+ * Never equal to any real `error` prop, so a component that has never had an
+ * open-transition yet (e.g. mounted already `open`, error passed from the
+ * first render) treats its error as fresh rather than stale. See
+ * `staleErrorBaseline` below.
+ */
+const NO_PRIOR_ERROR: unique symbol = Symbol('VehicleTransferDialog:no-prior-error');
+
 export function VehicleTransferDialog({
   open,
   onOpenChange,
@@ -142,6 +150,15 @@ export function VehicleTransferDialog({
   // operator's FIRST frame shows; an effect would paint the previous phrase —
   // and its live confirm button — once.
   const [wasOpen, setWasOpen] = useState(open);
+  // The caller owns `error` (and `result`), and this dialog can now stay
+  // MOUNTED across vehicles (Task 14 keeps it around so `count_semantics`
+  // survives past its one render). Whatever `error` the caller is still
+  // holding at the moment a fresh open-transition happens belongs to
+  // whatever session was open BEFORE this one — almost certainly a previous
+  // vehicle's rejected transfer that nobody called `mutation.reset()` on.
+  // Remembered here so it renders as nothing until a genuinely NEW error
+  // (a different object) arrives for THIS session.
+  const [staleErrorBaseline, setStaleErrorBaseline] = useState<unknown>(NO_PRIOR_ERROR);
   if (wasOpen !== open) {
     setWasOpen(open);
     if (open) {
@@ -149,6 +166,7 @@ export function VehicleTransferDialog({
       setDebouncedQuery('');
       setDestination(null);
       setTyped('');
+      setStaleErrorBaseline(error);
     }
   }
 
@@ -180,8 +198,15 @@ export function VehicleTransferDialog({
   const previewFailed = preview.isError;
   const showConfirmControls = !!attrs && !previewFailed;
 
-  const apiError = error === undefined || error === null ? null : createErrorFromUnknown(error);
-  const done = result ?? null;
+  // A stale `error` left over from the vehicle the dialog was open for
+  // before this session must not render here either (ruling R21).
+  const isStaleError = error !== undefined && error !== null && error === staleErrorBaseline;
+  const apiError =
+    error === undefined || error === null || isStaleError ? null : createErrorFromUnknown(error);
+  // `result` is caller-owned too, and a stale one identifies itself by
+  // carrying a DIFFERENT vehicle's id — only treat it as THIS dialog's
+  // outcome when it matches (ruling R21).
+  const done = result && result.data.attributes.vehicle_id === vehicleId ? result : null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -216,7 +241,11 @@ export function VehicleTransferDialog({
                 onChange={(e) => setQuery(e.target.value)}
               />
               <ul className="max-h-40 overflow-y-auto rounded-sm border border-border">
-                {options.length === 0 ? (
+                {fleets.isError ? (
+                  <li role="alert" className="px-3 py-2 text-danger-subtle-foreground">
+                    Could not search fleets. Try again.
+                  </li>
+                ) : options.length === 0 ? (
                   <li className="px-3 py-2 text-muted-foreground">No other fleets match.</li>
                 ) : (
                   options.map((f) => (
