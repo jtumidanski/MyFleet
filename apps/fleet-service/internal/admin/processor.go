@@ -30,6 +30,36 @@ type Downstream interface {
 	Reap(ctx context.Context, opID string) (map[string]int, error)
 }
 
+// MediaReassigner re-homes a set of MEDIA objects to another fleet. Declared
+// here as a port rather than importing the concrete client, matching how
+// Downstream and AuthVerifier are declared, so the processor stays testable
+// without an HTTP server. *adminclient.MediaClient satisfies it.
+//
+// COUNT SEMANTICS. The returned map's "media_objects" is the number of LIVE
+// rows that are NOW on destFleetID for the named ids — a read-back of the end
+// state, not a count of rows this call changed. Re-running the same reassign
+// returns the same number, and a media object that was ALREADY on the
+// destination (a prior partial transfer, or pre-existing state) is included.
+// Whoever surfaces this number to a human must say "media now in the
+// destination fleet", never "media moved by this transfer".
+type MediaReassigner interface {
+	Reassign(ctx context.Context, mediaIDs []string, destFleetID string) (map[string]int, error)
+}
+
+// NotificationReassigner re-points notifications for a set of VEHICLES.
+//
+// Vehicle ids, not notification ids: notification-service owns the
+// vehicle -> notification relationship, and enumerating it here would mean
+// fleet-service reading another service's rows.
+// *adminclient.NotificationClient satisfies it.
+//
+// COUNT SEMANTICS: identical to MediaReassigner's — "notifications" is the live
+// row count now on destFleetID for the named vehicles, not the number of rows
+// this call rewrote.
+type NotificationReassigner interface {
+	Reassign(ctx context.Context, vehicleIDs []string, destFleetID string) (map[string]int, error)
+}
+
 // TargetResolver turns a purge root into the human label to denormalise and,
 // for a record-scope vehicle purge, the media ids media-service must be told
 // about — the only place in the whole design where an explicit id set crosses a
@@ -52,6 +82,14 @@ type Deps struct {
 	// from Downstream because the sets differ: auth-service contributes a count
 	// but is never purged.
 	StatsSources []StatsSource
+	// MediaReassign and NotificationReassign are the two downstream halves of a
+	// vehicle transfer. They are separate from Downstream because the protocols
+	// differ: a purge fans out the same PurgeRequest to every service, while a
+	// transfer sends media-service media ids and notification-service vehicle
+	// ids. Nil disables the corresponding call, which is what the purge-only
+	// tests rely on.
+	MediaReassign        MediaReassigner
+	NotificationReassign NotificationReassigner
 	// AuthUsers resolves member ids to email and display name for the fleet
 	// detail view. A failure here is a warning, not an error (FR-ADMIN-FLEET-5).
 	AuthUsers UserResolver
