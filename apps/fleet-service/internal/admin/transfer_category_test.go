@@ -203,6 +203,74 @@ func TestResolveCategories_doesNotRemapOtherVehicles(t *testing.T) {
 	}
 }
 
+// Ruling R14 (task-031 fix round 1): findDestinationCategory intentionally
+// matches only fleet_id = destFleetID and does NOT consider system rows
+// (fleet_id IS NULL), even though maintenancecategory.Provider.FindByName
+// treats system rows as visible/preferred matches for the picker. This is a
+// deliberate divergence, not an oversight: the transfer is reproducing the
+// state the SOURCE fleet was already in — a fleet-scoped category shadowing a
+// same-named system one — and must carry over that category's own
+// description. Reusing the destination's system row instead would discard
+// that description and silently lose user data. A duplicate picker entry in
+// the destination fleet is judged the lesser harm. Do not "fix" this by
+// making findDestinationCategory consider system rows.
+func TestResolveCategories_sourceCategoryShadowingASystemOneIsCopiedNotReused(t *testing.T) {
+	db := admintest.NewDB(t)
+	f := admintest.SeedFleet(t, db, "fleet-a")
+	admintest.SeedFleet(t, db, "fleet-b")
+	// SeedFleet's shared system category is ('category-1', 'Oil Change', NULL
+	// description, system_defined, 'maintenance', fleet_id NULL). Give fleet-a
+	// its own fleet-scoped category with the SAME name and kind, carrying a
+	// description the system row does not have.
+	seedCustomCategory(t, db, f, "cat-oil-fleet-a", "Oil Change", "maintenance")
+
+	created, err := admin.ResolveCategories(db, transferSpec(f.VehicleID, "fleet-a", "fleet-b"))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if created != 1 {
+		t.Fatalf("created = %d, want 1 — the system row must not be treated as an existing destination match", created)
+	}
+
+	newID := scanOne[string](t, db,
+		`SELECT category_id FROM fleet.maintenance_records WHERE id = ?`, f.MaintenanceRecordID)
+	if newID == "category-1" {
+		t.Fatal("record was remapped onto the system category rather than a new fleet-scoped one")
+	}
+	if newID == "cat-oil-fleet-a" {
+		t.Fatal("record still points at the source-fleet category")
+	}
+
+	var row struct {
+		Name          string
+		Description   string
+		Kind          string
+		FleetID       string
+		SystemDefined bool
+	}
+	if err := db.Raw(`SELECT name, description, kind, fleet_id, system_defined
+	                  FROM fleet.maintenance_categories WHERE id = ?`, newID).Scan(&row).Error; err != nil {
+		t.Fatalf("read new category: %v", err)
+	}
+	if row.FleetID != "fleet-b" {
+		t.Errorf("new category fleet_id = %q, want fleet-b", row.FleetID)
+	}
+	if row.SystemDefined {
+		t.Error("new category is system_defined; a copied fleet category never is")
+	}
+	if row.Description != "Seasonal swap" {
+		t.Errorf("new category description = %q, want the source category's own description (proves the system row was not reused)", row.Description)
+	}
+
+	// Exactly one row named "Oil Change"/maintenance now exists in fleet-b
+	// besides the untouched global system row: the copy, not a reuse.
+	if n := scanOne[int](t, db,
+		`SELECT count(*) FROM fleet.maintenance_categories
+		  WHERE fleet_id = 'fleet-b' AND name = 'Oil Change' AND kind = 'maintenance'`); n != 1 {
+		t.Errorf("fleet-b Oil Change/maintenance rows = %d, want 1 new fleet-scoped copy", n)
+	}
+}
+
 // PreviewCategories must report exactly what ResolveCategories would create,
 // without writing anything (FR-XFER-UI-4).
 func TestPreviewCategories_namesWhatWouldBeCreatedAndWritesNothing(t *testing.T) {
