@@ -62,8 +62,9 @@ case where the default location is correct for this repo.
 ### Phase 4 context budget
 
 `task-implementer` replaces `general-purpose` for every Phase 4
-implementation dispatch. Its contract — the 120-call budget, the verification
-split, front-loaded file inventory — is owned by
+implementation dispatch. Its contracts override the plugin's
+`implementer-prompt.md` where they disagree. Its contract — the 120-call
+budget, the verification split, front-loaded file inventory — is owned by
 [`docs/agent-dispatch.md`](agent-dispatch.md).
 
 ## Code Review
@@ -77,6 +78,8 @@ it to be derived by hand on every call:
 - Go files changed → `backend-guidelines-reviewer`
 - `apps/web` TypeScript/React files changed → `frontend-guidelines-reviewer`
 - a `plan.md` exists for the task → `plan-adherence-reviewer`
+- a single commit range needs per-unit review → `task-reviewer`, see
+  [docs/agent-dispatch.md](agent-dispatch.md)'s per-unit review section
 
 All three run in parallel when both backend and frontend changed. Each
 agent's own `## Scope` section is the contract for what it checks; you do not

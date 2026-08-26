@@ -41,8 +41,9 @@ lines change what the controller does next; the reasoning belongs on disk, where
 it stays readable without being re-billed.
 
 Implementer and verifier returns are already the right shape and are explicitly
-**not** changed by this document — `task-verifier`'s 478–1,546 B return is the
-reference. Reviewers are the outlier this contract exists to fix.
+**not** changed by this document — `task-verifier`'s 478–1,546 B return
+(measured, in a sibling repository) is the reference. Reviewers are the
+outlier this contract exists to fix.
 
 ---
 
@@ -167,8 +168,8 @@ verdict: CHANGES_REQUIRED
 artifact: docs/tasks/task-045-vehicle-assignment/reviews/apply-assignment-endpoint.md
 scope_confirmed: apps/fleet-service changes, commits 8c3736a..bcb5cf5
 blocking: 2
-  - apps/fleet-service/internal/assignment/processor.go:212 — the vehicle-status transition is applied before the driver-eligibility check, so an ineligible driver can still receive the assignment.
-  - apps/fleet-service/internal/assignment/administrator.go:88 — the Kafka assignment-created event is published on the success path only, so a retried request after a partial failure can never emit the event.
+  - apps/fleet-service/internal/fleet/processor.go:212 — the vehicle-status transition is applied before the driver-eligibility check, so an ineligible driver can still receive the assignment.
+  - apps/fleet-service/internal/fleet/administrator.go:88 — the Kafka assignment-created event is published on the success path only, so a retried request after a partial failure can never emit the event.
 non_blocking: 3
 not_evaluable: 1
 ```
