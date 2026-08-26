@@ -7,7 +7,18 @@ import (
 )
 
 // Administrator is the write interface for activity-event data access. The feed
-// is APPEND-ONLY: there is no Update or Delete.
+// is APPEND-ONLY: there is no Update or Delete here, and adding one must be a
+// deliberate act — appendonly_test.go fails the moment one appears.
+//
+// ONE exception exists, and it is deliberately not reachable through this
+// interface: an admin vehicle transfer re-points fleet_id — and ONLY fleet_id —
+// on the moved vehicle's rows, in raw SQL inside internal/admin (see that
+// package's transfer.go). fleet_id is a denormalised routing column answering
+// "whose feed does this appear in", not part of "what happened", so correcting
+// it when the vehicle changes owners preserves the feed's meaning rather than
+// revising it. Leaving it stale would leak one household's activity into
+// another's vehicle detail view, because Provider.ListByVehicle selects on
+// vehicle_id alone.
 type Administrator interface {
 	// Insert appends a single activity event.
 	Insert(Model) (Model, error)
