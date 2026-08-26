@@ -27,6 +27,13 @@ RUN npm run -w @myfleet/web build
 # Unprivileged nginx (UID 101, binds :8080) so the container runs with the same
 # hardened securityContext as the Go services: runAsNonRoot + readOnlyRootFilesystem.
 FROM nginxinc/nginx-unprivileged:alpine
+# Same apk lag as the Go services' alpine base: the tag ships openssl 3.5.7-r0
+# while the CVE-2026-14456 fix (3.5.8-r0) is already in v3.24/main. This image
+# defaults to USER 101, so drop to root for the upgrade and go straight back —
+# the runtime user is unchanged.
+USER root
+RUN apk upgrade --no-cache
+USER 101
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 8080
