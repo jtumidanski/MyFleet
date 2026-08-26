@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -137,4 +138,158 @@ func VehicleMediaIDs(db *gorm.DB, vehicleID string) ([]string, error) {
 		return nil, fmt.Errorf("resolve transfer media ids: %w", err)
 	}
 	return ids, nil
+}
+
+// CategoryToCreate names a category the transfer would add to the destination
+// fleet. The console lists these under the blast radius (FR-XFER-UI-4).
+type CategoryToCreate struct {
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+}
+
+// sourceCategory is one fleet-scoped category the moved vehicle references.
+type sourceCategory struct {
+	ID          string
+	Name        string
+	Description string
+	Kind        string
+}
+
+// candidateCategories returns the DISTINCT source-fleet categories the moved
+// vehicle's live records and schedules point at.
+//
+// The `c.fleet_id = ?` predicate is what makes FR-XFER-CAT-2 hold by
+// construction rather than by a check: a system category has a NULL fleet_id
+// and can never satisfy it, so it is never a candidate and never remapped.
+func candidateCategories(db *gorm.DB, spec TransferSpec) ([]sourceCategory, error) {
+	var out []sourceCategory
+	q := `
+		SELECT DISTINCT c.id, c.name, c.description, c.kind
+		  FROM fleet.maintenance_categories c
+		 WHERE c.fleet_id = ?
+		   AND (c.id IN (SELECT category_id FROM fleet.maintenance_records
+		                  WHERE vehicle_id = ? AND deleted_at IS NULL)
+		     OR c.id IN (SELECT category_id FROM fleet.maintenance_schedules
+		                  WHERE vehicle_id = ? AND deleted_at IS NULL))`
+	if err := db.Raw(q, spec.SourceFleetID, spec.VehicleID, spec.VehicleID).Scan(&out).Error; err != nil {
+		return nil, fmt.Errorf("resolve source categories: %w", err)
+	}
+	return out, nil
+}
+
+// findDestinationCategory returns the id of the destination-fleet category
+// matching name (case-INSENSITIVELY) and kind (EXACTLY), or "" if there is none.
+//
+// The lookup and the backing unique index deliberately disagree:
+// idx_maintenance_categories_scope is case-SENSITIVE on (fleet_id, name, kind)
+// and is a backstop against a double-submit, while this LOWER() comparison is
+// the real user-facing match, consistent with the domain's own FindByName.
+func findDestinationCategory(db *gorm.DB, destFleetID, name, kind string) (string, error) {
+	var ids []string
+	q := `SELECT id FROM fleet.maintenance_categories
+	       WHERE fleet_id = ? AND LOWER(name) = LOWER(?) AND kind = ?
+	       LIMIT 1`
+	if err := db.Raw(q, destFleetID, name, kind).Scan(&ids).Error; err != nil {
+		return "", fmt.Errorf("find destination category: %w", err)
+	}
+	if len(ids) == 0 {
+		return "", nil
+	}
+	return ids[0], nil
+}
+
+// PreviewCategories names the categories a transfer would create in the
+// destination fleet. It writes nothing — it runs the same candidate query and
+// the same destination lookup ResolveCategories uses, and simply stops there.
+func PreviewCategories(db *gorm.DB, spec TransferSpec) ([]CategoryToCreate, error) {
+	cands, err := candidateCategories(db, spec)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CategoryToCreate, 0, len(cands))
+	for _, c := range cands {
+		existing, ferr := findDestinationCategory(db, spec.DestFleetID, c.Name, c.Kind)
+		if ferr != nil {
+			return nil, ferr
+		}
+		if existing == "" {
+			out = append(out, CategoryToCreate{Name: c.Name, Kind: c.Kind})
+		}
+	}
+	return out, nil
+}
+
+// ResolveCategories find-or-creates a destination-fleet equivalent for every
+// source-fleet category the moved vehicle references, then rewrites
+// category_id on the vehicle's records and schedules to point at it
+// (FR-XFER-CAT-3/4/5). It returns how many categories it CREATED.
+//
+// Source categories are only ever read. They are never deleted, renamed or
+// re-scoped even when the moved vehicle was their only consumer, because other
+// vehicles and future records in the source fleet may still use them
+// (FR-XFER-CAT-6).
+func ResolveCategories(tx *gorm.DB, spec TransferSpec) (int, error) {
+	cands, err := candidateCategories(tx, spec)
+	if err != nil {
+		return 0, err
+	}
+	created := 0
+	for _, c := range cands {
+		destID, rerr := resolveOneCategory(tx, spec.DestFleetID, c, &created)
+		if rerr != nil {
+			return 0, rerr
+		}
+		if err := remapCategory(tx, spec.VehicleID, c.ID, destID); err != nil {
+			return 0, err
+		}
+	}
+	return created, nil
+}
+
+// resolveOneCategory returns the destination id for one source category,
+// inserting it if absent.
+//
+// A unique violation on the insert means a concurrent transfer created the same
+// category between our lookup and our write. That is "someone else created it,
+// re-read it", never a 500 — so the lookup runs once more and the winner is
+// used. The re-read is bounded to one attempt, and it is a recovery, not a
+// blanket catch: when it finds no winner the insert failed for some other
+// reason, and that ORIGINAL insert error is returned rather than swallowed.
+func resolveOneCategory(tx *gorm.DB, destFleetID string, c sourceCategory, created *int) (string, error) {
+	existing, err := findDestinationCategory(tx, destFleetID, c.Name, c.Kind)
+	if err != nil {
+		return "", err
+	}
+	if existing != "" {
+		return existing, nil
+	}
+	newID := uuid.NewString()
+	ins := `INSERT INTO fleet.maintenance_categories
+	          (id, name, description, system_defined, kind, fleet_id)
+	        VALUES (?, ?, ?, ?, ?, ?)`
+	if ierr := tx.Exec(ins, newID, c.Name, c.Description, false, c.Kind, destFleetID).Error; ierr != nil {
+		winner, ferr := findDestinationCategory(tx, destFleetID, c.Name, c.Kind)
+		if ferr != nil {
+			return "", ferr
+		}
+		if winner == "" {
+			return "", fmt.Errorf("create destination category %q: %w", c.Name, ierr)
+		}
+		return winner, nil
+	}
+	*created++
+	return newID, nil
+}
+
+// remapCategory repoints the moved vehicle's rows from one source category to
+// its destination equivalent. Two set-based statements; never a row-by-row loop.
+func remapCategory(tx *gorm.DB, vehicleID, fromID, toID string) error {
+	for _, table := range []string{"fleet.maintenance_records", "fleet.maintenance_schedules"} {
+		q := "UPDATE " + table + " SET category_id = ?" +
+			" WHERE vehicle_id = ? AND category_id = ? AND deleted_at IS NULL"
+		if err := tx.Exec(q, toID, vehicleID, fromID).Error; err != nil {
+			return fmt.Errorf("remap %s: %w", table, err)
+		}
+	}
+	return nil
 }
