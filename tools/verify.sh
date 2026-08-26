@@ -3,7 +3,9 @@
 #
 # One entry point for everything that must be clean before a branch is called
 # "done". Gate 1 mirrors `make ci`, which is what CI runs; gate 2 mirrors the
-# image builds in .github/workflows/pr.yml, which `make ci` does not do; gates 3
+# image builds in .github/workflows/pr.yml's `containers` job plus the
+# apps/web image, which CI only builds post-merge in
+# .github/workflows/main.yml — `make ci` does not build any of these; gates 3
 # and 4 have no CI analogue because CI has no cluster. When this script and CI
 # disagree, CI is the authority and this script is the bug.
 #
@@ -100,7 +102,10 @@ skip() { SKIPPED+=("$1"); }
 loud_skip() { LOUD_SKIPPED+=("$1"); }
 
 have() {
-    [ "$DRY" = "1" ] && return 0
+    # No DRY shortcut here on purpose: this is gate-SELECTION logic, not gate
+    # BODY work, and the dry run only fakes the latter (see the VERIFY_DRY_RUN
+    # comment above) — otherwise a dry run can never exercise the loud-skip
+    # branches tools/verify_test.sh needs to assert against.
     command -v "$1" >/dev/null 2>&1
 }
 
@@ -170,7 +175,8 @@ dry_run() { # dry_run <overlay>
 }
 
 cluster_reachable() {
-    [ "$DRY" = "1" ] && return 0
+    # Same reasoning as have(): selection logic, not gate body work, so no DRY
+    # shortcut. The probe itself is read-only and fast (5s timeout).
     kubectl cluster-info --request-timeout=5s >/dev/null 2>&1
 }
 
@@ -219,6 +225,13 @@ if [ "${#LOUD_SKIPPED[@]}" -gt 0 ]; then
 fi
 
 if [ "$QUICK" -eq 1 ] || [ "$NO_DOCKER" -eq 1 ]; then
+    exit 0
+fi
+
+# A flagless run that hit a loud skip never evaluated every gate, so it must
+# not claim the same authorization as a full pass — see docs/verification.md.
+if [ "${#LOUD_SKIPPED[@]}" -gt 0 ]; then
+    printf '\n\033[33mGates were skipped for lack of an environment: this run does NOT authorize calling the branch done.\033[0m\n'
     exit 0
 fi
 

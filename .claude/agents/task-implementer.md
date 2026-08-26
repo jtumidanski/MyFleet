@@ -75,7 +75,7 @@ changed:
 
 ```sh
 cd <worktree>/apps/<svc> && go build ./... && go test ./...
-npm run -w apps/web test                  # frontend module-local
+make fe-test && make fe-build              # frontend module-local
 ```
 
 For a `packages/` change, run the same two Go commands from that package's

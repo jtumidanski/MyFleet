@@ -72,6 +72,33 @@ case "$flagless_out" in
     *)            ok  "flagless does not print the non-authorization sentence" ;;
 esac
 
+# --- loud-skip semantics (a flagless run must never over-claim) ------------
+#
+# have()/cluster_reachable() are gate-SELECTION logic, not gate BODY work, so
+# VERIFY_DRY_RUN=1 does not shortcut them (see their comments in verify.sh) —
+# only step()'s execution of the gate body is faked. That means the real PATH
+# still drives selection under a dry run, so hiding docker/kubectl/kustomize
+# from a restricted PATH forces the loud-skip branches for real, without any
+# extra failure-injection hook or second gate-selection path in verify.sh.
+loudskip_bin="$(mktemp -d)"
+trap 'rm -rf "$loudskip_bin"' EXIT
+ln -s "$(command -v bash)" "$loudskip_bin/bash"
+ln -s "$(command -v dirname)" "$loudskip_bin/dirname"
+
+loudskip_out="$(VERIFY_DRY_RUN=1 PATH="$loudskip_bin" "$VERIFY" 2>&1)"; loudskip_rc=$?
+assert_eq "loud-skip flagless run still exits 0" 0 "$loudskip_rc"
+assert_contains "loud-skip flagless run states it does not authorize done" \
+    "$NONAUTH" "$loudskip_out"
+assert_contains "loud-skip flagless run names both skipped gates" \
+    '2 gate(s) were skipped for lack of an environment' "$loudskip_out"
+case "$loudskip_out" in
+    *"$AUTH"*) bad "loud-skip flagless run must NOT print the authorization sentence" ;;
+    *)         ok  "loud-skip flagless run does not print the authorization sentence" ;;
+esac
+
+rm -rf "$loudskip_bin"
+trap - EXIT
+
 # --- gate selection ----------------------------------------------------
 #
 # Each assertion pins the PASSED-line or SKIPPED-line rendering the summary
