@@ -7,7 +7,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55
-	github.com/sirupsen/logrus v1.10.0
+	github.com/sirupsen/logrus v1.10.1
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.293.0
 	gorm.io/driver/sqlite v1.6.0
