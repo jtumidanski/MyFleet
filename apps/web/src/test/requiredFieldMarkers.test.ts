@@ -153,4 +153,24 @@ describe('required field markers', () => {
     expect(region).toContain('<RequiredMarker />');
     expect(region).toContain('aria-required="true"');
   });
+
+  it('marks the vehicle transfer destination search', () => {
+    const source = read('components/admin/VehicleTransferDialog.tsx');
+    const start = source.indexOf('htmlFor="transfer-destination-search"');
+    expect(start).toBeGreaterThan(-1);
+    const region = source.slice(start, source.indexOf('</div>', start));
+
+    expect(region).toContain('<RequiredMarker />');
+    expect(region).toContain('aria-required="true"');
+  });
+
+  it('marks the vehicle transfer confirmation input', () => {
+    const source = read('components/admin/VehicleTransferDialog.tsx');
+    const start = source.indexOf('htmlFor="transfer-confirmation"');
+    expect(start).toBeGreaterThan(-1);
+    const region = source.slice(start, source.indexOf('</div>', start));
+
+    expect(region).toContain('<RequiredMarker />');
+    expect(region).toContain('aria-required="true"');
+  });
 });

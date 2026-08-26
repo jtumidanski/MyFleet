@@ -27,13 +27,18 @@ const ACTIONS = [
   { value: 'purge.cancelled', label: 'Restored' },
   { value: 'purge.retried', label: 'Retried' },
   { value: 'purge.reaped', label: 'Deleted for good' },
+  { value: 'vehicle.transferred', label: 'Transferred' },
 ];
 
+// Kept in step with ACTIONS above by AdminAuditPage.test.tsx: the badge has a
+// `?? a.action` fallback, so an omission here degrades quietly to a raw action
+// string instead of failing.
 const ACTION_LABELS: Record<string, string> = {
   'purge.created': 'Created',
   'purge.cancelled': 'Restored',
   'purge.retried': 'Retried',
   'purge.reaped': 'Deleted for good',
+  'vehicle.transferred': 'Transferred',
 };
 
 /** ActorSystem — the value the reaper writes rather than a user id. */
