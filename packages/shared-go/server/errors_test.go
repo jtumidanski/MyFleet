@@ -476,8 +476,9 @@ func TestSetErrorLogger_isSafeUnderConcurrentUse(t *testing.T) {
 // this package maps, and it is reached from a PUBLIC, unauthenticated endpoint
 // (POST /auth/refresh). Only `status` and `code` may differ from a 500 — the
 // reason for the outage is upstream-controlled and is not the caller's
-// business, so `title` stays the fixed InternalErrorTitle and no `detail` is
-// emitted.
+// business, so `title` stays the fixed InternalErrorTitle. This error carries
+// no Detailed sentence, so no `detail` is emitted either — see
+// TestWriteError_5xxKeepsAnAuthoredDetail for the one thing that does survive.
 func TestWriteError_503KeepsTheRedactedEnvelope(t *testing.T) {
 	transient := fmt.Errorf("%w: active membership lookup failed with status 500", ErrServiceUnavailable)
 
@@ -493,9 +494,58 @@ func TestWriteError_503KeepsTheRedactedEnvelope(t *testing.T) {
 		t.Fatalf("title = %q, want %q — a 5xx title must not describe the fault", got.Title, InternalErrorTitle)
 	}
 	if got.Detail != "" {
-		t.Fatalf("detail = %q, want empty on a 5xx", got.Detail)
+		t.Fatalf("detail = %q, want empty on a 5xx with no authored sentence", got.Detail)
 	}
 	for _, secret := range []string{"membership", "lookup", "500"} {
+		if strings.Contains(rec.Body.String(), secret) {
+			t.Fatalf("503 body leaked %q: %s", secret, rec.Body.String())
+		}
+	}
+}
+
+// TestWriteError_503KeepsAnAuthoredDetail: ErrServiceUnavailable is a sentinel
+// a caller reaches for deliberately, so Detailed over it is as authored as
+// Detailed over a 4xx — unlike the arbitrary chain behind a 500, which
+// TestWriteError_500DropsDetail keeps redacted. On a 503 that sentence is often
+// the only thing telling an operator whether the write landed. The title stays
+// redacted regardless.
+func TestWriteError_503KeepsAnAuthoredDetail(t *testing.T) {
+	err := Detailed(ErrServiceUnavailable,
+		"notification-service could not be reached; the transfer was rolled back")
+
+	rec, got := writeErrorBody(t, err)
+
+	if rec.Code != 503 {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got.Title != InternalErrorTitle {
+		t.Fatalf("title = %q, want the redacted title even with a detail", got.Title)
+	}
+	if !strings.Contains(got.Detail, "rolled back") {
+		t.Fatalf("detail = %q, want the authored sentence", got.Detail)
+	}
+}
+
+// leakyDetail is a stand-in for a driver or third-party error that happens to
+// carry a Detail() method and that classifies as a 503. Nothing authored it for
+// a client, so the 503 path must match the CONCRETE Detailed wrapper — a
+// structural interface{ Detail() string } match would publish this text.
+type leakyDetail struct{}
+
+func (leakyDetail) Error() string  { return "pq: connection to fleet_db refused" }
+func (leakyDetail) Detail() string { return "host=10.4.0.7 user=myfleet password rejected" }
+func (leakyDetail) Unwrap() error  { return ErrServiceUnavailable }
+
+func TestWriteError_503DoesNotPublishAForeignDetail(t *testing.T) {
+	rec, got := writeErrorBody(t, leakyDetail{})
+
+	if rec.Code != 503 {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got.Detail != "" {
+		t.Fatalf("detail = %q, want empty — only Detailed may put a sentence on a 503", got.Detail)
+	}
+	for _, secret := range []string{"10.4.0.7", "myfleet", "fleet_db"} {
 		if strings.Contains(rec.Body.String(), secret) {
 			t.Fatalf("503 body leaked %q: %s", secret, rec.Body.String())
 		}

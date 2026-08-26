@@ -105,9 +105,11 @@ var ddl = []string{
 		position_y INTEGER, width INTEGER, height INTEGER, config BLOB,
 		deleted_at DATETIME, purge_operation_id TEXT)`,
 	// Seeded reference data. Present so a cascade test can assert it SURVIVES.
+	// fleet_id is NULL for the system rows and set for fleet-scoped ones,
+	// which is what the transfer's category remap keys on.
 	`CREATE TABLE fleet.maintenance_categories (
 		id TEXT PRIMARY KEY, name TEXT, description TEXT,
-		system_defined BOOLEAN, kind TEXT)`,
+		system_defined BOOLEAN, kind TEXT, fleet_id TEXT)`,
 	`CREATE TABLE fleet.purge_operations (
 		id TEXT PRIMARY KEY, scope TEXT, target_type TEXT, target_id TEXT,
 		target_label TEXT, status TEXT, requested_by_user_id TEXT,
@@ -116,12 +118,14 @@ var ddl = []string{
 		affected_counts BLOB, failed_services BLOB,
 		created_at DATETIME, updated_at DATETIME)`,
 	// No deleted_at: append-only, and it survives a system purge
-	// (FR-ADMIN-AUDIT-2).
+	// (FR-ADMIN-AUDIT-2). source_fleet_id/destination_fleet_id are NULL for
+	// every purge.* row and populated only by a vehicle transfer.
 	`CREATE TABLE fleet.admin_audit_events (
 		id TEXT PRIMARY KEY, actor_user_id TEXT, actor_email TEXT, action TEXT,
 		scope TEXT, target_type TEXT, target_id TEXT, target_label TEXT,
-		purge_operation_id TEXT, affected_counts BLOB, correlation_id TEXT,
-		created_at DATETIME)`,
+		purge_operation_id TEXT, affected_counts BLOB,
+		source_fleet_id TEXT, destination_fleet_id TEXT,
+		correlation_id TEXT, created_at DATETIME)`,
 	// The outbox is created because domain writes enqueue into it; it is
 	// explicitly NOT purgeable (see admin.excludedTables).
 	`CREATE TABLE outbox (

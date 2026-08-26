@@ -40,6 +40,11 @@ describe('getActivityEventLabel', () => {
     ['member.left', 'Member left the fleet'],
     ['member.removed', 'Member removed from the fleet'],
     ['schedule.overdue', 'Maintenance overdue'],
+    // Both halves of an admin vehicle transfer. FR-XFER-SRC-4 puts these in
+    // both fleets' user-facing feeds; the source fleet's row is the only
+    // record that the car left, and it used to read "Event".
+    ['vehicle.transferred_out', 'Vehicle transferred out'],
+    ['vehicle.transferred_in', 'Vehicle transferred in'],
   ])('labels %s', (type, expected) => {
     expect(getActivityEventLabel(type)).toBe(expected);
   });
@@ -148,6 +153,38 @@ describe('describeActivityEvent', () => {
     );
 
     expect(details).toContainEqual({ term: 'Vehicle', value: 'v-gone' });
+  });
+
+  // The source fleet's transferred_out row names a vehicle that is no longer in
+  // that fleet, so resolveVehicle cannot help and the frozen vehicle_label is
+  // the only readable name there is.
+  it('names the vehicle from the transfer payload once it has left the fleet', () => {
+    const details = describeActivityEvent(
+      event(
+        'vehicle.transferred_out',
+        { counterpart_fleet_id: 'f-other', vehicle_label: '2020 Toyota Corolla' },
+        { vehicleId: 'v-moved' },
+      ),
+      ctx,
+    );
+
+    expect(details).toContainEqual({ term: 'Vehicle', value: '2020 Toyota Corolla' });
+    // The counterpart fleet id is a UUID, and a UUID on a timeline tells the
+    // reader nothing while displacing what does.
+    expect(JSON.stringify(details)).not.toContain('f-other');
+  });
+
+  it('prefers the live vehicle name over the frozen transfer label', () => {
+    const details = describeActivityEvent(
+      event(
+        'vehicle.transferred_in',
+        { counterpart_fleet_id: 'f-other', vehicle_label: '2020 Toyota Corolla' },
+        { vehicleId: 'v1' },
+      ),
+      ctx,
+    );
+
+    expect(details).toContainEqual({ term: 'Vehicle', value: 'The Wagon' });
   });
 
   it('renders nothing extra for an event with no payload', () => {

@@ -62,9 +62,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // refresh.ts clearing anything.
   //
   // `instanceof ApiError` rather than createErrorFromUnknown: the rejection
-  // arrives already typed, and createErrorFromUnknown would flatten it to
-  // status 0 (it only reads `status` off a raw fetch envelope), silently
-  // restoring the bug.
+  // arrives already typed, so there is nothing to normalise. (createErrorFromUnknown
+  // now returns an ApiError unchanged; it used to flatten one to status 0, which
+  // would have silently restored the bug.)
   const tokenRejected = me.isError && !(me.error instanceof ApiError && me.error.status === 503);
 
   useEffect(() => {

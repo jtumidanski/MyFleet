@@ -83,9 +83,25 @@ func errorLogger() logrus.FieldLogger {
 //     column names, SQLSTATE codes, sometimes parameter values. None of that is
 //     the client's business (SEC-09).
 //
-// A `detail` from Detailed is likewise rendered only on 4xx — a detail is a
-// deliberate client-facing sentence, and there is no way to know that an
-// arbitrary 5xx error chain's Detail() is one.
+// A `detail` from Detailed is rendered on every 4xx and on a 503, and on
+// nothing else.
+//
+// A 500 is an ARBITRARY error chain — a raw repository error, whatever GORM or
+// the driver produced — and a Detailed wrapper around one is no evidence its
+// sentence was written for a client; TestWriteError_500DropsDetail exhibits one
+// that names a database and a database user. So a 500 stays wholly redacted.
+//
+// A 503 is different in kind: ErrServiceUnavailable is a sentinel a caller
+// reaches for deliberately, exactly as ErrConflict is, and Detailed over it is
+// as authored as Detailed over a 4xx. It is also the one 5xx where the client
+// needs a sentence — "the transfer was rolled back" is the difference between
+// an operator who knows the write did not land and one who has to go and check.
+// The title stays the fixed InternalErrorTitle either way: only the authored
+// sentence survives, never err.Error().
+//
+// The 503 case matches the CONCRETE Detailed wrapper rather than an
+// `interface{ Detail() string }`, so a driver or third-party error that happens
+// to carry a Detail() method cannot publish its own text through this path.
 //
 // The text redacted from a 5xx body is written to the error logger instead, so
 // the fault stays diagnosable server-side; see SetErrorLogger. Only the error
@@ -117,6 +133,11 @@ func WriteError(w http.ResponseWriter, err error) {
 		var d interface{ Detail() string }
 		if errors.As(err, &d) {
 			apiErr.Detail = d.Detail()
+		}
+	} else if status == 503 {
+		if de := (*detailedError)(nil); errors.As(err, &de) {
+			// Title stays redacted; only the authored sentence survives.
+			apiErr.Detail = de.detail
 		}
 	}
 	WriteJSON(w, status, struct {

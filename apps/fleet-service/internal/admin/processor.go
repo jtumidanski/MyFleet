@@ -30,6 +30,65 @@ type Downstream interface {
 	Reap(ctx context.Context, opID string) (map[string]int, error)
 }
 
+// MediaReassigner re-homes a set of MEDIA objects to another fleet. Declared
+// here as a port rather than importing the concrete client, matching how
+// Downstream and AuthVerifier are declared, so the processor stays testable
+// without an HTTP server. *adminclient.MediaClient satisfies it.
+//
+// COUNT SEMANTICS. The returned map's "media_objects" is the number of LIVE
+// rows that are NOW on destFleetID for the named ids — a read-back of the end
+// state, not a count of rows this call changed. Re-running the same reassign
+// returns the same number, and a media object that was ALREADY on the
+// destination (a prior partial transfer, or pre-existing state) is included.
+// Whoever surfaces this number to a human must say "media now in the
+// destination fleet", never "media moved by this transfer".
+//
+// srcFleetID is the fleet the objects are expected to be in NOW, and
+// media-service treats it as an ownership predicate: an object that is not in
+// that fleet is not moved. It is passed on every call, including the
+// compensating reversal — where the "source" is the destination fleet, because
+// that is where the objects are being moved back FROM.
+type MediaReassigner interface {
+	Reassign(ctx context.Context, mediaIDs []string, srcFleetID, destFleetID string) (map[string]int, error)
+}
+
+// NoopMediaReassign is an explicit "this processor never moves media" —
+// for the purge-only tests, which construct a Deps that has no business
+// carrying a media client. It exists because NewProcessor REFUSES a nil
+// reassigner: a nil one used to make a transfer silently skip media and still
+// commit, which is the exact split-brain the compensation logic exists to
+// prevent, and a wiring regression would have produced it with no error
+// anywhere.
+type NoopMediaReassign struct{}
+
+// Reassign moves nothing and says so.
+func (NoopMediaReassign) Reassign(context.Context, []string, string, string) (map[string]int, error) {
+	return map[string]int{"media_objects": 0}, nil
+}
+
+// NotificationReassigner re-points notifications for a set of VEHICLES.
+//
+// Vehicle ids, not notification ids: notification-service owns the
+// vehicle -> notification relationship, and enumerating it here would mean
+// fleet-service reading another service's rows.
+// *adminclient.NotificationClient satisfies it.
+//
+// COUNT SEMANTICS: identical to MediaReassigner's — "notifications" is the live
+// row count now on destFleetID for the named vehicles, not the number of rows
+// this call rewrote.
+type NotificationReassigner interface {
+	Reassign(ctx context.Context, vehicleIDs []string, destFleetID string) (map[string]int, error)
+}
+
+// NoopNotificationReassign is the NotificationReassigner counterpart to
+// NoopMediaReassign, for the same reason.
+type NoopNotificationReassign struct{}
+
+// Reassign moves nothing and says so.
+func (NoopNotificationReassign) Reassign(context.Context, []string, string) (map[string]int, error) {
+	return map[string]int{"notifications": 0}, nil
+}
+
 // TargetResolver turns a purge root into the human label to denormalise and,
 // for a record-scope vehicle purge, the media ids media-service must be told
 // about — the only place in the whole design where an explicit id set crosses a
@@ -52,6 +111,15 @@ type Deps struct {
 	// from Downstream because the sets differ: auth-service contributes a count
 	// but is never purged.
 	StatsSources []StatsSource
+	// MediaReassign and NotificationReassign are the two downstream halves of a
+	// vehicle transfer. They are separate from Downstream because the protocols
+	// differ: a purge fans out the same PurgeRequest to every service, while a
+	// transfer sends media-service media ids and notification-service vehicle
+	// ids. Both are MANDATORY — NewProcessor panics on a nil one. A caller that
+	// genuinely wants purge-only behaviour passes NoopMediaReassign /
+	// NoopNotificationReassign and says so out loud.
+	MediaReassign        MediaReassigner
+	NotificationReassign NotificationReassigner
 	// AuthUsers resolves member ids to email and display name for the fleet
 	// detail view. A failure here is a warning, not an error (FR-ADMIN-FLEET-5).
 	AuthUsers UserResolver
@@ -76,7 +144,23 @@ type Processor struct {
 }
 
 // NewProcessor constructs the lifecycle processor.
+//
+// It PANICS on a missing reassigner, at wiring time, rather than defaulting one
+// in. A nil MediaReassign or NotificationReassign used to make TransferVehicle
+// skip that service's half of the move, COMMIT anyway, and report `0` to the
+// operator with no error logged anywhere — a transfer that leaves a fleet's
+// media or notifications behind while telling everyone it succeeded. That is
+// the single outcome the whole compensation apparatus exists to prevent, so a
+// wiring regression must stop the process at startup, not produce it silently
+// at 3am. Now and Window are defaulted instead because a missing clock has an
+// obviously correct answer and a missing dependency does not.
 func NewProcessor(log logrus.FieldLogger, d Deps, targets TargetResolver) *Processor {
+	if d.MediaReassign == nil {
+		panic("admin.NewProcessor: MediaReassign is nil; pass admin.NoopMediaReassign{} to opt out deliberately")
+	}
+	if d.NotificationReassign == nil {
+		panic("admin.NewProcessor: NotificationReassign is nil; pass admin.NoopNotificationReassign{} to opt out deliberately")
+	}
 	if d.Now == nil {
 		d.Now = func() time.Time { return time.Now().UTC() }
 	}

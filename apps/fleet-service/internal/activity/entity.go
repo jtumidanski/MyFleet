@@ -6,8 +6,18 @@ import (
 	"gorm.io/gorm"
 )
 
-// Entity maps to fleet.activity_events (PRD §6). Append-only: rows are inserted
-// once and never updated or deleted. payload is JSONB on Postgres.
+// Entity maps to fleet.activity_events (PRD §6). payload is JSONB on Postgres.
+//
+// Append-only, with ONE exception: rows are inserted once and never updated or
+// deleted by any ordinary code path, and this package exposes no way to do so.
+// An admin vehicle transfer re-points fleet_id — and ONLY fleet_id — on the
+// moved vehicle's rows, in raw SQL inside internal/admin (see that package's
+// transfer.go). fleet_id is not part of "what happened"; it is a denormalised
+// routing column answering "whose feed does this appear in", and correcting it
+// when the vehicle changes owners preserves the feed's meaning rather than
+// revising it. Leaving it stale would leak one household's activity into
+// another's vehicle detail view, because Provider.ListByVehicle selects on
+// vehicle_id alone.
 type Entity struct {
 	ID               string  `gorm:"type:uuid;primaryKey"`
 	FleetID          string  `gorm:"type:uuid;not null;index"`

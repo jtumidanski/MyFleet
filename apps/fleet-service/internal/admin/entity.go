@@ -62,8 +62,16 @@ type AuditEntity struct {
 	TargetLabel      string
 	PurgeOperationID *string `gorm:"type:uuid;index"`
 	AffectedCounts   []byte  `gorm:"type:jsonb"`
-	CorrelationID    string
-	CreatedAt        time.Time `gorm:"index"`
+	// Source and destination fleet for a vehicle transfer; NULL for every
+	// purge.* row (FR-XFER-AUDIT-4). Nullable so the existing rows stay valid
+	// — AutoMigrate adds the columns on the next boot, and this repo has no
+	// migration files. They are their own columns rather than entries in
+	// affected_counts (which is map[string]int) or in target_label (which is
+	// human-facing text the operator typed).
+	SourceFleetID      *string `gorm:"type:uuid"`
+	DestinationFleetID *string `gorm:"type:uuid"`
+	CorrelationID      string
+	CreatedAt          time.Time `gorm:"index"`
 }
 
 func (AuditEntity) TableName() string { return "fleet.admin_audit_events" }
@@ -74,6 +82,10 @@ const (
 	ActionPurgeCancelled = "purge.cancelled"
 	ActionPurgeRetried   = "purge.retried"
 	ActionPurgeReaped    = "purge.reaped"
+	// ActionVehicleTransferred records an admin vehicle fleet transfer. Unlike
+	// the purge actions it carries no purge_operation_id: a transfer is not a
+	// purge.
+	ActionVehicleTransferred = "vehicle.transferred"
 )
 
 // ActorSystem is the actor_user_id and actor_email the reaper writes, so the

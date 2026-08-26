@@ -17,4 +17,17 @@ describe('createErrorFromUnknown', () => {
     expect(err.status).toBe(0);
     expect(err.message).toContain('boom');
   });
+
+  it('passes an ApiError through unchanged', () => {
+    // ApiClient.request already converts a failed response into an ApiError
+    // before throwing, so every hook that calls createErrorFromUnknown on a
+    // caught error hands it one of these. Rebuilding it would drop `detail`
+    // and reset `status` to 0 — which is exactly what the console needs to
+    // decide what to tell the operator.
+    const original = new ApiError(409, 'conflict', 'conflict', 'vehicle is pending purge');
+    const err = createErrorFromUnknown(original);
+    expect(err).toBe(original);
+    expect(err.status).toBe(409);
+    expect(err.detail).toBe('vehicle is pending purge');
+  });
 });

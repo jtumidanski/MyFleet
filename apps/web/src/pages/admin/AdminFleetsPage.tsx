@@ -15,9 +15,15 @@ import {
 } from '../../components/ui/table';
 import { BlastRadiusPanel } from '../../components/admin/BlastRadiusPanel';
 import { PurgeConfirmDialog } from '../../components/admin/PurgeConfirmDialog';
-import { useAdminFleet, useAdminFleets, useCreatePurge } from '../../lib/hooks/api/admin';
+import { VehicleTransferDialog } from '../../components/admin/VehicleTransferDialog';
+import {
+  useAdminFleet,
+  useAdminFleets,
+  useCreatePurge,
+  useTransferVehicle,
+} from '../../lib/hooks/api/admin';
 import { cn } from '../../lib/utils';
-import type { DeletedFilter } from '../../types/models/admin';
+import type { AdminVehicleRow, DeletedFilter } from '../../types/models/admin';
 
 /**
  * The fleet inspector — list and detail as two panes of one grid.
@@ -174,6 +180,10 @@ function FleetDetail({ id }: { id: string }) {
   const { data, isLoading, isError } = useAdminFleet(id);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const createPurge = useCreatePurge();
+  // The target vehicle rather than a boolean, following FleetDetail's own
+  // shape: the dialog needs to know WHICH row opened it.
+  const [transferTarget, setTransferTarget] = useState<AdminVehicleRow | null>(null);
+  const transferVehicle = useTransferVehicle();
 
   if (isLoading) {
     return <Skeleton className="h-64" data-testid="fleet-detail-loading" />;
@@ -283,6 +293,7 @@ function FleetDetail({ id }: { id: string }) {
                 <TableHead>Vehicle</TableHead>
                 <TableHead>Mileage</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -300,6 +311,33 @@ function FleetDetail({ id }: { id: string }) {
                     ) : v.status ? (
                       <Badge variant="secondary">{v.status}</Badge>
                     ) : null}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {/*
+                      FR-XFER-UI-8: a vehicle on its way out cannot be moved, and
+                      the server would refuse. Saying why beats a dead button —
+                      the same treatment the owner's Remove action gets above.
+                    */}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={v.pending_purge || transferVehicle.isPending}
+                      title={
+                        v.pending_purge
+                          ? 'This vehicle is pending purge and cannot be transferred.'
+                          : undefined
+                      }
+                      onClick={() => {
+                        // The mutation outlives the dialog, so an error or a
+                        // result left over from the LAST vehicle would greet
+                        // the operator on this one. Cleared before opening.
+                        transferVehicle.reset();
+                        setTransferTarget(v);
+                      }}
+                    >
+                      Transfer
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
@@ -363,6 +401,40 @@ function FleetDetail({ id }: { id: string }) {
           );
         }}
       />
+
+      {/*
+        `id` is the SOURCE fleet by construction: this row is being rendered
+        inside that fleet's detail view. AdminVehicleRow carries no fleet_id of
+        its own, and inventing one would be a second source of truth.
+      */}
+      {transferTarget ? (
+        <VehicleTransferDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setTransferTarget(null);
+          }}
+          vehicleId={transferTarget.id}
+          sourceFleetId={id}
+          isPending={transferVehicle.isPending}
+          // The dialog is the only surface that shows either of these, and it
+          // deliberately does NOT close itself on success: `meta.count_semantics`
+          // — the sentence saying that `media_objects` and `notifications` count
+          // rows NOW ON the destination rather than rows moved — exists only on
+          // the completed-transfer response. Auto-closing would destroy it at
+          // the last hop, so the operator closes this themselves once they have
+          // read the outcome.
+          error={transferVehicle.error}
+          result={transferVehicle.data}
+          onConfirm={({ destinationFleetId, destinationName, typed }) => {
+            transferVehicle.mutate({
+              vehicleId: transferTarget.id,
+              // `typed`, never the label: the server compares it exactly.
+              attributes: { destination_fleet_id: destinationFleetId, confirmation: typed },
+              destinationName,
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

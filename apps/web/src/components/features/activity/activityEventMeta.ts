@@ -27,6 +27,12 @@ const EVENT_META: Record<string, ActivityEventMeta> = {
   'maintenance.scheduled': { icon: '📅', label: 'Maintenance scheduled' },
   'schedule.overdue': { icon: '⚠️', label: 'Maintenance overdue' },
   'media.uploaded': { icon: '📷', label: 'Photo uploaded' },
+  // Both halves of a platform-admin vehicle transfer
+  // (apps/fleet-service/internal/admin/transfer.go). One row lands in EACH
+  // fleet's feed, and the source fleet's is its only record that the car left —
+  // so an unlabelled "Event" there is worse than useless.
+  'vehicle.transferred_out': { icon: '📤', label: 'Vehicle transferred out' },
+  'vehicle.transferred_in': { icon: '📥', label: 'Vehicle transferred in' },
   // Membership events. These carry no vehicleId — they are fleet-level — which
   // is why they used to render as a bare "Event" with a timestamp and nothing
   // else at all.
@@ -178,7 +184,14 @@ export function describeActivityEvent(
   // left once a vehicle is deleted), and the raw id only as a last resort.
   const vehicleId = event.attributes.vehicleId;
   if (vehicleId && includeVehicle) {
-    const frozen = text(p.nickname) || [text(p.make), text(p.model)].filter(Boolean).join(' ');
+    // `vehicle_label` is the transfer payload's frozen name. It matters most on
+    // the SOURCE fleet's `vehicle.transferred_out` row, where the vehicle is by
+    // definition no longer in the fleet being viewed, so `resolveVehicle` has
+    // nothing to offer and the line would otherwise fall through to a raw UUID.
+    const frozen =
+      text(p.nickname) ||
+      text(p.vehicle_label) ||
+      [text(p.make), text(p.model)].filter(Boolean).join(' ');
     // `||` not `??`: an unresolved label and an empty frozen name are both the
     // empty case, and `??` would let '' through as the vehicle's name.
     push('Vehicle', resolveVehicle(vehicleId) || frozen || vehicleId);

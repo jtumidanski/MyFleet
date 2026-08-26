@@ -234,8 +234,12 @@ func main() {
 			admin.NamedStatsSource{AttrKey: "media_objects", Service: "media-service", Fn: mediaAdmin.Stats},
 			admin.NamedStatsSource{AttrKey: "notifications", Service: "notification-service", Fn: notifAdmin.Stats},
 		},
-		VehicleStatus: adminVehicleStatus{vehicles: vehicleProc, deps: vehicleStatusDeps},
-		Window:        admin.RecoveryWindow(config.Get("ADMIN_PURGE_RECOVERY_WINDOW", "120h")),
+		// The transfer's two downstream halves. They are the same clients the
+		// purge fan-out uses; only the protocol differs.
+		MediaReassign:        mediaAdmin,
+		NotificationReassign: notifAdmin,
+		VehicleStatus:        adminVehicleStatus{vehicles: vehicleProc, deps: vehicleStatusDeps},
+		Window:               admin.RecoveryWindow(config.Get("ADMIN_PURGE_RECOVERY_WINDOW", "120h")),
 	}, admin.NewTargetResolver(db))
 
 	// Admin purge reaper: hard-delete operations past their recovery window.

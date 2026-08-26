@@ -14,6 +14,9 @@ const (
 	TypeUser       = "admin-users"
 	TypeOperation  = "purge-operations"
 	TypeAuditEvent = "admin-audit-events"
+
+	TypeTransferPreview = "vehicle-transfer-previews"
+	TypeTransfer        = "vehicle-transfers"
 )
 
 // statsAttributes carries nullable counts. A null is "we could not ask", which
@@ -207,17 +210,19 @@ func TransformOperations(ops []Operation) []server.Resource {
 }
 
 type auditAttributes struct {
-	ActorUserID      string         `json:"actor_user_id"`
-	ActorEmail       string         `json:"actor_email"`
-	Action           string         `json:"action"`
-	Scope            string         `json:"scope"`
-	TargetType       string         `json:"target_type"`
-	TargetID         string         `json:"target_id"`
-	TargetLabel      string         `json:"target_label"`
-	PurgeOperationID string         `json:"purge_operation_id"`
-	AffectedCounts   map[string]int `json:"affected_counts"`
-	CorrelationID    string         `json:"correlation_id"`
-	CreatedAt        time.Time      `json:"created_at"`
+	ActorUserID        string         `json:"actor_user_id"`
+	ActorEmail         string         `json:"actor_email"`
+	Action             string         `json:"action"`
+	Scope              string         `json:"scope"`
+	TargetType         string         `json:"target_type"`
+	TargetID           string         `json:"target_id"`
+	TargetLabel        string         `json:"target_label"`
+	PurgeOperationID   string         `json:"purge_operation_id"`
+	AffectedCounts     map[string]int `json:"affected_counts"`
+	SourceFleetID      string         `json:"source_fleet_id"`
+	DestinationFleetID string         `json:"destination_fleet_id"`
+	CorrelationID      string         `json:"correlation_id"`
+	CreatedAt          time.Time      `json:"created_at"`
 }
 
 // TransformAuditEvents renders a page of audit rows.
@@ -228,19 +233,118 @@ func TransformAuditEvents(events []AuditEvent) []server.Resource {
 			Type: TypeAuditEvent,
 			ID:   a.ID,
 			Attributes: auditAttributes{
-				ActorUserID:      a.ActorUserID,
-				ActorEmail:       a.ActorEmail,
-				Action:           a.Action,
-				Scope:            a.Scope,
-				TargetType:       a.TargetType,
-				TargetID:         a.TargetID,
-				TargetLabel:      a.TargetLabel,
-				PurgeOperationID: a.PurgeOperationID,
-				AffectedCounts:   a.AffectedCounts,
-				CorrelationID:    a.CorrelationID,
-				CreatedAt:        a.CreatedAt,
+				ActorUserID:        a.ActorUserID,
+				ActorEmail:         a.ActorEmail,
+				Action:             a.Action,
+				Scope:              a.Scope,
+				TargetType:         a.TargetType,
+				TargetID:           a.TargetID,
+				TargetLabel:        a.TargetLabel,
+				PurgeOperationID:   a.PurgeOperationID,
+				AffectedCounts:     a.AffectedCounts,
+				SourceFleetID:      a.SourceFleetID,
+				DestinationFleetID: a.DestinationFleetID,
+				CorrelationID:      a.CorrelationID,
+				CreatedAt:          a.CreatedAt,
 			},
 		})
 	}
 	return out
+}
+
+type transferPreviewAttributes struct {
+	VehicleLabel string `json:"vehicle_label"`
+	// The label the console must echo. Computed once, server-side, so the
+	// client never derives the confirmation phrase independently
+	// (FR-XFER-CONF-2).
+	SourceFleetID        string             `json:"source_fleet_id"`
+	SourceFleetName      string             `json:"source_fleet_name"`
+	DestinationFleetID   string             `json:"destination_fleet_id"`
+	DestinationFleetName string             `json:"destination_fleet_name"`
+	Counts               map[string]int     `json:"counts"`
+	CategoriesToCreate   []CategoryToCreate `json:"categories_to_create"`
+	// Degradation notes. No omitempty: [] and absent must not read the same.
+	Warnings []string `json:"warnings"`
+}
+
+// TransformTransferPreview renders the blast radius of a transfer that has not
+// happened. The id is the vehicle's, because that is what the preview is of.
+func TransformTransferPreview(p TransferPreview) server.Resource {
+	return server.Resource{
+		Type: TypeTransferPreview,
+		ID:   p.VehicleID,
+		Attributes: transferPreviewAttributes{
+			VehicleLabel:         p.VehicleLabel,
+			SourceFleetID:        p.SourceFleetID,
+			SourceFleetName:      p.SourceFleetName,
+			DestinationFleetID:   p.DestinationFleetID,
+			DestinationFleetName: p.DestinationFleetName,
+			Counts:               p.Counts,
+			CategoriesToCreate:   p.CategoriesToCreate,
+			Warnings:             p.Warnings,
+		},
+	}
+}
+
+type transferAttributes struct {
+	VehicleID          string         `json:"vehicle_id"`
+	SourceFleetID      string         `json:"source_fleet_id"`
+	DestinationFleetID string         `json:"destination_fleet_id"`
+	TransferredAt      time.Time      `json:"transferred_at"`
+	AffectedCounts     map[string]int `json:"affected_counts"`
+}
+
+// TransformTransfer renders a completed transfer.
+func TransformTransfer(r TransferResult) server.Resource {
+	return server.Resource{
+		Type:       TypeTransfer,
+		ID:         r.VehicleID,
+		Attributes: transferAttributes(r),
+	}
+}
+
+// downstreamCountSemantics is the sentence attached to the two affected_counts
+// keys that do not mean what the rest of the map means.
+//
+// Every fleet-service-local key in affected_counts is "rows THIS transfer
+// moved", counted from the same predicate the UPDATE used. media_objects and
+// notifications are not: both reassign endpoints return count(*) of live rows
+// NOW ON THE DESTINATION for the named ids, so a row that was already there —
+// a re-run, a prior partial transfer, or pre-existing state — is included and
+// was not moved by this call (see mergeDownstreamCount).
+//
+// mergeDownstreamCount documents that in Go. A Go doc comment does not travel
+// into the JSON an operator reads, and the console renders these numbers to a
+// human who will otherwise read them as "moved" — so the response carries the
+// correction with them.
+const downstreamCountSemantics = "live rows now in the destination fleet for the ids this transfer named, " +
+	"not the number moved by this transfer"
+
+// downstreamCountKeys are exactly the affected_counts keys sourced from a
+// downstream read-back. The fleet-service-local keys are deliberately NOT
+// annotated: labelling every key would bury the two that need it.
+var downstreamCountKeys = []string{"media_objects", "notifications"}
+
+// TransferMeta annotates the counts whose names overstate what they measure.
+//
+// It rides in the document's `meta` rather than in `attributes` because it is
+// information ABOUT the primary data rather than a property of the transfer,
+// and because the attribute set is the published contract the console codes
+// against — an annotation must not have to be added to every client's resource
+// type before the numbers become honest.
+//
+// Renaming the keys would be blunter and better, but affected_counts is carried
+// verbatim into the audit row (FR-XFER-AUDIT-3) and read back by the
+// audit-event view, so the key names are not this layer's to change.
+func TransferMeta(r TransferResult) map[string]any {
+	semantics := make(map[string]string, len(downstreamCountKeys))
+	for _, k := range downstreamCountKeys {
+		if _, ok := r.AffectedCounts[k]; ok {
+			semantics[k] = downstreamCountSemantics
+		}
+	}
+	if len(semantics) == 0 {
+		return nil
+	}
+	return map[string]any{"count_semantics": semantics}
 }

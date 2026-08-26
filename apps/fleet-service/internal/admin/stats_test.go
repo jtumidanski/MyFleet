@@ -32,11 +32,16 @@ func (s stubSource) Count(context.Context) (int, error) {
 func newStatsProcessor(t *testing.T, db *gorm.DB, sources ...admin.StatsSource) *admin.Processor {
 	t.Helper()
 	return admin.NewProcessor(logrus.New(), admin.Deps{
-		DB:            db,
-		Provider:      admin.NewProvider(db),
-		Administrator: admin.NewAdministrator(db),
-		StatsSources:  sources,
-		Now:           func() time.Time { return testNow },
+		// Purge-only: these tests never transfer a vehicle, so the two
+		// reassigners are explicitly no-ops rather than nil — NewProcessor
+		// refuses nil, because a nil one silently skipped half a transfer.
+		MediaReassign:        admin.NoopMediaReassign{},
+		NotificationReassign: admin.NoopNotificationReassign{},
+		DB:                   db,
+		Provider:             admin.NewProvider(db),
+		Administrator:        admin.NewAdministrator(db),
+		StatsSources:         sources,
+		Now:                  func() time.Time { return testNow },
 	}, stubTargets{})
 }
 

@@ -3,6 +3,8 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
+import { toast } from 'sonner';
+import { ApiError } from '@myfleet/shared-ts';
 import { adminKeys, useCreatePurge } from './admin';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
@@ -42,6 +44,7 @@ describe('useCreatePurge', () => {
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     });
     createPurge.mockReset();
+    vi.mocked(toast.error).mockReset();
   });
 
   afterEach(() => {
@@ -71,5 +74,35 @@ describe('useCreatePurge', () => {
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(invalidate).toHaveBeenCalledWith({ queryKey: adminKeys.all });
+  });
+
+  // These two branches were unreachable until createErrorFromUnknown stopped
+  // rebuilding an ApiError it was handed — the rebuild reset status to 0, so
+  // every failure fell through to the generic message. ApiClient.request throws
+  // an ApiError, which is exactly what the mutation catches here.
+  it('reports a confirmation mismatch specifically on a 409', async () => {
+    createPurge.mockRejectedValue(
+      new ApiError(409, 'conflict', 'conflict', 'confirmation did not match'),
+    );
+
+    const { result } = renderHook(() => useCreatePurge(), { wrapper });
+    result.current.mutate({ scope: 'system', confirmation: 'nope' });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).toHaveBeenCalledWith(
+      'That confirmation did not match. Nothing was deleted.',
+    );
+  });
+
+  it('reports revoked access specifically on a 403', async () => {
+    createPurge.mockRejectedValue(new ApiError(403, 'forbidden', 'forbidden', 'not an admin'));
+
+    const { result } = renderHook(() => useCreatePurge(), { wrapper });
+    result.current.mutate({ scope: 'system', confirmation: 'nope' });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(toast.error).toHaveBeenCalledWith(
+      'Your platform-admin access has been revoked. Nothing was deleted.',
+    );
   });
 });

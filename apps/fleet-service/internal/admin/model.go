@@ -65,8 +65,11 @@ type AuditEvent struct {
 	TargetLabel      string
 	PurgeOperationID string
 	AffectedCounts   map[string]int
-	CorrelationID    string
-	CreatedAt        time.Time
+	// Empty unless Action is ActionVehicleTransferred.
+	SourceFleetID      string
+	DestinationFleetID string
+	CorrelationID      string
+	CreatedAt          time.Time
 }
 
 // AuditFilter narrows the audit list (FR-ADMIN-AUDIT-3). Empty strings mean
@@ -159,6 +162,12 @@ func MakeAudit(e AuditEntity) AuditEvent {
 	if e.PurgeOperationID != nil {
 		a.PurgeOperationID = *e.PurgeOperationID
 	}
+	if e.SourceFleetID != nil {
+		a.SourceFleetID = *e.SourceFleetID
+	}
+	if e.DestinationFleetID != nil {
+		a.DestinationFleetID = *e.DestinationFleetID
+	}
 	if len(e.AffectedCounts) > 0 {
 		_ = json.Unmarshal(e.AffectedCounts, &a.AffectedCounts)
 	}
@@ -188,6 +197,14 @@ func (a AuditEvent) ToEntity() AuditEntity {
 	if a.PurgeOperationID != "" {
 		p := a.PurgeOperationID
 		e.PurgeOperationID = &p
+	}
+	if a.SourceFleetID != "" {
+		s := a.SourceFleetID
+		e.SourceFleetID = &s
+	}
+	if a.DestinationFleetID != "" {
+		d := a.DestinationFleetID
+		e.DestinationFleetID = &d
 	}
 	e.AffectedCounts, _ = json.Marshal(a.AffectedCounts)
 	return e

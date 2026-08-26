@@ -30,6 +30,8 @@ var adminRoutes = []route{
 	{http.MethodDelete, "/admin/purge-operations/op-1"},
 	{http.MethodPost, "/admin/purge-operations/op-1/retry"},
 	{http.MethodGet, "/admin/audit-events"},
+	{http.MethodGet, "/admin/vehicles/vehicle-1/transfer-preview"},
+	{http.MethodPost, "/admin/vehicles/vehicle-1/transfer"},
 }
 
 // readRoutes are the endpoints that must answer for an admin with no fleet at

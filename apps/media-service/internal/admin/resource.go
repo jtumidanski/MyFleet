@@ -81,6 +81,41 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB, store ObjectR
 			server.WriteJSON(w, http.StatusOK, affectedResponse{Affected: affected})
 		})
 
+		// SECURITY: like its neighbours this route has no authentication, and
+		// it is a HIGHER-value target than they are — it can move any media
+		// object into any fleet, which is a read-access grant rather than a
+		// deletion. It is kept off the public internet by two independent
+		// mechanisms: the priority-200 internal-deny rule matching
+		// ^/+api/+media[^/]*/*internal (an ipAllowList of 255.255.255.255/32,
+		// which no client can match), and media-stripprefix stripping only
+		// /api, so a public /api/media/internal/... would arrive here as
+		// /media/internal/... and match no registered route.
+		// tools/check-manifests.sh asserts the first of those on both
+		// entrypoints and runs as part of `make ci`.
+		r.Post("/internal/admin/reassign-fleet", func(w http.ResponseWriter, req *http.Request) {
+			var body ReassignRequest
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+			if err := reassignRootFrom(body); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			var affected map[string]int
+			if terr := db.Transaction(func(tx *gorm.DB) error {
+				var rerr error
+				affected, rerr = Reassign(tx, body.MediaIDs, body.SourceFleetID, body.DestinationFleetID)
+				return rerr
+			}); terr != nil {
+				log.WithError(terr).WithField("destination_fleet_id", body.DestinationFleetID).
+					Error("media admin reassign")
+				server.WriteError(w, terr)
+				return
+			}
+			server.WriteJSON(w, http.StatusOK, affectedResponse{Affected: affected})
+		})
+
 		r.Delete("/internal/admin/purge/{opId}", func(w http.ResponseWriter, req *http.Request) {
 			opID := chi.URLParam(req, "opId")
 			if terr := db.Transaction(func(tx *gorm.DB) error { return Restore(tx, opID) }); terr != nil {
