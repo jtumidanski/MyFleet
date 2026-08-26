@@ -77,6 +77,37 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB) func(chi.Rout
 			server.WriteJSON(w, http.StatusOK, affectedResponse{Affected: affected})
 		})
 
+		// SECURITY: unauthenticated, like its neighbours, and this service is
+		// the one that is not safe by accident — notifications-stripprefix
+		// strips the FULL /api/notifications prefix, so the priority-200
+		// internal-deny rule matching ^/+api/+notifications[^/]*/*internal is
+		// the ONLY thing keeping this off the public internet.
+		// tools/check-manifests.sh asserts it on both entrypoints and runs as
+		// part of `make ci`.
+		r.Post("/internal/admin/reassign-fleet", func(w http.ResponseWriter, req *http.Request) {
+			var body ReassignRequest
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+			if err := reassignRootFrom(body); err != nil {
+				server.WriteError(w, err)
+				return
+			}
+			var affected map[string]int
+			if terr := db.Transaction(func(tx *gorm.DB) error {
+				var rerr error
+				affected, rerr = Reassign(tx, body.VehicleIDs, body.DestinationFleetID)
+				return rerr
+			}); terr != nil {
+				log.WithError(terr).WithField("destination_fleet_id", body.DestinationFleetID).
+					Error("notification admin reassign")
+				server.WriteError(w, terr)
+				return
+			}
+			server.WriteJSON(w, http.StatusOK, affectedResponse{Affected: affected})
+		})
+
 		r.Delete("/internal/admin/purge/{opId}", func(w http.ResponseWriter, req *http.Request) {
 			opID := chi.URLParam(req, "opId")
 			if terr := db.Transaction(func(tx *gorm.DB) error { return Restore(tx, opID) }); terr != nil {
