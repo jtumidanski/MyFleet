@@ -258,7 +258,12 @@ func TestApplyTransfer_rejectsAnEmptyIDBeforeTouchingAnything(t *testing.T) {
 // be its own check, not a side effect of the emptiness checks.
 func TestApplyTransfer_rejectsASameFleetSpecBeforeTouchingAnything(t *testing.T) {
 	db, f, _ := applyFixture(t)
-	addWidget(t, db, "w-unpinned", f.DashboardID, `{}`)
+	// Genuinely pinned to the vehicle under test, mirroring
+	// TestApplyTransfer_reportsCategoriesCreatedAndWidgetsRemoved: an
+	// unpinned `{}` config can never match WidgetsPinnedToVehicle's
+	// cfg.VehicleID == vehicleID comparison, so it would survive PruneWidgets
+	// whether or not the guard exists, and would not prove anything.
+	addWidget(t, db, "w-pinned", f.DashboardID, `{"vehicleId":"`+f.VehicleID+`"}`)
 	spec := transferSpec(f.VehicleID, "fleet-a", "fleet-a")
 
 	// Errorf, not Fatalf: when the guard is missing the assertions below are
@@ -267,15 +272,23 @@ func TestApplyTransfer_rejectsASameFleetSpecBeforeTouchingAnything(t *testing.T)
 		t.Error("apply with source == destination fleet returned no error")
 	}
 	if n := scanOne[int](t, db,
-		`SELECT count(*) FROM fleet.dashboard_widgets WHERE id = ?`, "w-unpinned"); n != 1 {
-		t.Error("an unrelated widget was pruned by a same-fleet spec that should have been rejected")
+		`SELECT count(*) FROM fleet.dashboard_widgets WHERE id = ?`, "w-pinned"); n != 1 {
+		t.Error("a widget pinned to the vehicle was pruned by a same-fleet spec that should have been rejected")
 	}
-	if got := scanOne[string](t, db,
-		`SELECT fleet_id FROM fleet.vehicles WHERE id = ?`, f.VehicleID); got != "fleet-a" {
-		t.Errorf("fleet_id = %q, want fleet-a: nothing may be written", got)
-	}
+	// fleet_id is deliberately NOT asserted here: source == destination means
+	// even an executed UPDATE reads back "fleet-a", indistinguishable from
+	// nothing being written. Likewise categories_created can't distinguish
+	// the guard firing from it not: ResolveCategories' find-or-create looks
+	// up the destination by (name, kind), and with source == destination it
+	// always finds the source category itself, so it creates nothing either
+	// way. The activity events below are the only writes a same-fleet spec
+	// would produce that read back differently whether the guard fired.
 	if n := scanOne[int](t, db, `SELECT count(*) FROM fleet.activity_events WHERE type = ?`,
 		admin.EventVehicleTransferredOut); n != 0 {
+		t.Error("a transfer activity event was written for a rejected same-fleet spec")
+	}
+	if n := scanOne[int](t, db, `SELECT count(*) FROM fleet.activity_events WHERE type = ?`,
+		admin.EventVehicleTransferredIn); n != 0 {
 		t.Error("a transfer activity event was written for a rejected same-fleet spec")
 	}
 }
