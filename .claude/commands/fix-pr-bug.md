@@ -67,7 +67,7 @@ model: sonnet
 
 Brief: the bug file path. Add only what the file cannot carry — the worktree
 absolute path, and any ruling you made after writing it. Do not restate the
-file. This dispatch is subject to the same 120-tool-call `task-implementer`
+file, and do not restate the agent's own contracts. This dispatch is subject to the same 120-tool-call `task-implementer`
 budget as any other dispatch — see
 [`docs/agent-dispatch.md`](../../docs/agent-dispatch.md) §The implementer
 budget.
