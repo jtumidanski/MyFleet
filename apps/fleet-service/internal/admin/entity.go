@@ -52,7 +52,11 @@ func (OperationEntity) TableName() string { return "fleet.purge_operations" }
 // or delete these rows, and a system purge must not erase its own audit trail
 // (FR-ADMIN-AUDIT-2). That is also why the table is in excludedTables.
 type AuditEntity struct {
-	ID               string `gorm:"type:uuid;primaryKey"`
+	ID string `gorm:"type:uuid;primaryKey"`
+	// ActorUserID is a uuid column, so a background job writes the
+	// systemactor.ID sentinel here — never the word "system", which is what
+	// FR-ADMIN-UI-13 asks the CONSOLE to show and what actor_email carries.
+	// See the systemactor package doc for what conflating the two cost.
 	ActorUserID      string `gorm:"type:uuid;not null"`
 	ActorEmail       string `gorm:"not null"`
 	Action           string `gorm:"not null;index"`
@@ -87,11 +91,6 @@ const (
 	// purge.
 	ActionVehicleTransferred = "vehicle.transferred"
 )
-
-// ActorSystem is the actor_user_id and actor_email the reaper writes, so the
-// console can render "system" rather than attributing a scheduled deletion to
-// the person who requested it days earlier (FR-ADMIN-UI-13).
-const ActorSystem = "system"
 
 // Migration creates both admin-owned tables.
 func Migration(db *gorm.DB) error {

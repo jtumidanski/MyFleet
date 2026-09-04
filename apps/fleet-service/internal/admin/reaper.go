@@ -7,6 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/systemactor"
 )
 
 // NewProcessorClockForTest returns a copy of the processor with a fixed clock.
@@ -93,10 +95,16 @@ func (p *Processor) reapOne(ctx context.Context, op Operation, now time.Time) (m
 		// Actor is the system: attributing a scheduled deletion to the person
 		// who requested it days earlier would misread the trail
 		// (FR-ADMIN-UI-13).
+		//
+		// The id is the uuid sentinel and the email is the word. They are not
+		// interchangeable: actor_user_id is a uuid column, and writing "system"
+		// into it failed this insert — and, since the insert shares this
+		// transaction with the hard delete above, rolled back the entire reap —
+		// on every hourly tick.
 		return p.d.Administrator.InsertAudit(tx, AuditEvent{
 			ID:               uuid.NewString(),
-			ActorUserID:      ActorSystem,
-			ActorEmail:       ActorSystem,
+			ActorUserID:      systemactor.ID,
+			ActorEmail:       systemactor.Label,
 			Action:           ActionPurgeReaped,
 			Scope:            string(op.Scope()),
 			TargetType:       op.TargetType(),

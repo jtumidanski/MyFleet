@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/systemactor"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
@@ -18,7 +19,13 @@ type OverdueEmitter func(tx *gorm.DB, fleetID, scheduleID, vehicleID, severity, 
 
 // systemActor is the actor recorded for system-generated transitions (the
 // recompute job has no human actor).
-const systemActor = "system"
+//
+// It is the uuid sentinel, not the word "system": activity_events.actor_user_id
+// is `uuid NOT NULL`, and the word made the transition insert below fail on
+// Postgres — taking the status update in the same transaction down with it, so
+// the schedule never reached overdue and the sweep abandoned every schedule
+// after it. The console still SEES "system"; activity.Transform substitutes it.
+const systemActor = systemactor.ID
 
 // Processor contains maintenance schedule business logic, injected with
 // Provider and Administrator.

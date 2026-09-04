@@ -3,6 +3,7 @@ package admin
 import (
 	"time"
 
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/systemactor"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
@@ -226,6 +227,11 @@ type auditAttributes struct {
 }
 
 // TransformAuditEvents renders a page of audit rows.
+//
+// The actor id goes through systemactor.Display: a background job stores the
+// uuid sentinel, and the console (AdminAuditPage) already recognises the word
+// "system" and renders it in place of an email. Emitting the raw sentinel would
+// show an operator a row of zeroes.
 func TransformAuditEvents(events []AuditEvent) []server.Resource {
 	out := make([]server.Resource, 0, len(events))
 	for _, a := range events {
@@ -233,7 +239,7 @@ func TransformAuditEvents(events []AuditEvent) []server.Resource {
 			Type: TypeAuditEvent,
 			ID:   a.ID,
 			Attributes: auditAttributes{
-				ActorUserID:        a.ActorUserID,
+				ActorUserID:        systemactor.Display(a.ActorUserID),
 				ActorEmail:         a.ActorEmail,
 				Action:             a.Action,
 				Scope:              a.Scope,
