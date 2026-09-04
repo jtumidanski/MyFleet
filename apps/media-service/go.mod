@@ -3,13 +3,13 @@ module github.com/jtumidanski/myfleet/apps/media-service
 go 1.27.0
 
 require (
-	github.com/go-chi/chi/v5 v5.3.1
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jtumidanski/myfleet/packages/dto-go v0.0.0-20260729130335-a5bfa151d5e4
 	github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55
 	github.com/minio/minio-go/v7 v7.3.0
-	github.com/sirupsen/logrus v1.10.1
+	github.com/sirupsen/logrus v1.10.2
 	golang.org/x/image v0.45.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
