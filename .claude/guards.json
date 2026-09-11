@@ -1,0 +1,17 @@
+{
+  "_": "Opt-in marker for the context/cost guards in the user-profile hooks (~/.claude/hooks/, see its README.md). This repo already runs its own ported copies of most of those guards from .claude/hooks/, wired in .claude/settings.json — so every guard that exists in-repo is disabled here to avoid double-firing. Only context_handoff, which has no in-repo counterpart, is left on. Commit this file so git worktrees under .worktrees/ inherit it.",
+  "enabled": true,
+  "context_handoff": {
+    "floor": 40,
+    "escalate": 60
+  },
+  "guards": {
+    "turn_budget": false,
+    "context_handoff": true,
+    "commit_boundary": false,
+    "fork_dispatch": false,
+    "wait_loop": false,
+    "home_paths": false
+  },
+  "handoff_hint": "In this project a handoff means: write the diagnosis into docs/tasks/task-NNN-slug/, then tell the user to /clear and re-run the phase command (/design-task, /plan-task, /execute-task) for the same task id — each phase resumes from the committed artifacts of the prior one, so nothing is lost. Stay inside the task worktree."
+}
