@@ -60,6 +60,15 @@ Code review uses three modular reviewer agents, dispatched in parallel: `plan-ad
 
 Before a session runs out of usable context, hand off rather than pushing through degraded reasoning: write a short diagnosis and next steps into the task folder so the handoff is lossless even though the reasoning behind it does not survive in the transcript. A handoff the same context then works past is not a handoff. See `docs/agent-dispatch.md` for the full context-handoff mechanics, the `--kind handoff --context-tokens <n>` ledger record, and how `/execute-task` Steps 4d-4e implement `PARTIAL` handling and controller handoff as concrete instances of this rule.
 
+The handoff rule is enforced, not advisory: `.claude/guards.json` opts this repo
+into the user-profile guard layer, whose `context-handoff-guard.sh` **denies** the
+controller a dispatch that starts a *new* unit of work past ~60 tool calls
+(≈150k context). Finishing dispatches — reviewers, verifiers, doc agents — still
+pass, and `CONTEXT-JUSTIFIED: <reason>` anywhere in the prompt is the escape hatch
+when the next unit genuinely needs state only this conversation holds. Every other
+guard in that layer is switched off in `guards.json` because `.claude/hooks/` already
+runs a ported copy of it; enabling both would double-fire each one.
+
 ## Repository conventions
 
 - Check `packages/shared-go/` before defining a new domain type, alias, or numeric constant.
