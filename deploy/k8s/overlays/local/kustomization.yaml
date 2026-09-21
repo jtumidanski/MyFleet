@@ -28,15 +28,15 @@ replicas:
 
 # Override images to use local/latest tags for local development
 images:
-  - name: ghcr.io/jtumidanski/myfleet-auth-service
+  - name: registry.tumidanski/jtumidanski/myfleet-auth-service
     newTag: local
-  - name: ghcr.io/jtumidanski/myfleet-fleet-service
+  - name: registry.tumidanski/jtumidanski/myfleet-fleet-service
     newTag: local
-  - name: ghcr.io/jtumidanski/myfleet-media-service
+  - name: registry.tumidanski/jtumidanski/myfleet-media-service
     newTag: local
-  - name: ghcr.io/jtumidanski/myfleet-notification-service
+  - name: registry.tumidanski/jtumidanski/myfleet-notification-service
     newTag: local
-  - name: ghcr.io/jtumidanski/myfleet-web
+  - name: registry.tumidanski/jtumidanski/myfleet-web
     newTag: local
 
 # Patch to relax imagePullPolicy for local images

@@ -20,7 +20,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: auth-service
-          image: ghcr.io/jtumidanski/myfleet-auth-service:latest
+          image: registry.tumidanski/jtumidanski/myfleet-auth-service:latest
           ports:
             - containerPort: 8080
               name: http

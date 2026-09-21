@@ -21,7 +21,7 @@ spec:
         fsGroup: 101
       containers:
         - name: web
-          image: ghcr.io/jtumidanski/myfleet-web:latest
+          image: registry.tumidanski/jtumidanski/myfleet-web:latest
           ports:
             - containerPort: 8080
               name: http

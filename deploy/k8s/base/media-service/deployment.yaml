@@ -20,7 +20,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: media-service
-          image: ghcr.io/jtumidanski/myfleet-media-service:latest
+          image: registry.tumidanski/jtumidanski/myfleet-media-service:latest
           ports:
             - containerPort: 8080
               name: http

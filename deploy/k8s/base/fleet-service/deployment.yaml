@@ -20,7 +20,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: fleet-service
-          image: ghcr.io/jtumidanski/myfleet-fleet-service:latest
+          image: registry.tumidanski/jtumidanski/myfleet-fleet-service:latest
           ports:
             - containerPort: 8080
               name: http

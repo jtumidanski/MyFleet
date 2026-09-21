@@ -53,15 +53,15 @@ replicas:
 # every push to main, so `git log` is an accurate record of what is deployed.
 # `latest` is only the seed for the first sync.
 images:
-  - name: ghcr.io/jtumidanski/myfleet-auth-service
+  - name: registry.tumidanski/jtumidanski/myfleet-auth-service
     newTag: 26fc8907bdc2715290f9c7c981b22b418742bc51
-  - name: ghcr.io/jtumidanski/myfleet-fleet-service
+  - name: registry.tumidanski/jtumidanski/myfleet-fleet-service
     newTag: 26fc8907bdc2715290f9c7c981b22b418742bc51
-  - name: ghcr.io/jtumidanski/myfleet-media-service
+  - name: registry.tumidanski/jtumidanski/myfleet-media-service
     newTag: 26fc8907bdc2715290f9c7c981b22b418742bc51
-  - name: ghcr.io/jtumidanski/myfleet-notification-service
+  - name: registry.tumidanski/jtumidanski/myfleet-notification-service
     newTag: 26fc8907bdc2715290f9c7c981b22b418742bc51
-  - name: ghcr.io/jtumidanski/myfleet-web
+  - name: registry.tumidanski/jtumidanski/myfleet-web
     newTag: 26fc8907bdc2715290f9c7c981b22b418742bc51
 
 patches:

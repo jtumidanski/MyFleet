@@ -20,7 +20,7 @@ spec:
         fsGroup: 10001
       containers:
         - name: notification-service
-          image: ghcr.io/jtumidanski/myfleet-notification-service:latest
+          image: registry.tumidanski/jtumidanski/myfleet-notification-service:latest
           ports:
             - containerPort: 8080
               name: http
