@@ -1,0 +1,388 @@
+name: main
+
+# Forge port of .github/workflows/main.yml (Phase 5, task B3). See pr.yml's
+# header for the cache rules and the general shape of the port.
+#
+# Departures from the original, all forced by the platform:
+#
+#   1. GHCR is gone. The registry is zot at registry.tumidanski and the
+#      credential is the zot `ci` user with secrets.ZOT_CI_PASSWORD; there is
+#      no GITHUB_TOKEN and no `packages: write` to grant. The whole
+#      `permissions:` block goes with it — it carries GitHub token semantics
+#      that mean nothing here.
+#   2. docker/build-push-action is gone. Host-mode runners have no Docker
+#      daemon, so `publish` builds through ci/actions/buildx-build@v1 against a
+#      remote BuildKit worker. Unlike the GitHub original this DOES use a layer
+#      cache: it is type=registry in zot rather than type=gha, so none of the
+#      reasons the original gave for dropping cache-from/cache-to apply (no
+#      GHA cache service, no 10 GB repo quota to crowd out the Go cache).
+#   3. aquasecurity/trivy-action is gone: it runs trivy as a container, which
+#      host mode cannot do. The runner image ships the trivy 0.74.0 binary and
+#      the job invokes it directly.
+#   4. `concurrency:` is ignored by Forgejo 15.0.9 — see the comments on the
+#      `tag` and `bump-overlay` jobs.
+#   5. The push credential is secrets.FORGE_PUSH_TOKEN, handed to
+#      actions/checkout so the remote it configures can push.
+
+on:
+  push:
+    branches: [main]
+    # Guard 1 of 2 against a self-retrigger loop: the bump-overlay job below
+    # pushes a commit that touches only this path. Guard 2 is [skip ci] in that
+    # commit's message. Guard 0 — the one that actually decides — is the
+    # convergence check inside bump-overlay itself; see there.
+    paths-ignore:
+      - 'deploy/k8s/overlays/main/**'
+
+env:
+  REGISTRY: registry.tumidanski
+  IMAGE_PREFIX: registry.tumidanski/jtumidanski/myfleet
+
+# The verification gate (backend + frontend + manifests) and `publish` run
+# concurrently. Publishing is safe to start before the gate finishes because a
+# SHA-tagged image is inert: nothing resolves `…-<service>:<sha>` until
+# `bump-overlay` writes that SHA into the overlay.
+#
+# `:latest` is NOT inert — deploy/k8s/base/*/deployment.yaml all reference it,
+# and it is the seed a fresh cluster syncs against before the first bump (see
+# the bootstrap section of docs/runbooks/k3s-deployment.md). So `publish` pushes
+# the SHA tag only, and the `retag-latest` job below moves `:latest` afterwards,
+# behind the same gate as `bump-overlay`. An untested or vulnerable commit can
+# therefore be neither tagged, nor deployed, nor made the bootstrap seed.
+#
+# The cost of ungating `publish` is that a commit failing the gate still burns
+# its 5 publish jobs. That is ~2.5 minutes of runner time on a doomed commit,
+# traded for ~3 minutes off the path to a running deployment on every good one.
+jobs:
+  # ── Verification gate: Go ────────────────────────────────────────────────────
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      GOMODCACHE: /work/ci-cache/go/mod
+      GOCACHE: /work/ci-cache/go/build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
+        with:
+          go-version: '1.27'
+          # Cache handled explicitly below. Two independent reasons. The one
+          # the GitHub original recorded: setup-go's built-in cache derives its
+          # key from OS/arch/go-version/file-hash only, with no way to
+          # namespace it and no restore-keys fallback — so every Go job in the
+          # repo computes the same key and races to save. The one this forge
+          # adds: its cache server lower-cases the key on restore and setup-go
+          # compares with `===`, so it concludes it missed and re-uploads the
+          # whole cache in its post step on every single job.
+          cache: false
+
+      # Keyed per workload, so the race-instrumented objects `make test` needs
+      # are not overwritten by a lint job's cache. The restore-keys fallback
+      # means a dependency bump degrades to a warm-ish cache rather than a cold
+      # one. Shares a prefix with pr.yml's backend job on purpose: they do the
+      # same work, so a PR run should restore what main last built.
+      - name: Cache Go build and module caches
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: /work/ci-cache/go
+          key: go-build-linux-x64-${{ steps.go.outputs.go-version }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-build-linux-x64-${{ steps.go.outputs.go-version }}-
+
+      - name: Vet
+        run: make vet
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+  # ── Verification gate: web ───────────────────────────────────────────────────
+  frontend:
+    runs-on: ubuntu-latest
+    env:
+      npm_config_cache: /work/ci-cache/npm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Cache npm cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: /work/ci-cache/npm
+          key: npm-linux-x64-24-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Frontend test
+        run: make fe-test
+
+      - name: Frontend build
+        run: make fe-build
+
+  # ── Verification gate: deploy manifests ──────────────────────────────────────
+  # Renders both overlays and asserts their invariants — chiefly that the :80
+  # and :443 IngressRoutes carry identical route sets, so the internal-deny rule
+  # cannot go missing from one entrypoint. A broken overlay blocks `bump-overlay`
+  # rather than being discovered when Argo CD syncs it to the cluster.
+  #
+  # Note the workflow's paths-ignore skips overlay-only pushes (the bump-overlay
+  # commits); those change nothing but `newTag`, which cannot affect route parity.
+  #
+  # kustomize and PyYAML come from the runner image; the original's two install
+  # steps are gone.
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - name: Report the toolchain
+        run: kustomize version && python3 -c 'import yaml; print("pyyaml", yaml.__version__)'
+
+      - name: Check manifests
+        run: make manifests
+
+      # See pr.yml's manifests job for why this lives here. On this workflow it
+      # is also a deploy gate: bump-overlay waits on `manifests`, so a Carfax
+      # template that has drifted between the TS default, the served
+      # config.json and the ConfigMap cannot reach the cluster.
+      - name: Check Carfax URL template
+        run: make carfax-template
+
+  # ── Publish container images to zot ──────────────────────────────────────────
+  # Deliberately has no `needs`: see the note above the jobs block.
+  #
+  # No toolchain cache and so no /work/ci-cache reset: the build runs entirely
+  # inside BuildKit, whose layer cache lives in zot under
+  # registry.tumidanski/ci/buildcache:myfleet-<service>-amd64.
+  publish:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, fleet-service, media-service, notification-service, web]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select an amd64 BuildKit replica
+        id: amd64
+        uses: ci/actions/select-amd64-builder@v1
+        with:
+          index: 0
+
+      - name: Build and push ${{ matrix.service }}
+        uses: ci/actions/buildx-build@v1
+        with:
+          context: .
+          dockerfile: apps/${{ matrix.service }}/Dockerfile
+          image: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+          # SHA tag only. `retag-latest` moves `:latest` once the gate passes.
+          tags: ${{ github.sha }}
+          platform: linux/amd64
+          buildkit-endpoint: ${{ steps.amd64.outputs.endpoint }}
+          push: 'true'
+          registry: ${{ env.REGISTRY }}
+          registry-username: ci
+          registry-password: ${{ secrets.ZOT_CI_PASSWORD }}
+          cache-scope: myfleet-${{ matrix.service }}-amd64
+
+  # ── Vulnerability scan (Trivy) ────────────────────────────────────────────────
+  # aquasecurity/trivy-action runs trivy as a container, which host mode cannot
+  # do; the runner image ships the binary (trivy 0.74.0), so the scan is a plain
+  # `trivy image` invocation against the pushed ref.
+  trivy:
+    needs: publish
+    runs-on: ubuntu-latest
+    strategy:
+      # Scan every service even when one fails — fail-fast cancels the siblings
+      # and hides their findings until the first failure is fixed.
+      fail-fast: false
+      matrix:
+        service: [auth-service, fleet-service, media-service, notification-service, web]
+    # No checkout: this job resolves an image by ref and reads nothing from the
+    # repository. Reinstate it if a .trivyignore is ever added.
+    steps:
+      - name: Trivy scan — ${{ matrix.service }}
+        env:
+          # The default is ${{ github.workspace }}/.cache/trivy, which on this
+          # executor can be saved but never restored; a fixed literal under
+          # /work/ci-cache is the rule for every cached tool here.
+          TRIVY_CACHE_DIR: /work/ci-cache/trivy
+          TRIVY_USERNAME: ci
+          TRIVY_PASSWORD: ${{ secrets.ZOT_CI_PASSWORD }}
+        run: |
+          rm -rf /work/ci-cache/trivy
+          trivy image --exit-code 1 --ignore-unfixed --pkg-types os,library \
+            --severity CRITICAL,HIGH --format table \
+            "${IMAGE_PREFIX}-${{ matrix.service }}:${{ github.sha }}"
+
+  # ── Move :latest onto the verified image ─────────────────────────────────────
+  # deploy/k8s/base/*/deployment.yaml reference `:latest`, so this tag is a real
+  # deploy input for a fresh cluster's first sync — it gets the same gate as
+  # bump-overlay, Trivy included. imagetools re-points the existing manifest
+  # list; it does not rebuild or re-upload any layer.
+  retag-latest:
+    needs: [backend, frontend, manifests, publish, trivy]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, fleet-service, media-service, notification-service, web]
+    steps:
+      # imagetools needs a buildx builder and runner pods have no Docker
+      # daemon, so the default `docker` driver has nothing to talk to. The
+      # remote driver is the same one ci/actions/buildx-build@v1 sets up.
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          driver: remote
+          endpoint: tcp://buildkitd.buildkit.svc.cluster.local:1234
+          driver-opts: |
+            cacert=/etc/buildkit-client/ca.pem
+            cert=/etc/buildkit-client/cert.pem
+            key=/etc/buildkit-client/key.pem
+            servername=buildkitd.buildkit.svc.cluster.local
+
+      - name: Log in to the registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: registry.tumidanski
+          username: ci
+          password: ${{ secrets.ZOT_CI_PASSWORD }}
+
+      - name: Point :latest at ${{ github.sha }}
+        run: |
+          docker buildx imagetools create \
+            --tag "${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest" \
+            "${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}"
+
+  # ── Version tagging ───────────────────────────────────────────────────────────
+  tag:
+    needs: [backend, frontend, manifests, publish]
+    runs-on: ubuntu-latest
+    # Forgejo 15.0.9 ignores `concurrency:` (measured 2026-09-20, k3s Phase 5
+    # spec). Two overlapping runs may compute the same next version; the
+    # loser's push is rejected as already-existing, which is loud and harmless.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          # The remote actions/checkout configures is what `git push` below
+          # uses; the job token cannot write refs.
+          token: ${{ secrets.FORGE_PUSH_TOKEN }}
+
+      - name: Compute next semver tag
+        id: semver
+        run: |
+          # Find latest tag of the form vMAJOR.MINOR.PATCH; default to v0.0.0
+          latest=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n1)
+          latest=${latest:-v0.0.0}
+          IFS='.' read -r major minor patch <<< "${latest#v}"
+          patch=$((patch + 1))
+          echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+
+      - name: Push version tag
+        env:
+          TAG: ${{ steps.semver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Stale-run guard. The original's was the "workflow-file flavour":
+          # GitHub refuses a ref push from a GITHUB_TOKEN whose
+          # .github/workflows content differs from the default branch's, so a
+          # superseded run's tag push was rejected outright. That has no
+          # analogue here — FORGE_PUSH_TOKEN is an ordinary user token and the
+          # forge applies no such rule — so the whole paragraph is gone.
+          #
+          # What remains is the plain supersession check: if main has already
+          # moved past the commit this run built, that newer commit's own run
+          # will tag an equivalent tree, and tagging this (older) SHA would
+          # leave the newest version pointing at stale bits.
+          git fetch --quiet origin main
+          tip="$(git rev-parse origin/main)"
+          if [ "$tip" != "${{ github.sha }}" ]; then
+            echo "main's tip is now $tip, not this run's ${{ github.sha }} — a newer push already landed and will tag itself. Skipping."
+            exit 0
+          fi
+
+          git config user.name  "forge-bot"
+          git config user.email "forge-bot@git.tumidanski"
+          git tag "${TAG}"
+          git push origin "refs/tags/${TAG}"
+
+  # ── Bump the deployed image SHAs ──────────────────────────────────────────────
+  bump-overlay:
+    needs: [backend, frontend, manifests, publish, trivy]
+    runs-on: ubuntu-latest
+    # Forgejo 15.0.9 ignores `concurrency:` (measured 2026-09-20, k3s Phase 5
+    # spec), so the original's `group: bump-overlay` queue does not exist here
+    # and the block is deleted rather than left as decoration. Two overlapping
+    # runs are handled by the two guards in the step below instead: the
+    # convergence check makes a redundant bump a no-op, and the stale-run check
+    # makes the older run's push a no-op. The loser's push is rejected as
+    # non-fast-forward at worst, which is loud and harmless.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # MUST be `ref: main`. The default checkout for a push event leaves a
+          # detached HEAD, and `git push` from one fails outright.
+          ref: main
+          token: ${{ secrets.FORGE_PUSH_TOKEN }}
+
+      - name: Pin overlay images to this commit
+        run: |
+          set -euo pipefail
+          f=deploy/k8s/overlays/main/kustomization.yaml
+
+          # Convergence guard (primary). On Forgejo a bot push DOES re-trigger
+          # this workflow (no GITHUB_TOKEN exemption exists), so the trigger
+          # guards below are secondary. If the overlay already pins this SHA,
+          # there is nothing to do and no commit to make.
+          if [ "$(grep -c "    newTag: ${{ github.sha }}" "$f")" -eq 5 ]; then
+            echo "overlay already pinned to ${{ github.sha }} — converged"
+            exit 0
+          fi
+
+          # Stale-run guard: main may have moved past the commit this run built
+          # if a later merge's bump-overlay already landed while this run was
+          # still going through the gate/publish/trivy. Rewriting to this run's
+          # (older) SHA would roll the overlay backwards while every step still
+          # stays green, so bail out loudly instead of pinning stale bits.
+          tip="$(git rev-parse HEAD)"
+          if [ "$tip" != "${{ github.sha }}" ]; then
+            echo "main's tip is now $tip, not this run's ${{ github.sha }} — a newer push already landed (or will bump the overlay itself). Skipping to avoid rewriting the overlay to a stale SHA."
+            exit 0
+          fi
+
+          # Rewrite every `newTag:` in the images block to this commit's SHA.
+          # Argo CD then sees a real manifest diff and rolls the Deployments.
+          sed -i -E "s/^(    newTag: ).*$/\1${{ github.sha }}/" "$f"
+          # `if` guards the check so a clean diff does not trip `set -e`.
+          if git diff --quiet "$f"; then
+            echo "already pinned to this SHA — nothing to bump"
+            exit 0
+          fi
+          # Fail loudly if the rewrite missed an image rather than deploying a
+          # partially-pinned overlay.
+          test "$(grep -c "    newTag: ${{ github.sha }}" "$f")" -eq 5
+
+          git config user.name  "forge-bot"
+          git config user.email "forge-bot@git.tumidanski"
+          git add "$f"
+          # [skip ci] is guard 2 of 2 against retriggering this workflow;
+          # paths-ignore on the push trigger is guard 1. The convergence check
+          # at the top of this step is what makes the loop terminate even if
+          # both are bypassed.
+          git commit -m "chore(deploy): pin main overlay to ${{ github.sha }} [skip ci]"
+          git push origin main

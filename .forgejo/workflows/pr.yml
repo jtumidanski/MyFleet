@@ -1,0 +1,303 @@
+name: pr
+
+# Forge port of .github/workflows/pr.yml (Phase 5, task B3). Forgejo prefers
+# .forgejo/workflows and ignores .github/workflows entirely when it is present,
+# so the frozen GitHub file carries no risk of double-running.
+#
+# Departures from the original, all forced by the platform:
+#
+#   1. `docker build` is gone. The Forgejo runners are host mode -- the pod IS
+#      the job environment and there is no Docker daemon in it -- so the
+#      container job builds through ci/actions/buildx-build@v1, which drives a
+#      remote BuildKit worker and, with push=false, writes
+#      `--output type=cacheonly`. There is no local image store to load into,
+#      and a PR build never wanted the image anyway.
+#   2. The `Install kustomize` and `Install PyYAML` steps are gone. Both are
+#      baked into the runner image (kustomize 5.8.1, python3-yaml); the
+#      original piped an unpinned installer from raw.githubusercontent into
+#      bash and sudo-moved the result into /usr/local/bin, which on a host-mode
+#      runner mutates the shared image for every later job.
+#   3. gitleaks/gitleaks-action is replaced by the pinned gitleaks binary. The
+#      action calls the GitHub API to post PR comments and expects an
+#      organisation licence.
+#   4. Toolchain caches move to fixed absolute paths under /work/ci-cache; see
+#      the block below.
+
+on:
+  pull_request:
+    branches: [main]
+    # Skip the machine-written image pin. bump-overlay in main.yml commits the
+    # new SHA to this path and pushes it straight to main; wherever that commit
+    # surfaces there is nothing in it left to validate, because the images the
+    # pin names were already built and Trivy-scanned by the run that produced
+    # it.
+    paths-ignore:
+      - 'deploy/k8s/overlays/main/**'
+
+permissions:
+  contents: read
+
+# Every job below that uses a toolchain cache pins it to fixed absolute paths
+# under /work/ci-cache, set at JOB level, and clears them as its first step
+# after checkout. Two rules, both load-bearing on the host executor:
+#
+#   1. Fixed absolute paths, not ${{ github.workspace }}/...: the host executor
+#      gives every job a unique workspace directory, and the cache entry's
+#      version is derived from the cached paths, so a workspace-relative cache
+#      can never be restored from the Forgejo cache server. Set at job level,
+#      never workflow level -- at workflow level ${{ github.workspace }}
+#      expands to the empty string.
+#
+#   2. Host-mode runners share /work (a per-pod emptyDir) between jobs, so a
+#      module cache left behind by a previous job would silently warm this one.
+#      Clear it first: the Forgejo cache server is then the only warm path, and
+#      the directory stays bounded to a single build's worth of data. Safe
+#      because runner capacity is 1, so no two jobs share /work concurrently.
+#
+# setup-go's own `cache:` is off (`cache: false`) and setup-node is given no
+# `cache:` at all; restoring is an explicit actions/cache step instead. That is
+# deliberate and not interchangeable: this forge lower-cases the key on restore,
+# setup-go/setup-node compare the returned key to their primary key with `===`,
+# conclude they missed, and re-upload the whole cache in their post step on
+# every job -- and nothing here supersedes a key, so each save retains a new
+# blob on the cache PVC. actions/cache compares case-insensitively and skips
+# the save on a hit. The keys below are all-lowercase for the same reason, so
+# `runner.os` (which renders `Linux`) is not used in them.
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      GOMODCACHE: /work/ci-cache/go/mod
+      GOCACHE: /work/ci-cache/go/build
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
+        with:
+          go-version: '1.27'
+          cache: false          # see main.yml's backend job for why
+
+      # Same key prefix as main.yml's backend job, deliberately: a PR run should
+      # restore the cache main last built for identical work.
+      - name: Cache Go build and module caches
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: /work/ci-cache/go
+          key: go-build-linux-x64-${{ steps.go.outputs.go-version }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-build-linux-x64-${{ steps.go.outputs.go-version }}-
+
+      - name: Vet
+        run: make vet
+
+      - name: Build
+        run: make build
+
+      - name: Test
+        run: make test
+
+  # tools/lint.sh --check is the single source of truth for both formatting
+  # (gofumpt + goimports) and linting (golangci-lint `standard` group). These
+  # jobs mirror what developers run locally; both are enforced tree-wide
+  # against a zero-finding baseline. gofmt is subsumed by the formatter layer.
+  lint-go:
+    runs-on: ubuntu-latest
+    env:
+      GOMODCACHE: /work/ci-cache/go/mod
+      GOCACHE: /work/ci-cache/go/build
+      # golangci-lint's own cache defaults to $HOME/.cache/golangci-lint, and
+      # $HOME persists between jobs on a host-mode runner -- that would make a
+      # job's result depend on which of the three runners it landed on.
+      GOLANGCI_LINT_CACHE: /work/ci-cache/golangci-lint
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        id: go
+        with:
+          go-version: '1.27'
+          cache: false          # see main.yml's backend job for why
+
+      # golangci-lint type-checks every package, so it wants a Go build cache
+      # too — but its own, under a distinct prefix. Sharing one with the test
+      # jobs means whichever finishes first decides whether the cache holds
+      # -race objects or lint objects.
+      - name: Cache Go build and module caches
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            /work/ci-cache/go
+            /work/ci-cache/golangci-lint
+          key: go-lint-linux-x64-${{ steps.go.outputs.go-version }}-${{ hashFiles('**/go.sum', 'go.work.sum') }}
+          restore-keys: |
+            go-lint-linux-x64-${{ steps.go.outputs.go-version }}-
+
+      # The original's "Cache lint tooling" step is dropped, not ported. It
+      # cached $ROOT/.cache/tools/bin -- tools/lint.sh hard-codes TOOLS_BIN
+      # there and offers no override -- which is workspace-relative, and a
+      # workspace-relative cache entry on this executor can be saved but never
+      # restored (the entry's version is derived from the path, and every job
+      # gets a fresh workspace directory). Keeping it would have reported a
+      # save on every run and restored nothing, forever. lint.sh fetches the
+      # pinned prebuilt golangci-lint instead, which is a single ~20 MB
+      # download.
+      - name: Lint & format guard (Go)
+        run: ./tools/lint.sh --check --go
+
+  lint-web:
+    runs-on: ubuntu-latest
+    env:
+      npm_config_cache: /work/ci-cache/npm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Cache npm cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: /work/ci-cache/npm
+          key: npm-linux-x64-24-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint & format guard (web)
+        run: ./tools/lint.sh --check --web
+
+  frontend:
+    runs-on: ubuntu-latest
+    env:
+      npm_config_cache: /work/ci-cache/npm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Cache npm cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: /work/ci-cache/npm
+          key: npm-linux-x64-24-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `make fe-test`, not `npm run -w @myfleet/web test`. The Makefile target
+      # covers every JS workspace that has tests — apps/web plus
+      # packages/shared-ts and packages/ui-components. shared-ts owns
+      # fetchAuthenticated, the single 401-refresh path every SPA call goes
+      # through; running only the web workspace here left it ungated on PRs,
+      # which is the gap the Makefile comment says it closed.
+      - name: Test
+        run: make fe-test
+
+      - name: Build
+        run: make fe-build
+
+  # No toolchain cache here and so no /work/ci-cache reset: the build runs
+  # entirely inside BuildKit, whose layer cache lives in zot (the
+  # registry.tumidanski/ci/buildcache:myfleet-* tags), not on the cache server.
+  containers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, fleet-service, media-service, notification-service]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select an amd64 BuildKit replica
+        id: amd64
+        uses: ci/actions/select-amd64-builder@v1
+        with:
+          index: 0
+
+      # push=false, so no registry credential and nothing is written: the
+      # action emits `--output type=cacheonly`. This is a compile check.
+      - name: Build ${{ matrix.service }} image
+        uses: ci/actions/buildx-build@v1
+        with:
+          context: .
+          dockerfile: apps/${{ matrix.service }}/Dockerfile
+          image: registry.tumidanski/jtumidanski/myfleet-${{ matrix.service }}
+          tags: pr-${{ github.event.pull_request.number }}
+          platform: linux/amd64
+          buildkit-endpoint: ${{ steps.amd64.outputs.endpoint }}
+          push: 'false'
+          cache-scope: myfleet-${{ matrix.service }}-amd64
+
+  # deploy/k8s has no test suite, so this renders both overlays and asserts the
+  # invariants the runbook states in prose. Chiefly: the :80 and :443
+  # IngressRoutes must carry identical route sets. They are two objects because
+  # a Traefik IngressRoute with a `tls` section is TLS-only, and the route set
+  # contains the internal-deny rule guarding fleet-service's unauthenticated
+  # /internal/* endpoints — so drift between them is a security hole.
+  #
+  # kustomize and PyYAML come from the runner image; the original's two install
+  # steps are gone.
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - name: Report the toolchain
+        run: kustomize version && python3 -c 'import yaml; print("pyyaml", yaml.__version__)'
+
+      - name: Check manifests
+        run: make manifests
+
+      # Lives here rather than in its own job: it needs only bash and PyYAML,
+      # both already present, and one of the three files it compares is
+      # deploy/k8s/base/web/configmap.yaml. Before this it ran in no workflow at
+      # all — `make ci` was its only caller, so drift between the TS default,
+      # the served config.json and the ConfigMap would have reached a cluster.
+      - name: Check Carfax URL template
+        run: make carfax-template
+
+  # gitleaks/gitleaks-action is not used here: it calls the GitHub API to post
+  # PR comments and expects an organisation licence. The binary does the scan.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Reset toolchain caches
+        run: rm -rf /work/ci-cache
+
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.0
+        run: |
+          set -euo pipefail
+          cd /tmp
+          curl -fsSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          tar -xzf gitleaks.tar.gz gitleaks
+          install -m 755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan
+        run: gitleaks detect --source . --redact --verbose --exit-code 1
