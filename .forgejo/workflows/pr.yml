@@ -230,8 +230,22 @@ jobs:
         with:
           index: 0
 
-      # push=false, so no registry credential and nothing is written: the
-      # action emits `--output type=cacheonly`. This is a compile check.
+      # buildx-build only logs in when push=true, but its `cache-to` is
+      # unconditional: every build writes a registry cache to
+      # registry.tumidanski/ci/buildcache, and zot rejects an anonymous write
+      # ("error writing layer blob: unauthorized: authentication required" —
+      # observed on run 1, tasks 846-849, which failed for exactly this and
+      # nothing else). So log in here even though nothing is pushed. The image
+      # itself is still discarded: the step below emits
+      # `--output type=cacheonly`, because a host-mode runner has no local
+      # image store to load into and a PR build is only a compile check.
+      - name: Log in to the registry (for the buildx registry cache)
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: registry.tumidanski
+          username: ci
+          password: ${{ secrets.ZOT_CI_PASSWORD }}
+
       - name: Build ${{ matrix.service }} image
         uses: ci/actions/buildx-build@v1
         with:
