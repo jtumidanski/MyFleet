@@ -34,9 +34,6 @@ on:
     paths-ignore:
       - 'deploy/k8s/overlays/main/**'
 
-permissions:
-  contents: read
-
 # Every job below that uses a toolchain cache pins it to fixed absolute paths
 # under /work/ci-cache, set at JOB level, and clears them as its first step
 # after checkout. Two rules, both load-bearing on the host executor:

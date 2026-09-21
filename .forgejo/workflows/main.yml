@@ -298,21 +298,19 @@ jobs:
           TAG: ${{ steps.semver.outputs.tag }}
         run: |
           set -euo pipefail
-          # Stale-run guard. The original's was the "workflow-file flavour":
-          # GitHub refuses a ref push from a GITHUB_TOKEN whose
-          # .github/workflows content differs from the default branch's, so a
-          # superseded run's tag push was rejected outright. That has no
-          # analogue here — FORGE_PUSH_TOKEN is an ordinary user token and the
-          # forge applies no such rule — so the whole paragraph is gone.
-          #
-          # What remains is the plain supersession check: if main has already
-          # moved past the commit this run built, that newer commit's own run
-          # will tag an equivalent tree, and tagging this (older) SHA would
-          # leave the newest version pointing at stale bits.
+          # Stale-run guard, ported faithfully from the original (which
+          # compared .github/workflows content, not SHAs) rather than the
+          # naive `tip != github.sha` check this port shipped with initially.
+          # main moves forward on every push -- a sibling merge, and on the
+          # forge also bump-overlay's own [skip ci] commit -- and none of that
+          # should suppress the tag. Only a newer commit that itself touches
+          # .forgejo/workflows/ means a newer run exists that will tag in this
+          # run's place; comparing SHAs directly skipped tagging in the common
+          # case (bump-overlay wins the race to move main on nearly every run)
+          # and produced a green, untagged release with no failure signal.
           git fetch --quiet origin main
-          tip="$(git rev-parse origin/main)"
-          if [ "$tip" != "${{ github.sha }}" ]; then
-            echo "main's tip is now $tip, not this run's ${{ github.sha }} — a newer push already landed and will tag itself. Skipping."
+          if ! git diff --quiet "${{ github.sha }}" origin/main -- .forgejo/workflows; then
+            echo "main's workflow files have moved past this run's ${{ github.sha }} — a workflow-touching commit landed while this run was in the gate. Skipping: that commit's own run will tag instead."
             exit 0
           fi
 
