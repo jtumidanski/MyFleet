@@ -18,7 +18,7 @@
     {
       "customType": "regex",
       "description": "actions/setup-go's go-version input is a plain YAML value the github-actions manager does not extract.",
-      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "managerFilePatterns": ["/^\\.forgejo/workflows/[^/]+\\.ya?ml$/"],
       "matchStrings": ["go-version:\\s*['\"](?<currentValue>[0-9.]+)['\"]"],
       "datasourceTemplate": "golang-version",
       "depNameTemplate": "go",
