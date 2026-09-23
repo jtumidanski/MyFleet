@@ -15,6 +15,6 @@
     "format:check": "prettier --check \"apps/web/src/**/*.{ts,tsx,css}\" \"apps/web/*.{ts,js}\" \"packages/shared-ts/src/**/*.{ts,tsx}\" \"packages/ui-components/src/**/*.{ts,tsx}\""
   },
   "devDependencies": {
-    "prettier": "3.9.6"
+    "prettier": "3.9.7"
   }
 }
