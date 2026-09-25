@@ -54,7 +54,9 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # pgsty/minio: the community fork of MinIO. Upstream minio/minio images
+    # are no longer pullable (401 on docker.io and quay.io).
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
