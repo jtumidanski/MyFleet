@@ -180,7 +180,7 @@ jobs:
 
       - name: Select an amd64 BuildKit replica
         id: amd64
-        uses: ci/actions/select-amd64-builder@v1
+        uses: https://git.tumidanski/ci/actions/select-amd64-builder@v1
         with:
           index: 0
 
@@ -192,7 +192,7 @@ jobs:
         run: echo "nonce=$(date -u +%F)" >> "$GITHUB_OUTPUT"
 
       - name: Build and push ${{ matrix.service }}
-        uses: ci/actions/buildx-build@v1
+        uses: https://git.tumidanski/ci/actions/buildx-build@v1
         with:
           context: .
           dockerfile: apps/${{ matrix.service }}/Dockerfile
