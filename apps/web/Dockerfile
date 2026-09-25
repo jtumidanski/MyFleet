@@ -30,8 +30,11 @@ FROM nginxinc/nginx-unprivileged:alpine
 # Same apk lag as the Go services' alpine base: the tag ships openssl 3.5.7-r0
 # while the CVE-2026-14456 fix (3.5.8-r0) is already in v3.24/main. This image
 # defaults to USER 101, so drop to root for the upgrade and go straight back —
-# the runtime user is unchanged.
+# the runtime user is unchanged. APK_UPGRADE_NONCE is the same per-run cache
+# bust main.yml's publish job passes to the Go services: without it the registry
+# layer cache replays a stale upgrade layer and the upgrade silently does nothing.
 USER root
+ARG APK_UPGRADE_NONCE
 RUN apk upgrade --no-cache
 USER 101
 COPY apps/web/nginx.conf /etc/nginx/conf.d/default.conf

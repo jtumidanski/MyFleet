@@ -33,6 +33,10 @@ FROM alpine:3.24
 # so it lags patched packages: 3.24.1 still ships openssl 3.5.7-r0 while the
 # CVE-2026-14456 fix (3.5.8-r0) is already in v3.24/main, which failed the
 # Trivy gate on main for every service. Upgrading closes that window here.
+# main.yml's publish job passes a fresh APK_UPGRADE_NONCE per run: without it
+# the registry layer cache replays an upgrade layer built against an APKINDEX
+# from before the fix, and the upgrade silently does nothing.
+ARG APK_UPGRADE_NONCE
 RUN apk upgrade --no-cache
 RUN adduser -D -u 10001 app
 USER app

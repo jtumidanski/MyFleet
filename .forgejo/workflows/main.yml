@@ -192,6 +192,11 @@ jobs:
           image: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
           # SHA tag only. `retag-latest` moves `:latest` once the gate passes.
           tags: ${{ github.sha }}
+          # Re-runs each runtime stage's `apk upgrade` instead of replaying the
+          # cached layer, so a package fixed since the base tag was cut lands in
+          # the image Trivy scans. The build stages stay cached.
+          build-args: |
+            APK_UPGRADE_NONCE=${{ github.run_id }}
           platform: linux/amd64
           buildkit-endpoint: ${{ steps.amd64.outputs.endpoint }}
           push: 'true'
