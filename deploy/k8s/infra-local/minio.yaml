@@ -46,7 +46,9 @@ spec:
     spec:
       containers:
         - name: minio
-          image: minio/minio:latest
+          # pgsty/minio: the community fork of MinIO. Upstream minio/minio
+          # images are no longer pullable (401 on docker.io and quay.io).
+          image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
           args: ["server", "/data", "--console-address", ":9001"]
           ports:
             - containerPort: 9000
