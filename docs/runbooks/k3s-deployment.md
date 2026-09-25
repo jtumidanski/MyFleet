@@ -20,7 +20,7 @@ at `192.168.23.230` on three hostnames:
 Both `.me` and `.home` resolve to `192.168.23.230` directly; only the `.com`
 host goes through Cloudflare.
 
-Nothing stateful is deployed. Postgres, Kafka and MinIO are pre-existing shared
+Nothing stateful is deployed. Postgres, Kafka and RustFS are pre-existing shared
 cluster services.
 
 Argo CD syncs `deploy/k8s/overlays/main` from `main`. The steps below are the
@@ -65,58 +65,17 @@ kubectl -n postgres exec "$POD" -- psql -U postgres -d myfleet -c '\dn'
 
 Expected: the four schemas, all owned by `myfleet`.
 
-## 2. MinIO — bucket and a scoped user
+## 2. RustFS — bucket and a scoped user
 
-The credential must not be able to reach any `atlas-*` bucket, so it gets a
-policy scoped to `myfleet-media` alone rather than the root user.
+The `myfleet-media` bucket, the `myfleet` user and the `myfleet-media-rw`
+policy are created on the shared cluster RustFS by the k3s repo's runbook,
+`docs/runbooks/rustfs-cutover.md`, section "Bootstrap". The user's secret
+key is the `MINIO_SECRET_KEY` value in `media-service-secret`. To verify
+from a workstation:
 
-Write the policy:
-
-```sh
-cat > /tmp/myfleet-media-policy.json <<'JSON'
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": ["s3:*"],
-      "Resource": [
-        "arn:aws:s3:::myfleet-media",
-        "arn:aws:s3:::myfleet-media/*"
-      ]
-    }
-  ]
-}
-JSON
-```
-
-Then create the bucket and user:
-
-```sh
-kubectl -n minio port-forward svc/minio 9000:9000 &
-# Backgrounding port-forward and immediately using the tunnel races its
-# startup on a slow connection. Wait until it actually accepts connections.
-# Use curl, not `exec 3<>/dev/tcp/...`: /dev/tcp is a bash-only feature and
-# this project's shell is zsh, where the redirect always fails and the loop
-# spins forever instead of falling through.
-until curl -sf --max-time 2 http://localhost:9000/minio/health/live >/dev/null; do sleep 0.5; done
-mc alias set bee http://localhost:9000 <root-user> <root-pass>
-mc mb bee/myfleet-media
-mc admin user add bee myfleet <minio-secret>
-mc admin policy create bee myfleet-media-rw /tmp/myfleet-media-policy.json
-mc admin policy attach bee myfleet-media-rw --user myfleet
-```
-
-Verify the scoping — the first must succeed, the second must be denied:
-
-```sh
-mc alias set beemyfleet http://localhost:9000 myfleet <minio-secret>
-mc ls beemyfleet/myfleet-media
-mc ls beemyfleet/atlas-assets   # must fail with AccessDenied
-```
-
-Media bytes are proxied through media-service, so MinIO is never reachable from
-a browser and this credential never leaves the cluster.
+    kubectl -n rustfs port-forward svc/rustfs 9000:9000 &
+    mc alias set beemyfleet http://localhost:9000 myfleet <secret>
+    mc ls beemyfleet/myfleet-media
 
 ## 3. Kubernetes Secrets
 
