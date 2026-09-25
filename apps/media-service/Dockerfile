@@ -29,16 +29,18 @@ COPY apps/media-service ./apps/media-service
 RUN cd apps/media-service && go build -o /out/media-service ./cmd
 
 FROM alpine:3.24
+# Ahead of the nonce so a daily refresh does not re-create the user (adduser
+# stamps the day into /etc/shadow).
+RUN adduser -D -u 10001 app
 # The alpine:3.24 tag is rebuilt on Alpine's cadence, not the security feed's,
 # so it lags patched packages: 3.24.1 still ships openssl 3.5.7-r0 while the
 # CVE-2026-14456 fix (3.5.8-r0) is already in v3.24/main, which failed the
 # Trivy gate on main for every service. Upgrading closes that window here.
-# main.yml's publish job passes a fresh APK_UPGRADE_NONCE per run: without it
+# main.yml's publish job passes the UTC date as APK_UPGRADE_NONCE: without it
 # the registry layer cache replays an upgrade layer built against an APKINDEX
 # from before the fix, and the upgrade silently does nothing.
 ARG APK_UPGRADE_NONCE
 RUN apk upgrade --no-cache
-RUN adduser -D -u 10001 app
 USER app
 COPY --from=build /out/media-service /media-service
 EXPOSE 8080

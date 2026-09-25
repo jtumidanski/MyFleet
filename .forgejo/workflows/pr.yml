@@ -243,6 +243,13 @@ jobs:
           username: ci
           password: ${{ secrets.ZOT_CI_PASSWORD }}
 
+      # Same nonce as main.yml's publish job. Both write the one cache-scope tag,
+      # and each export replaces it: a PR build without the nonce would evict the
+      # day's `apk upgrade` layer, and the merge build would re-run it anyway.
+      - name: Compute the apk upgrade nonce
+        id: apk
+        run: echo "nonce=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
       - name: Build ${{ matrix.service }} image
         uses: ci/actions/buildx-build@v1
         with:
@@ -250,6 +257,8 @@ jobs:
           dockerfile: apps/${{ matrix.service }}/Dockerfile
           image: registry.tumidanski/jtumidanski/myfleet-${{ matrix.service }}
           tags: pr-${{ github.event.pull_request.number }}
+          build-args: |
+            APK_UPGRADE_NONCE=${{ steps.apk.outputs.nonce }}
           platform: linux/amd64
           buildkit-endpoint: ${{ steps.amd64.outputs.endpoint }}
           push: 'false'
