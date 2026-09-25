@@ -184,6 +184,13 @@ jobs:
         with:
           index: 0
 
+      # One refresh per UTC day: the first build of the day re-runs each
+      # runtime stage's `apk upgrade` against the current Alpine index; later
+      # builds that day hit the cache, so an unchanged service keeps its digest.
+      - name: Compute the apk upgrade nonce
+        id: apk
+        run: echo "nonce=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push ${{ matrix.service }}
         uses: ci/actions/buildx-build@v1
         with:
@@ -192,6 +199,10 @@ jobs:
           image: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
           # SHA tag only. `retag-latest` moves `:latest` once the gate passes.
           tags: ${{ github.sha }}
+          # Without it the registry cache replays an `apk upgrade` layer from
+          # before a fix landed, and Trivy scans the stale package.
+          build-args: |
+            APK_UPGRADE_NONCE=${{ steps.apk.outputs.nonce }}
           platform: linux/amd64
           buildkit-endpoint: ${{ steps.amd64.outputs.endpoint }}
           push: 'true'
