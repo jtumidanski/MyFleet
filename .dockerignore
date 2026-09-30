@@ -3,7 +3,7 @@
 #
 # The entry that matters is deploy/k8s/secrets.yaml: it is the filled-in,
 # gitignored copy of secrets.example.yaml and holds live production credentials
-# (Postgres password, MinIO secret key, JWT signing key, OIDC state secret, the
+# (Postgres password, object store secret key, JWT signing key, OIDC state secret, the
 # TLS private key). .gitignore keeps it out of git; this keeps it out of images.
 #
 # No current Dockerfile does `COPY . .` — they all copy go.work, packages/,

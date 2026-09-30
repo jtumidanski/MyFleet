@@ -5,7 +5,7 @@ namespace: myfleet
 
 # The bee cluster overlay. Argo CD syncs this path (see argocd-myfleet.yml in
 # the k3s/bee repo). It references base/ only — never infra-local/ — because
-# Postgres, Kafka and MinIO are pre-existing shared cluster services and the
+# Postgres, Kafka and the object store (RustFS) are pre-existing shared cluster services and the
 # dev Traefik would fight bee's cluster Traefik over every IngressRoute.
 #
 # No Secrets here: they are applied out-of-band so Argo CD's prune cannot

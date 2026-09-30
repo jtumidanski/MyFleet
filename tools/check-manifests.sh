@@ -31,7 +31,7 @@ for overlay in main local; do
 done
 
 echo "==> main overlay must ship no cluster-scoped or stateful resources"
-# The main overlay targets a SHARED cluster. Postgres/Kafka/MinIO are
+# The main overlay targets a SHARED cluster. Postgres/Kafka/the object store (RustFS) are
 # pre-existing there, Secrets are applied out-of-band so Argo CD's prune cannot
 # remove them, and MyFleet has no business holding a ClusterRole.
 for kind in PersistentVolumeClaim Secret ClusterRole ClusterRoleBinding; do
