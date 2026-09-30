@@ -5,3 +5,8 @@ metadata:
 data:
   KAFKA_BROKERS: "kafka.home:9093"
   S3_ENDPOINT: "rustfs.rustfs.svc.cluster.local:9000"
+  # Bridge for one release (2026-09-30): the image currently pinned in this
+  # overlay predates the S3_* names and requires MINIO_ENDPOINT at start. Keep
+  # both until the overlay's newTag carries the S3_*-aware media-service, then
+  # drop this line together with the MINIO_* fallback in cmd/main.go.
+  MINIO_ENDPOINT: "rustfs.rustfs.svc.cluster.local:9000"
