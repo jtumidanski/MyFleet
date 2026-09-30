@@ -115,7 +115,7 @@ async putContent(id: string, file: File): Promise<JsonApiResource<MediaObjectAtt
 }
 ```
 
-Bytes are proxied through media-service rather than presigned to MinIO directly, because MinIO is a shared cluster service that is never reachable from the browser (`MediaService.ts:20-21`). Going through `apiClient` is what applies the bearer token and the 401 refresh to the upload.
+Bytes are proxied through media-service rather than presigned to the object store directly, because the object store is a shared cluster service that is never reachable from the browser (`MediaService.ts:20-21`). Going through `apiClient` is what applies the bearer token and the 401 refresh to the upload.
 
 ## Error handling
 

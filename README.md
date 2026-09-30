@@ -47,14 +47,14 @@ reverse proxy. Traefik routes by path prefix; the SPA is the catch-all at `/`.
                     │ /*                   → web (nginx + SPA)     :80
                     └─────────────────────────────────┘
                               │
-              PostgreSQL  ·  MinIO  ·  Kafka/Redpanda
+              PostgreSQL  ·  S3 object store  ·  Kafka/Redpanda
 ```
 
 | Component | Path | Responsibility |
 |---|---|---|
 | `auth-service` | `apps/auth-service` | Google OIDC verification, user auto-provisioning, first-party RS256 JWT mint + refresh, JWKS endpoint, `/auth/me`. |
 | `fleet-service` | `apps/fleet-service` | All core domain: fleets, membership, invites, vehicles, mileage, maintenance records + schedules, fuel, activity, status, dashboards. Produces domain events. |
-| `media-service` | `apps/media-service` | MinIO-backed uploads, object metadata, presigned downloads, async thumbnail/display variant generation. |
+| `media-service` | `apps/media-service` | Uploads to an S3 object store (RustFS in the cluster, MinIO locally) via `S3_ENDPOINT`/`S3_ACCESS_KEY`/`S3_SECRET_KEY`, object metadata, presigned downloads, async thumbnail/display variant generation. |
 | `notification-service` | `apps/notification-service` | Event consumers, in-app notification inbox, per-type preferences, scheduled reminder jobs. |
 | `web` | `apps/web` | React 18 + TypeScript SPA (Vite, React Router, TanStack Query, react-hook-form + Zod, Tailwind, shadcn-style components). |
 | `shared-go` | `packages/shared-go` | Server bootstrap, JSON:API helpers, pagination, JWT middleware + JWKS client, config, database, health/metrics, telemetry, background jobs. |
