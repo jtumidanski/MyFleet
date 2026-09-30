@@ -44,7 +44,7 @@ func CountByOperation(db *gorm.DB, opID string) (map[string]int, error) {
 // operation now carries.
 //
 // It never writes purge_after. media-service runs its OWN 24-hour sweep keyed on
-// that column, which hard-deletes rows and their MinIO objects; leaving it NULL
+// that column, which hard-deletes rows and their object store objects; leaving it NULL
 // is what keeps an admin-stamped, still-cancellable object out of that sweep's
 // reach (design F3).
 //
@@ -134,7 +134,7 @@ type ObjectKey struct {
 	Key           string
 }
 
-// ReapableObjectKeys returns every MinIO key belonging to opID — the media
+// ReapableObjectKeys returns every object store key belonging to opID — the media
 // objects' own keys and their variants' — grouped by owning media object.
 //
 // It must be called BEFORE Reap: the rows are the only record of which objects

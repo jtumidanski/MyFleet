@@ -40,7 +40,7 @@ type Client struct {
 // clientTimeout bounds ValidateOwnership. This call happens synchronously on
 // a user-facing request path (POST /vehicles/{id}/maintenance-records), so it
 // cannot inherit http.DefaultClient's no-timeout behavior: a stalled
-// connection (GC pause, MinIO backpressure, a half-open socket after a node
+// connection (GC pause, object store backpressure, a half-open socket after a node
 // reschedule) would otherwise hang the handler goroutine indefinitely,
 // because the request context only cancels if the browser disconnects.
 const clientTimeout = 5 * time.Second

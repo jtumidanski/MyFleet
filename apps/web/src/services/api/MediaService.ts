@@ -10,14 +10,14 @@ import type {
  * Media service — wraps the media-service endpoints (gateway prefix /api/media).
  * Backend routes (apps/media-service/internal/mediaobject/resource.go):
  *   POST   /api/media               — init upload: creates the row (uploaded)
- *   PUT    /api/media/{id}/content  — upload the raw bytes (proxied to MinIO)
+ *   PUT    /api/media/{id}/content  — upload the raw bytes (proxied to object storage)
  *   POST   /api/media/{id}/confirm  — mark uploaded→processing
  *   GET    /api/media/{id}          — get metadata
- *   GET    /api/media/{id}/content  — stream the bytes (proxied from MinIO);
+ *   GET    /api/media/{id}/content  — stream the bytes (proxied from object storage);
  *                                     optional ?variant=thumbnail|card|display
  *   DELETE /api/media/{id}          — soft delete
  *
- * Bytes are proxied through media-service, not presigned: MinIO is a shared
+ * Bytes are proxied through media-service, not presigned: object storage is a shared
  * cluster service and is never reachable from the browser.
  */
 class MediaService {

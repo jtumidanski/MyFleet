@@ -84,7 +84,7 @@ export interface UploadDeps {
 /**
  * Orchestrates the three-step upload sequence:
  *  1. Init — creates the media row in the uploaded state.
- *  2. PUT the bytes to /api/media/{id}/content (proxied to MinIO by the service).
+ *  2. PUT the bytes to /api/media/{id}/content (proxied to object storage by the service).
  *  3. Confirm — transitions the row from uploaded → processing.
  *
  * Documents come back `ready` from confirm; images come back `processing` and

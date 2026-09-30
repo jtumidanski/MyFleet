@@ -1,9 +1,10 @@
-// Package storage wraps the MinIO client used by media-service. Buckets are
+// Package storage wraps the S3 client (minio-go) used by media-service
+// against the cluster object store (RustFS) or a local MinIO. Buckets are
 // always private; bytes are exchanged with clients exclusively by proxying
-// through media-service, never by presigned URL — MinIO is a shared cluster
-// service and is not exposed outside the cluster. Object keys are namespaced
-// by fleet so a single bucket can hold every fleet's media without
-// collisions.
+// through media-service, never by presigned URL — the object store is a
+// shared cluster service and is not exposed outside the cluster. Object keys
+// are namespaced by fleet so a single bucket can hold every fleet's media
+// without collisions.
 package storage
 
 import (
@@ -97,7 +98,7 @@ type Client struct {
 	bucket string
 }
 
-// Config holds the connection settings for the MinIO client.
+// Config holds the connection settings for the object store client.
 type Config struct {
 	Endpoint  string // host:port, no scheme
 	AccessKey string
@@ -109,7 +110,8 @@ type Config struct {
 // New constructs the wrapped client and ensures the bucket exists (private).
 // It never sets any public-read policy; bytes are exchanged with clients
 // exclusively by proxying through media-service, never by presigned URL —
-// MinIO is a shared cluster service and is not exposed outside the cluster.
+// the object store is a shared cluster service and is not exposed outside
+// the cluster.
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	mc, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
@@ -151,8 +153,8 @@ func (c *Client) PutObject(ctx context.Context, key string, r io.Reader, size in
 
 // putOptions builds the options every upload uses. Split out from PutObject so
 // the PartSize that bounds minio-go's buffer is assertable without a live
-// MinIO — it is the one thing about the allocation that is observable in a
-// unit test.
+// object store — it is the one thing about the allocation that is observable
+// in a unit test.
 func putOptions(contentType string) minio.PutObjectOptions {
 	return minio.PutObjectOptions{
 		ContentType: contentType,

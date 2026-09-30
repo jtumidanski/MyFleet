@@ -144,7 +144,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, st ObjectStore, varia
 		})
 
 		// GET /media/{id}/content — stream the bytes after authz. Proxied, not
-		// presigned: MinIO is a shared cluster service and is never exposed
+		// presigned: the object store is a shared cluster service and is never exposed
 		// outside the cluster.
 		//
 		// The optional ?variant= parameter selects a stored rendition

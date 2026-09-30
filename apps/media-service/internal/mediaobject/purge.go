@@ -18,7 +18,7 @@ func IsPurgeable(purgeAfter *time.Time) bool {
 }
 
 // ListPurgeable returns soft-deleted objects whose purge window has elapsed.
-// The purge job uses these to remove both the rows and the MinIO objects.
+// The purge job uses these to remove both the rows and the object store objects.
 //
 // purge_operation_id IS NULL keeps this sweep off rows an admin purge stamped.
 // An admin stamp never writes purge_after, so such rows could not match anyway

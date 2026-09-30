@@ -30,7 +30,7 @@ func newPurgeDB(t *testing.T) *gorm.DB {
 
 // FR-ADMIN-RESTORE-7 / design F3. An admin-stamped object belongs to a
 // cancellable operation whose lifecycle the admin reaper owns; the legacy sweep
-// must not hard-delete it — and, worse, must not remove its MinIO object, which
+// must not hard-delete it — and, worse, must not remove its object store object, which
 // no restore could bring back.
 func TestListPurgeable_skipsAdminStampedObjects(t *testing.T) {
 	db := newPurgeDB(t)

@@ -46,7 +46,7 @@ func (c *MediaClient) Restore(ctx context.Context, opID string) (map[string]int,
 }
 
 // Reap hard-deletes media-service's rows for the operation and removes the
-// backing MinIO objects.
+// backing object store objects.
 func (c *MediaClient) Reap(ctx context.Context, opID string) (map[string]int, error) {
 	var body affectedResponse
 	if err := c.t.expectOK(ctx, http.MethodPost,

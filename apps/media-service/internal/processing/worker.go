@@ -260,7 +260,7 @@ func decodeOriginal(ctx context.Context, store ObjectStore, key string) (image.I
 }
 
 // buildVariant scales img to the variant's max edge (never upscaling), encodes
-// it, uploads it to MinIO under a variant-suffixed key, and returns the variant
+// it, uploads it to the object store under a variant-suffixed key, and returns the variant
 // model. The key's discriminator is the variant name, so thumbnail, card and
 // display cannot collide.
 func buildVariant(ctx context.Context, store ObjectStore, s Source, img image.Image, kind mediavariant.Variant, maxEdge int) (mediavariant.Model, error) {
