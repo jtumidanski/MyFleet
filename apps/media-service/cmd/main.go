@@ -46,16 +46,28 @@ func main() {
 		log.WithError(err).Fatal("db connect")
 	}
 
-	// MinIO client (private bucket, auto-created on startup).
+	// Object store client (private bucket, auto-created on startup).
+	endpoint, err := mustEnvFirst("S3_ENDPOINT", "MINIO_ENDPOINT")
+	if err != nil {
+		log.WithError(err).Fatal("object store config")
+	}
+	accessKey, err := mustEnvFirst("S3_ACCESS_KEY", "MINIO_ACCESS_KEY")
+	if err != nil {
+		log.WithError(err).Fatal("object store config")
+	}
+	secretKey, err := mustEnvFirst("S3_SECRET_KEY", "MINIO_SECRET_KEY")
+	if err != nil {
+		log.WithError(err).Fatal("object store config")
+	}
 	store, err := storage.New(ctx, storage.Config{
-		Endpoint:  config.MustGet("MINIO_ENDPOINT"),
-		AccessKey: config.MustGet("MINIO_ACCESS_KEY"),
-		SecretKey: config.MustGet("MINIO_SECRET_KEY"),
-		UseSSL:    config.Get("MINIO_USE_SSL", "false") == "true",
+		Endpoint:  endpoint,
+		AccessKey: accessKey,
+		SecretKey: secretKey,
+		UseSSL:    envFirst("false", "S3_USE_SSL", "MINIO_USE_SSL") == "true",
 		Bucket:    config.MustGet("MEDIA_BUCKET"),
 	})
 	if err != nil {
-		log.WithError(err).Fatal("minio connect")
+		log.WithError(err).Fatal("object store connect")
 	}
 
 	// Kafka producer for the outbox relay (design A8). The relay loop reads
@@ -121,7 +133,7 @@ func main() {
 	}
 
 	// Media purge: hard-delete soft-deleted objects past purge_after, removing
-	// both the rows and the MinIO objects. Under advisory lock so only one
+	// both the rows and the object store objects. Under advisory lock so only one
 	// replica runs per tick (design §10.6 / A9). Hourly, not daily: jobs.Every's
 	// first tick is at T+interval, so a 24-hour sweep in a service that
 	// redeploys more often than daily never runs (design OQ-5).

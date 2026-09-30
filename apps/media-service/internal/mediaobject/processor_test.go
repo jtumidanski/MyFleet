@@ -306,7 +306,7 @@ func TestConfirm_outboxRollsBackOnEnqueueError(t *testing.T) {
 }
 
 // fakeStore records what was written so the proxy path can be asserted without
-// a live MinIO.
+// a live object store.
 type fakeStore struct {
 	bucket   string
 	putCalls int
@@ -442,7 +442,7 @@ func TestStoreContent_crossFleetIs404(t *testing.T) {
 // (still zero, not partially/incorrectly updated).
 func TestStoreContent_storeFailurePropagatesAndLeavesSizeUntouched(t *testing.T) {
 	db := newConfirmTestDB(t)
-	injectErr := errors.New("simulated minio put failure")
+	injectErr := errors.New("simulated object store put failure")
 	store := &fakeStore{bucket: "myfleet-media", putErr: injectErr}
 	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
@@ -582,10 +582,10 @@ func TestContent_missingObjectIs404(t *testing.T) {
 
 // TestContent_otherStorageFailuresAreNot404 keeps the mapping narrow: only a
 // genuinely absent object becomes 404. Anything else must stay a 500 so a
-// broken MinIO is not reported to clients as "your media does not exist".
+// broken object store is not reported to clients as "your media does not exist".
 func TestContent_otherStorageFailuresAreNot404(t *testing.T) {
 	db := newConfirmTestDB(t)
-	boom := errors.New("simulated minio outage")
+	boom := errors.New("simulated object store outage")
 	store := &fakeStore{bucket: "myfleet-media", getErr: boom}
 	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db), store, &fakeVariants{}, testAllowlist(t))
 
@@ -780,7 +780,7 @@ func TestContent_variantMissingIs404AndServesNoOriginal(t *testing.T) {
 }
 
 // TestContent_variantObjectMissingIs404AndServesNoOriginal covers DB/store
-// drift: the variant row exists but its object is gone from MinIO. The response
+// drift: the variant row exists but its object is gone from the object store. The response
 // is the same 404 as a missing row, because the size consequence of falling back
 // to the original is identical. The Warn log is what distinguishes the two for
 // an operator — drift is a real fault, a missing row usually is not.

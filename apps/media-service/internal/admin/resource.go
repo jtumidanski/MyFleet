@@ -15,7 +15,7 @@ import (
 
 // ObjectRemover is the slice of storage.Client this package needs. Declaring the
 // port here rather than importing the concrete client keeps the dependency
-// one-way and makes the reap testable without MinIO.
+// one-way and makes the reap testable without a live object store.
 type ObjectRemover interface {
 	RemoveObject(ctx context.Context, key string) error
 }
@@ -153,7 +153,7 @@ func InitializeInternalRoutes(log logrus.FieldLogger, db *gorm.DB, store ObjectR
 					// retries.
 					log.WithError(rerr).WithFields(logrus.Fields{
 						"operation_id": opID, "object_key": k.Key,
-					}).Warn("remove minio object during admin reap failed")
+					}).Warn("remove object store object during admin reap failed")
 					failed[k.MediaObjectID] = true
 				}
 			}

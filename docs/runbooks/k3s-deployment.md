@@ -70,7 +70,7 @@ Expected: the four schemas, all owned by `myfleet`.
 The `myfleet-media` bucket, the `myfleet` user and the `myfleet-media-rw`
 policy are created on the shared cluster RustFS by the k3s repo's runbook,
 `docs/runbooks/rustfs-cutover.md`, section "Bootstrap". The user's secret
-key is the `MINIO_SECRET_KEY` value in `media-service-secret`. To verify
+key is the `S3_SECRET_KEY` value in `media-service-secret`. To verify
 from a workstation:
 
     kubectl -n rustfs port-forward svc/rustfs 9000:9000 &
@@ -113,9 +113,12 @@ it out of image layers (the build context is the repo root for every service).
 |---|---|
 | `auth-service-secret` | `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_PRIVATE_KEY_PEM`, `OIDC_STATE_SECRET` |
 | `fleet-service-secret` | `DATABASE_URL` |
-| `media-service-secret` | `DATABASE_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` |
+| `media-service-secret` | `DATABASE_URL`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` |
 | `notification-service-secret` | `DATABASE_URL`, `SMTP_USERNAME`, `SMTP_PASSWORD` |
 | `myfleet-tls` | `tls.crt`, `tls.key` — cert for the `websecure` route set |
+
+The service also accepts the previous `MINIO_*` names until the next release;
+re-apply the Secret with the new keys when convenient.
 
 `myfleet-tls` is not optional. Without it Traefik registers no router on :443,
 and every request arriving over TLS — Cloudflare to the origin, or a browser

@@ -16,7 +16,7 @@ import (
 	"github.com/jtumidanski/myfleet/apps/media-service/internal/admin"
 )
 
-// recordingRemover captures the MinIO keys a reap asks to delete, and can be
+// recordingRemover captures the object store keys a reap asks to delete, and can be
 // told to fail for one of them.
 type recordingRemover struct {
 	removed []string
@@ -190,7 +190,7 @@ func TestRestore_returnsEverythingTheOperationTook(t *testing.T) {
 	}
 }
 
-// FR-ADMIN-RESTORE-5: reap removes the MinIO objects too — the media object's
+// FR-ADMIN-RESTORE-5: reap removes the object store objects too — the media object's
 // key AND every variant's key.
 func TestReap_removesRowsAndObjects(t *testing.T) {
 	db := newMediaDB(t)
@@ -207,7 +207,7 @@ func TestReap_removesRowsAndObjects(t *testing.T) {
 		delete(want, key)
 	}
 	if len(want) != 0 {
-		t.Errorf("reap did not remove these MinIO objects: %v (removed %v)", want, store.removed)
+		t.Errorf("reap did not remove these object store objects: %v (removed %v)", want, store.removed)
 	}
 	var rows int64
 	db.Raw(`SELECT count(*) FROM media.media_objects WHERE purge_operation_id = 'op-1'`).Scan(&rows)
@@ -216,7 +216,7 @@ func TestReap_removesRowsAndObjects(t *testing.T) {
 	}
 }
 
-// A MinIO object that cannot be removed must leave its ROW in place, so the
+// An object store object that cannot be removed must leave its ROW in place, so the
 // next tick retries. Deleting the row would strand the object forever with
 // nothing left pointing at it.
 func TestReap_keepsRowsWhoseObjectCouldNotBeRemoved(t *testing.T) {

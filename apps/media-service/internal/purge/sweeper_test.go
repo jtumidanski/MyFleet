@@ -21,7 +21,7 @@ func newSweeper(t *testing.T, db *gorm.DB, store ObjectRemover, cfg Config) *Swe
 
 // T5 / FR-PURGE-5. An admin-stamped object belongs to a cancellable operation
 // whose lifecycle the admin reaper owns. The sweep must not hard-delete it and,
-// worse, must not remove its MinIO object, which no restore could bring back.
+// worse, must not remove its object store object, which no restore could bring back.
 //
 // This test is written BEFORE the sweep is rewritten and must stay green
 // throughout: the one thing a relocation can silently lose is the
@@ -160,7 +160,7 @@ func TestRunOnce_aFailedOriginalRemovalOffersNoVariantKeys(t *testing.T) {
 	}
 }
 
-// The tick's context has to reach the DATABASE calls, not only the MinIO ones.
+// The tick's context has to reach the DATABASE calls, not only the object store ones.
 // Without WithContext a cancelled tick keeps querying and deleting against a
 // bare connection, so shutdown blocks on work nobody will use — and every
 // assertion in this file would still pass, which is why this one exists.

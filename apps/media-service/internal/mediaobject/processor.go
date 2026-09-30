@@ -29,8 +29,9 @@ const EventTypeMediaUploaded = "media.uploaded"
 // by *storage.Client; kept as an interface so the processor is unit-testable.
 //
 // Bytes are proxied through this service rather than handed to the browser as
-// presigned URLs: MinIO is a shared cluster service that also holds other
-// applications' buckets, so it is never exposed outside the cluster.
+// presigned URLs: the object store is a shared cluster service that also
+// holds other applications' buckets, so it is never exposed outside the
+// cluster.
 //
 // GetObject must have determined that the object is actually readable before
 // it returns — callers commit an HTTP status line on the strength of its nil
@@ -183,7 +184,7 @@ func MarkFailed(m Model) (Model, error) {
 }
 
 // Processor contains media-object business logic, injected with Provider,
-// Administrator, and an ObjectStore (MinIO). Event publication is handled by the
+// Administrator, and an ObjectStore (S3-compatible object storage). Event publication is handled by the
 // transactional-outbox relay (design A8); the processor never calls Publish
 // directly.
 type Processor struct {
@@ -220,7 +221,7 @@ func NewProcessor(log logrus.FieldLogger, p Provider, a Administrator, st Object
 
 // InitUpload creates a media-object row in the uploaded state. The client then
 // PUTs the bytes to /media/{id}/content; this service proxies them to object
-// storage so MinIO is never reachable from the browser.
+// storage so the object store is never reachable from the browser.
 //
 // The client-supplied content type is validated against the server-side
 // allowlist and stored NORMALISED (parameters discarded, lowercased), so no
@@ -370,8 +371,8 @@ func (pr *Processor) GetByID(id, identityFleetID string) (Model, error) {
 
 // Content authorizes by fleet and opens the requested rendition's bytes for
 // streaming to the client. The caller owns closing the returned ReadCloser.
-// Bytes are proxied rather than presigned so MinIO stays unreachable from the
-// browser.
+// Bytes are proxied rather than presigned so the object store stays
+// unreachable from the browser.
 //
 // The media object is resolved and fleet-scoped FIRST, before any variant
 // lookup, object-store read, or scheduling decision, so a variant is never
@@ -539,7 +540,7 @@ func (pr *Processor) openOriginal(ctx context.Context, m Model) (ContentInfo, io
 			// that state. 404 rather than 500 because nothing is broken
 			// server-side — this sub-resource simply does not exist yet — and
 			// it matches what the client used to see when it followed a
-			// presigned URL straight to MinIO.
+			// presigned URL straight to the object store.
 			return ContentInfo{}, nil, server.ErrNotFound
 		}
 		return ContentInfo{}, nil, err

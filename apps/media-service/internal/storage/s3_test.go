@@ -50,7 +50,7 @@ func TestObjectKey_emptyFilenameFallsBack(t *testing.T) {
 // --- upload allocation bound (see uploadPartSize) ----------------------------
 
 // TestPutOptions_partSizeBoundsUnknownLengthAllocation pins the one part of the
-// allocation that is observable without a live MinIO: the PartSize we hand the
+// allocation that is observable without a live object store: the PartSize we hand the
 // SDK. PartSize == 0 is what makes minio-go pick a 528 MiB buffer for an
 // unknown-length (chunked) body, which OOM-kills a 256 MiB pod before a single
 // body byte is read. The consequences of the value are then measured through
@@ -97,7 +97,7 @@ func TestPutOptions_partSizeBoundsUnknownLengthAllocation(t *testing.T) {
 
 // --- GetObject must not report success for an object that is not there -------
 
-// newTestClient points a storage.Client at an httptest stand-in for MinIO. The
+// newTestClient points a storage.Client at an httptest stand-in for the object store. The
 // region is pinned so the SDK never issues a GetBucketLocation round trip.
 func newTestClient(t *testing.T, srv *httptest.Server) *Client {
 	t.Helper()

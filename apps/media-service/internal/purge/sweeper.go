@@ -14,8 +14,8 @@
 // the first time, enforced by a test (arch_test.go). Ports whose only
 // implementations lived in package main would leave this package's tests unable
 // to exercise the production SQL, and assertions about stored rows are the whole
-// point of the suite. ObjectRemover stays a port for the ordinary reason: MinIO
-// cannot be in a unit test.
+// point of the suite. ObjectRemover stays a port for the ordinary reason: a
+// live object store cannot be in a unit test.
 package purge
 
 import (
@@ -32,7 +32,7 @@ import (
 
 // ObjectRemover is the slice of storage.Client the sweep needs. Declaring the
 // port here rather than importing the concrete client keeps the dependency
-// one-way and makes the sweep testable without MinIO (FR-TEST-3).
+// one-way and makes the sweep testable without a live object store (FR-TEST-3).
 type ObjectRemover interface {
 	RemoveObject(ctx context.Context, key string) error
 }
@@ -135,7 +135,7 @@ func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error {
 	}
 
 	// One context-bound handle for the whole pass. Without it a cancelled tick
-	// cancels only the MinIO calls and leaves every query running against a bare
+	// cancels only the object store calls and leaves every query running against a bare
 	// connection, so shutdown waits on work nobody is going to use. It is derived
 	// once rather than repeated per call site: the query helpers take a *gorm.DB
 	// and a context-bound handle is still one, so their signatures are unchanged.
@@ -182,7 +182,7 @@ func (s *Sweeper) reconcile(ctx context.Context, sum *summary) error {
 func (s *Sweeper) purgeExpired(ctx context.Context, sum *summary) error {
 	// Context-bound for the whole pass, including the per-object transaction —
 	// see reconcile. Cancelling the tick must stop the database work too, not
-	// only the MinIO calls.
+	// only the object store calls.
 	db := s.db.WithContext(ctx)
 
 	objs, err := mediaobject.ListPurgeable(db)
@@ -209,7 +209,7 @@ func (s *Sweeper) purgeExpired(ctx context.Context, sum *summary) error {
 			if rerr := s.store.RemoveObject(ctx, key); rerr != nil {
 				s.log.WithError(rerr).WithFields(logrus.Fields{
 					"media_id": o.ID(), "object_key": key,
-				}).Warn("remove minio object during purge failed")
+				}).Warn("remove object store object during purge failed")
 				failed = true
 				break
 			}
