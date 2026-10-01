@@ -137,11 +137,26 @@ func cardSource(id string) Source {
 	}
 }
 
+// cardFixture is the original every decoding test serves. Its long edge only
+// has to exceed cardMaxEdge for the downscale to be exercised; anything bigger
+// is pure decode-and-scale cost, which under -race on a contended CI runner is
+// what pushed these tests past their waitFor deadline. 2:1 keeps the expected
+// card at (768,384).
+func cardFixture(t *testing.T) []byte {
+	t.Helper()
+	return pngBytes(t, 800, 400)
+}
+
 // waitFor polls until cond holds or the deadline passes. Generation is
 // asynchronous by design, so tests observe its effects rather than its return.
+//
+// The deadline is only ever reached by a genuine failure — a passing wait
+// returns the moment cond holds — so it is sized for the worst CI runner, not
+// for a developer machine. At 3s, `go test -race` across the whole module set
+// on a shared runner timed out real decodes that were merely slow.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
@@ -184,7 +199,7 @@ func TestCardGenerator_doesNotDestroyExistingVariants(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	store := &blockingStore{data: pngBytes(t, 2000, 1000)}
+	store := &blockingStore{data: cardFixture(t)}
 	g := NewCardGenerator(context.Background(), logrus.New(), store, admin,
 		variantfailures.New(logrus.New(), db), 4)
 
@@ -217,7 +232,7 @@ func TestCardGenerator_doesNotDestroyExistingVariants(t *testing.T) {
 // have produced: same max edge, same key scheme, same encoding.
 func TestCardGenerator_producesTheSameCardTheWorkerWould(t *testing.T) {
 	db := newCardTestDB(t)
-	store := &blockingStore{data: pngBytes(t, 2000, 1000)}
+	store := &blockingStore{data: cardFixture(t)}
 	g := NewCardGenerator(context.Background(), logrus.New(), store,
 		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), 4)
 
@@ -257,7 +272,7 @@ func TestCardGenerator_producesTheSameCardTheWorkerWould(t *testing.T) {
 func TestCardGenerator_singleFlightsPerMediaObject(t *testing.T) {
 	db := newCardTestDB(t)
 	gate := make(chan struct{})
-	store := &blockingStore{data: pngBytes(t, 2000, 1000), gate: gate}
+	store := &blockingStore{data: cardFixture(t), gate: gate}
 	g := NewCardGenerator(context.Background(), logrus.New(), store,
 		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), 4)
 
@@ -292,7 +307,7 @@ func TestCardGenerator_singleFlightsPerMediaObject(t *testing.T) {
 // must be admitted rather than blocked forever by a leaked slot.
 func TestCardGenerator_releasesTheInFlightSlot(t *testing.T) {
 	db := newCardTestDB(t)
-	store := &blockingStore{data: pngBytes(t, 2000, 1000)}
+	store := &blockingStore{data: cardFixture(t)}
 	g := NewCardGenerator(context.Background(), logrus.New(), store,
 		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), 4)
 
@@ -310,7 +325,7 @@ func TestCardGenerator_releasesTheInFlightSlot(t *testing.T) {
 func TestCardGenerator_capDropsRatherThanQueues(t *testing.T) {
 	db := newCardTestDB(t)
 	gate := make(chan struct{})
-	store := &blockingStore{data: pngBytes(t, 2000, 1000), gate: gate}
+	store := &blockingStore{data: cardFixture(t), gate: gate}
 	g := NewCardGenerator(context.Background(), logrus.New(), store,
 		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), 1)
 
@@ -349,7 +364,7 @@ func TestCardGenerator_capDropsRatherThanQueues(t *testing.T) {
 // switch an operator needs when the feature misbehaves, without a rollback.
 func TestCardGenerator_zeroConcurrencyDisablesGeneration(t *testing.T) {
 	db := newCardTestDB(t)
-	store := &blockingStore{data: pngBytes(t, 2000, 1000)}
+	store := &blockingStore{data: cardFixture(t)}
 	g := NewCardGenerator(context.Background(), logrus.New(), store,
 		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), 0)
 
@@ -364,7 +379,7 @@ func TestCardGenerator_zeroConcurrencyDisablesGeneration(t *testing.T) {
 // A negative value is an operator typo, not a request for unbounded work.
 func TestCardGenerator_negativeConcurrencyClampsToDisabled(t *testing.T) {
 	db := newCardTestDB(t)
-	store := &blockingStore{data: pngBytes(t, 2000, 1000)}
+	store := &blockingStore{data: cardFixture(t)}
 	g := NewCardGenerator(context.Background(), logrus.New(), store,
 		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), -3)
 
@@ -456,7 +471,7 @@ func TestCardGenerator_transientFailureIsNotRecorded(t *testing.T) {
 // completion and the card row lands.
 func TestCardGenerator_ignoresACancelledCallerContext(t *testing.T) {
 	db := newCardTestDB(t)
-	store := &blockingStore{data: pngBytes(t, 2000, 1000)}
+	store := &blockingStore{data: cardFixture(t)}
 	g := NewCardGenerator(context.Background(), logrus.New(), store,
 		mediavariant.NewAdministrator(db), variantfailures.New(logrus.New(), db), 4)
 
