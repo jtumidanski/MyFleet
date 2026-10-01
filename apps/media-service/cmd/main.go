@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -46,24 +47,13 @@ func main() {
 		log.WithError(err).Fatal("db connect")
 	}
 
-	// Object store client (private bucket, auto-created on startup).
-	endpoint, err := mustEnvFirst("S3_ENDPOINT", "MINIO_ENDPOINT")
-	if err != nil {
-		log.WithError(err).Fatal("object store config")
-	}
-	accessKey, err := mustEnvFirst("S3_ACCESS_KEY", "MINIO_ACCESS_KEY")
-	if err != nil {
-		log.WithError(err).Fatal("object store config")
-	}
-	secretKey, err := mustEnvFirst("S3_SECRET_KEY", "MINIO_SECRET_KEY")
-	if err != nil {
-		log.WithError(err).Fatal("object store config")
-	}
+	// Object store client (private bucket, auto-created on startup). The
+	// MINIO_* fallback names were removed 2026-10-01.
 	store, err := storage.New(ctx, storage.Config{
-		Endpoint:  endpoint,
-		AccessKey: accessKey,
-		SecretKey: secretKey,
-		UseSSL:    envFirst("false", "S3_USE_SSL", "MINIO_USE_SSL") == "true",
+		Endpoint:  config.MustGet("S3_ENDPOINT"),
+		AccessKey: config.MustGet("S3_ACCESS_KEY"),
+		SecretKey: config.MustGet("S3_SECRET_KEY"),
+		UseSSL:    os.Getenv("S3_USE_SSL") == "true",
 		Bucket:    config.MustGet("MEDIA_BUCKET"),
 	})
 	if err != nil {

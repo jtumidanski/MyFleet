@@ -117,8 +117,7 @@ it out of image layers (the build context is the repo root for every service).
 | `notification-service-secret` | `DATABASE_URL`, `SMTP_USERNAME`, `SMTP_PASSWORD` |
 | `myfleet-tls` | `tls.crt`, `tls.key` — cert for the `websecure` route set |
 
-The service also accepts the previous `MINIO_*` names until the next release;
-re-apply the Secret with the new keys when convenient.
+The `MINIO_*` fallback names were removed on 2026-10-01; the Secret must carry the `S3_*` keys above.
 
 `myfleet-tls` is not optional. Without it Traefik registers no router on :443,
 and every request arriving over TLS — Cloudflare to the origin, or a browser
