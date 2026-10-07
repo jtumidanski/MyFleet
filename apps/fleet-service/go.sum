@@ -36,8 +36,8 @@ github.com/jtumidanski/myfleet/packages/dto-go v0.0.0-20260729130335-a5bfa151d5e
 github.com/jtumidanski/myfleet/packages/dto-go v0.0.0-20260729130335-a5bfa151d5e4/go.mod h1:aG1ExFIYbuWg1ABEryabrBtZo8Rl19lCD92rlLv2pWY=
 github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55 h1:vMr441I47sW/8If778jFqGqcuB5i2yxFArmGC46nTFA=
 github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55/go.mod h1:OLITNlzG3jkGIGFHDZiL4xggGU5lYFwXw7b3LalRLO4=
-github.com/klauspost/compress v1.18.2 h1:iiPHWW0YrcFgpBYhsA6D1+fqHssJscY/Tm/y2Uqnapk=
-github.com/klauspost/compress v1.18.2/go.mod h1:R0h/fSBs8DE4ENlcrlib3PsXS61voFxhIs2DeRhCvJ4=
+github.com/klauspost/compress v1.18.7 h1:aUyZsS4kH3QTKurYhAOwAHxllVPnOthb3vPfnF1Ehjw=
+github.com/klauspost/compress v1.18.7/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
