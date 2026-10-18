@@ -3,12 +3,12 @@ module github.com/jtumidanski/myfleet/apps/media-service
 go 1.27.0
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jtumidanski/myfleet/packages/dto-go v0.0.0-20260729130335-a5bfa151d5e4
 	github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55
-	github.com/minio/minio-go/v7 v7.3.0
+	github.com/minio/minio-go/v7 v7.4.1
 	github.com/sirupsen/logrus v1.10.2
 	golang.org/x/image v0.47.0
 	gorm.io/driver/sqlite v1.6.0
@@ -58,7 +58,7 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
+	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.3 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
 )
