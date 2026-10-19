@@ -15,8 +15,8 @@ Services follow a strict layered design with immutability.
 4. **Application Layer** — Orchestration and configuration.
 
 ## Core Technologies
-- Go 1.27 (`go.work:1` declares `go 1.27.0`; CI pins `go-version: '1.27'`
-  at `.github/workflows/pr.yml:15,50`)
+- Go 1.27 (`go.work:1` declares `go 1.27.2`; CI pins `go-version: '1.27.2'`
+  at `.forgejo/workflows/main.yml:76` and `.forgejo/workflows/pr.yml:79,123`)
 - chi router (`github.com/go-chi/chi/v5`, `apps/fleet-service/go.mod:6`)
 - GORM ORM (PostgreSQL)
 - JSON:API-shaped transport (hand-rolled envelope, no third-party marshaling
