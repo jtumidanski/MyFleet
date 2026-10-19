@@ -1,7 +1,8 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "local>renovate/presets"
+    "local>renovate/presets",
+    "local>renovate/presets:go-toolchain"
   ],
   "minimumReleaseAge": "7 days",
   "separateMajorMinor": true,
@@ -69,7 +70,7 @@
       "enabled": false
     },
     {
-      "description": "Go toolchain surfaces — builder image, CI input, and the go.mod directive — move as one PR so they cannot drift apart the way 1.25/1.26 did.",
+      "description": "Go toolchain surfaces — builder image, CI input, the go.mod directives and go.work (both via the go-toolchain preset) — move as one PR so they cannot drift apart the way 1.25/1.26 did. Last on purpose: the gomod non-major group above would otherwise claim the go directive.",
       "matchDatasources": ["golang-version", "docker"],
       "matchPackageNames": ["go", "golang"],
       "groupName": "Go toolchain"
