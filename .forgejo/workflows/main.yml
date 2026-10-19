@@ -69,7 +69,11 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         id: go
         with:
-          go-version: '1.27'
+          # Exact patch, matching go.work. A bare '1.27' is satisfied by any
+          # 1.27.x already sitting in the runner's persistent tool cache
+          # (/work/jobs/tool_cache), and a stale 1.27.0 there then fails every
+          # go command against go.work's `go 1.27.2` under GOTOOLCHAIN=local.
+          go-version: '1.27.2'
           # Cache handled explicitly below. Two independent reasons. The one
           # the GitHub original recorded: setup-go's built-in cache derives its
           # key from OS/arch/go-version/file-hash only, with no way to
