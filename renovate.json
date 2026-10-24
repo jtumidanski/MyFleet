@@ -7,6 +7,8 @@
   "minimumReleaseAge": "7 days",
   "separateMajorMinor": true,
   "automerge": false,
+  "automergeType": "pr",
+  "platformAutomerge": true,
   "labels": ["dependencies"],
   "enabledManagers": [
     "gomod",
@@ -52,6 +54,11 @@
       "groupName": "GitHub Actions (non-major)"
     },
     {
+      "description": "Automerge patch and minor updates once CI passes. platformAutomerge hands the merge to the forge, whose branch protection on main requires every pr.yml job.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
       "description": "Separate major upgrades for all managers — never auto-merge",
       "matchUpdateTypes": ["major"],
       "automerge": false,
@@ -70,10 +77,11 @@
       "enabled": false
     },
     {
-      "description": "Go toolchain surfaces — builder image, CI input, the go.mod directives and go.work (both via the go-toolchain preset) — move as one PR so they cannot drift apart the way 1.25/1.26 did. Last on purpose: the gomod non-major group above would otherwise claim the go directive.",
+      "description": "Go toolchain surfaces — builder image, CI input, the go.mod directives and go.work (both via the go-toolchain preset) — move as one PR so they cannot drift apart the way 1.25/1.26 did, never automerged. Last on purpose: the gomod non-major group and the patch/minor automerge rule above would otherwise claim the go directive.",
       "matchDatasources": ["golang-version", "docker"],
       "matchPackageNames": ["go", "golang"],
-      "groupName": "Go toolchain"
+      "groupName": "Go toolchain",
+      "automerge": false
     }
   ],
   "postUpdateOptions": [
