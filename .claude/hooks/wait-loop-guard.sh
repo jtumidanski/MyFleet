@@ -35,6 +35,17 @@
 #   - anything with a `POLL-JUSTIFIED:` prefix or comment, mirroring
 #     `FORK-JUSTIFIED:` — a considered wait costs one sentence
 #
+#   File-tail polling. The sleep/pgrep denials above were defeated the week
+#   they shipped by re-issuing bare `tail -1 /tmp/gate.log`, `wc -l`,
+#   `grep -c 'EXIT=' log` turn after turn with no sleep in between — a
+#   task-verifier spent 31% of its budget that way, and three controllers did
+#   the same against verify logs. The command is harmless; the REPETITION is
+#   the poll. So the third consecutive identical read-only command in one
+#   session (or one agent) is denied. Two identical reads pass — a re-check
+#   after an edit is legitimate. State lives in the turn-budget state dir,
+#   keyed like turn-budget.sh (agent_id, else session_id), and any different
+#   command resets the streak.
+#
 # Silent on the happy path. Always exits 0.
 
 set -u
@@ -43,7 +54,72 @@ set -u
 
 input="$(cat)"
 
-decision="$(printf '%s' "$input" | jq -rc '
+# Headless (`claude -p` under claude-drive): ending the turn ends the process and
+# Monitor returns immediately, so the interactive "end your turn / be re-invoked"
+# advice is wrong there. CLAUDE_DRIVE being set selects the headless advice.
+headless=""
+[ -n "${CLAUDE_DRIVE:-}" ] && headless=1
+headless_advice="You are running headless under claude-drive (CLAUDE_DRIVE is set): ending your turn ends the process, no notification will re-invoke you, and Monitor does not block, so there is no in-turn wait. Run the command in the foreground with an explicit Bash timeout, or write 'Handoff after Task N' to the ledger, commit it, and then end."
+
+# ---------------------------------------------------------------------------
+# Stateful check: the same read-only command N times in a row.
+# ---------------------------------------------------------------------------
+POLL_STREAK=3
+
+cmd_raw="$(printf '%s' "$input" | jq -r '.tool_input.command // ""' 2>/dev/null)"
+if [ -n "$cmd_raw" ] && ! printf '%s' "$cmd_raw" | grep -q 'POLL-JUSTIFIED:'; then
+    session="$(printf '%s' "$input" | jq -r '.session_id // ""' 2>/dev/null | tr -cd 'A-Za-z0-9._-')"
+    agent="$(printf '%s' "$input" | jq -r '.agent_id // ""' 2>/dev/null | tr -cd 'A-Za-z0-9._-')"
+    key=""
+    if [ -n "$agent" ]; then key="agent-$agent"; elif [ -n "$session" ]; then key="session-$session"; fi
+    if [ -n "$key" ]; then
+        state_dir="${TMPDIR:-/tmp}/claude-turn-budget"
+        mkdir -p "$state_dir" 2>/dev/null || true
+        streak_file="$state_dir/poll-$key"
+        # Normalize whitespace so `tail -1 x` and `tail  -1  x` are one command.
+        norm="$(printf '%s' "$cmd_raw" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//')"
+        # A read-only inspection: every pipeline stage starts with a reader.
+        # `rtk` is the user's transparent output-filter prefix.
+        readonly_re='^(rtk )?(tail|head|cat|wc|grep|egrep|stat|ls|test|\[|du|find|jq|nl|less|more)( |$)'
+        is_read=1
+        # Blank quoted spans before splitting on `|`, so a pipe INSIDE a quoted
+        # argument (`grep -E 'a|b' file`) is not mistaken for a pipeline stage.
+        split_src="$(printf '%s' "$norm" | sed "s/'[^']*'/Q/g; s/\"[^\"]*\"/Q/g")"
+        old_ifs="$IFS"; IFS='|'
+        for stage in $split_src; do
+            stage="$(printf '%s' "$stage" | sed 's/^ *//')"
+            printf '%s' "$stage" | grep -Eq "$readonly_re" || { is_read=0; break; }
+        done
+        IFS="$old_ifs"
+        # Redirections, heredocs and && chains mean it is doing work, not looking.
+        printf '%s' "$norm" | grep -Eq '(>|<<|&&|;)' && is_read=0
+        if [ "$is_read" -eq 1 ]; then
+            sig="$(printf '%s' "$norm" | cksum | cut -d' ' -f1)"
+            prev_sig=""; prev_n=0
+            if [ -f "$streak_file" ]; then
+                prev_sig="$(sed -n 1p "$streak_file" 2>/dev/null)"
+                prev_n="$(sed -n 2p "$streak_file" 2>/dev/null)"
+                case "$prev_n" in ''|*[!0-9]*) prev_n=0 ;; esac
+            fi
+            if [ "$sig" = "$prev_sig" ]; then n=$((prev_n + 1)); else n=1; fi
+            printf '%s\n%s\n' "$sig" "$n" > "$streak_file" 2>/dev/null || true
+            if [ "$n" -ge "$POLL_STREAK" ]; then
+                jq -nc --arg c "$norm" --arg n "$n" --arg headless "$headless" --arg adv "$headless_advice" '{
+                  hookSpecificOutput: {
+                    hookEventName: "PreToolUse",
+                    permissionDecision: "deny",
+                    permissionDecisionReason: (if $headless != "" then ("Refused: `" + $c + "` is the same read-only command for the " + $n + "th consecutive turn. Re-reading a log or a file until it changes is the polling anti-pattern CLAUDE.md forbids.\n\n" + $adv + "\n\nIf this repeated read is real work, prefix the command with `POLL-JUSTIFIED: <reason>`.") else ("Refused: `" + $c + "` is the same read-only command for the " + $n + "th consecutive turn. Re-reading a log or a file until it changes is the polling anti-pattern CLAUDE.md forbids, with `tail`/`wc`/`grep` standing in for `sleep`; a task-verifier spent 31% of its budget this way and each turn re-read its whole context to learn nothing.\n\nUse instead: `run_in_background: true` on the long command (you are re-invoked when it exits), or `Monitor` with an `until [ -f <sentinel> ]` / `until grep -q EXIT= <log>` loop and an explicit timeout.\n\nIf this repeated read is real work, prefix the command with `POLL-JUSTIFIED: <reason>`.") end)
+                  }
+                }' 2>/dev/null
+                exit 0
+            fi
+        else
+            printf '%s\n%s\n' "" "0" > "$streak_file" 2>/dev/null || true
+        fi
+    fi
+fi
+
+decision="$(printf '%s' "$input" | jq -rc --arg headless "$headless" --arg adv "$headless_advice" '
   (.tool_input.command // "") as $cmd |
 
   # An explicit justification always passes, wherever it appears in the command.
@@ -56,7 +132,7 @@ decision="$(printf '%s' "$input" | jq -rc '
     {hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: "Refused: no-op tool call. This turn produces no information and still costs a full context re-read — measured at ~120k tokens per turn inside a large agent, where 30 such calls consumed 36% of the agent.\n\nIf you are waiting on a child agent: you do not need to. Agent completions arrive as notifications; do other work, or end your turn and be re-invoked. If you are waiting on a process: launch it with `run_in_background: true`, or use `Monitor` with an until-loop and a timeout.\n\nIf you truly need a no-op, prefix the command with `POLL-JUSTIFIED: <reason>` as a comment."
+      permissionDecisionReason: (if $headless != "" then "Refused: no-op tool call. This turn produces no information and still costs a full context re-read.\n\n" + $adv + "\n\nIf you truly need a no-op, prefix the command with `POLL-JUSTIFIED: <reason>` as a comment." else "Refused: no-op tool call. This turn produces no information and still costs a full context re-read — measured at ~120k tokens per turn inside a large agent, where 30 such calls consumed 36% of the agent.\n\nIf you are waiting on a child agent: you do not need to. Agent completions arrive as notifications; do other work, or end your turn and be re-invoked. If you are waiting on a process: launch it with `run_in_background: true`, or use `Monitor` with an until-loop and a timeout.\n\nIf you truly need a no-op, prefix the command with `POLL-JUSTIFIED: <reason>` as a comment." end)
     }}
 
   # Sleep as the shell command: a bare sleep, or a sleep-driven poll loop.
@@ -67,7 +143,7 @@ decision="$(printf '%s' "$input" | jq -rc '
     {hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: "Refused: sleeping to wait. Each poll turn re-reads the whole context to learn nothing, and they cluster late in a session where that is most expensive — 20 of them at 170–290k context cost ≈4.6M tokens in one measured session.\n\nUse instead: `run_in_background: true` on the long command (you are re-invoked when it exits), or `Monitor` with an `until [ -f <sentinel> ]` loop and an explicit timeout — that returned 209 bytes per call in the same task.\n\nIf this sleep is part of real work (a rate limit, a settle delay inside a test), prefix the command with `POLL-JUSTIFIED: <reason>`."
+      permissionDecisionReason: (if $headless != "" then "Refused: sleeping to wait. Each poll turn re-reads the whole context to learn nothing.\n\n" + $adv + "\n\nIf this sleep is part of real work (a rate limit, a settle delay inside a test), prefix the command with `POLL-JUSTIFIED: <reason>`." else "Refused: sleeping to wait. Each poll turn re-reads the whole context to learn nothing, and they cluster late in a session where that is most expensive — 20 of them at 170–290k context cost ≈4.6M tokens in one measured session.\n\nUse instead: `run_in_background: true` on the long command (you are re-invoked when it exits), or `Monitor` with an `until [ -f <sentinel> ]` loop and an explicit timeout — that returned 209 bytes per call in the same task.\n\nIf this sleep is part of real work (a rate limit, a settle delay inside a test), prefix the command with `POLL-JUSTIFIED: <reason>`." end)
     }}
 
   # Broad process listing used as a wait. `ps -p`/`ps -o` (a named process) and
@@ -78,7 +154,7 @@ decision="$(printf '%s' "$input" | jq -rc '
     {hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
-      permissionDecisionReason: "Refused: broad process listing as a wait. A `ps aux` / `pgrep` sweep to check whether something is still running is the polling anti-pattern CLAUDE.md forbids; one such call returned a 9.8 KB dump into a 290k context.\n\nTo know whether a background command finished: it notifies you when it exits. To wait on a condition: `Monitor` with an until-loop. To inspect ONE known process: `ps -p <pid>` or `ps -o …`, which this guard allows.\n\nIf you are genuinely debugging process state rather than waiting, prefix with `POLL-JUSTIFIED: <reason>`."
+      permissionDecisionReason: (if $headless != "" then "Refused: broad process listing as a wait. A `ps aux` / `pgrep` sweep to check whether something is still running is the polling anti-pattern CLAUDE.md forbids.\n\n" + $adv + " To inspect ONE known process: `ps -p <pid>` or `ps -o …`, which this guard allows.\n\nIf you are genuinely debugging process state rather than waiting, prefix with `POLL-JUSTIFIED: <reason>`." else "Refused: broad process listing as a wait. A `ps aux` / `pgrep` sweep to check whether something is still running is the polling anti-pattern CLAUDE.md forbids; one such call returned a 9.8 KB dump into a 290k context.\n\nTo know whether a background command finished: it notifies you when it exits. To wait on a condition: `Monitor` with an until-loop. To inspect ONE known process: `ps -p <pid>` or `ps -o …`, which this guard allows.\n\nIf you are genuinely debugging process state rather than waiting, prefix with `POLL-JUSTIFIED: <reason>`." end)
     }}
 
   else empty
