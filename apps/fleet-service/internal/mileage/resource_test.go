@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -116,5 +117,68 @@ func TestPostMileage_lowerReadingFlaggedAndKept(t *testing.T) {
 	}
 	if n := liveRows(t, db, "v1"); n != 1 {
 		t.Errorf("live rows = %d, want 1", n)
+	}
+}
+
+func TestParseSources(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    []string
+		wantErr error
+	}{
+		{"empty is absent", "", nil, nil},
+		{"single", "manual", []string{SourceManual}, nil},
+		{"trims and drops empties", "manual, ,fuel ", []string{SourceManual, SourceFuel}, nil},
+		{"dedupes", "manual,manual", []string{SourceManual}, nil},
+		{"case sensitive", "MANUAL", nil, server.ErrValidation},
+		{"unknown value", "manual,obd", nil, server.ErrValidation},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseSources(tc.raw)
+			if err != tc.wantErr {
+				t.Fatalf("err = %v, want %v", err, tc.wantErr)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetMileage_sourceFilter(t *testing.T) {
+	r, db := newMileageRouter(t)
+	seedMixedSources(t, db)
+
+	rec := serveAs(r, http.MethodGet, "/vehicles/v1/mileage?source=manual", "", ownerOf("f1"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
+	}
+	var doc struct {
+		Data []struct {
+			Attributes struct {
+				Source string `json:"source"`
+			} `json:"attributes"`
+		} `json:"data"`
+		Meta struct {
+			Total int `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(doc.Data) != 2 || doc.Meta.Total != 2 {
+		t.Errorf("rows/total = %d/%d, want 2/2", len(doc.Data), doc.Meta.Total)
+	}
+	for _, d := range doc.Data {
+		if d.Attributes.Source != SourceManual {
+			t.Errorf("source = %q, want manual", d.Attributes.Source)
+		}
+	}
+
+	rec = serveAs(r, http.MethodGet, "/vehicles/v1/mileage?source=bogus", "", ownerOf("f1"))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("bogus status = %d, want 422", rec.Code)
 	}
 }

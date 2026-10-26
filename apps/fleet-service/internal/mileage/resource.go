@@ -2,6 +2,7 @@ package mileage
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +22,26 @@ type VehicleAccessor interface {
 	GetByID(id string) (vehicle.Model, error)
 }
 
+// parseSources parses the comma-separated ?source= value: entries are trimmed,
+// empties dropped, duplicates removed. An absent or empty value yields nil (no
+// filter); any entry that is not a valid source is server.ErrValidation.
+func parseSources(raw string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" || seen[s] {
+			continue
+		}
+		if !ValidSource(s) {
+			return nil, server.ErrValidation
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out, nil
+}
+
 // InitializeRoutes wires the JWT-protected mileage endpoints.
 // vehicleAccessor is used to resolve fleetID and currentMileage from a vehicleID.
 // adm appends readings and advances the vehicle odometer in one transaction.
@@ -28,7 +49,8 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 	prov := NewProvider(db)
 	return func(r chi.Router) {
 		// GET /vehicles/{id}/mileage — list mileage records (newest first, paged)
-		// Supports ?from= and ?to= as RFC3339 range filters on recorded_at.
+		// Supports ?from= and ?to= as RFC3339 range filters on recorded_at, and
+		// ?source= as a comma-separated list of fuel|maintenance|manual.
 		r.Get("/vehicles/{id}/mileage", func(w http.ResponseWriter, req *http.Request) {
 			identity := auth.IdentityFromContext(req.Context())
 			vehicleID := chi.URLParam(req, "id")
@@ -61,8 +83,14 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				to = &t
 			}
 
+			sources, err := parseSources(req.URL.Query().Get("source"))
+			if err != nil {
+				server.WriteError(w, server.ErrValidation)
+				return
+			}
+
 			page := server.ParsePage(req)
-			ms, total, err := prov.ListByVehicle(vehicleID, from, to, page)
+			ms, total, err := prov.ListByVehicle(vehicleID, ListFilter{From: from, To: to, Sources: sources}, page)
 			if err != nil {
 				server.WriteError(w, err)
 				return
@@ -82,7 +110,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			identity := auth.IdentityFromContext(req.Context())
 			vehicleID := chi.URLParam(req, "id")
 
-			// Resolve vehicle for fleet-scoping authz and current mileage baseline.
+			// Resolve vehicle for fleet-scoping authz.
 			v, err := vehicleAccessor.GetByID(vehicleID)
 			if err != nil {
 				server.WriteError(w, err)

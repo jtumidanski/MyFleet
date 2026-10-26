@@ -17,7 +17,7 @@ func TestMileageProvider_hidesSoftDeleted(t *testing.T) {
 	prov := mileage.NewProvider(db)
 	page := server.Page{Number: 1, Size: 25}
 
-	before, totalBefore, err := prov.ListByVehicle(f.VehicleID, nil, nil, page)
+	before, totalBefore, err := prov.ListByVehicle(f.VehicleID, mileage.ListFilter{}, page)
 	if err != nil {
 		t.Fatalf("list before: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestMileageProvider_hidesSoftDeleted(t *testing.T) {
 		t.Fatalf("soft delete: %v", err)
 	}
 
-	after, totalAfter, err := prov.ListByVehicle(f.VehicleID, nil, nil, page)
+	after, totalAfter, err := prov.ListByVehicle(f.VehicleID, mileage.ListFilter{}, page)
 	if err != nil {
 		t.Fatalf("list after: %v", err)
 	}

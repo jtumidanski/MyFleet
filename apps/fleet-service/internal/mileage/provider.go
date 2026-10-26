@@ -8,11 +8,18 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
+// ListFilter narrows a mileage listing. Nil bounds and empty Sources mean
+// "no constraint".
+type ListFilter struct {
+	From, To *time.Time
+	Sources  []string
+}
+
 // Provider is the read-only interface for mileage data access.
 type Provider interface {
 	// ListByVehicle returns a page of a vehicle's mileage records, newest first
 	// (recorded_at desc), matching the fuel and maintenance-record siblings.
-	ListByVehicle(vehicleID string, from, to *time.Time, page server.Page) ([]Model, int, error)
+	ListByVehicle(vehicleID string, f ListFilter, page server.Page) ([]Model, int, error)
 }
 
 type dbProvider struct{ db *gorm.DB }
@@ -20,13 +27,16 @@ type dbProvider struct{ db *gorm.DB }
 // NewProvider returns a read-only Provider backed by the given database.
 func NewProvider(db *gorm.DB) Provider { return &dbProvider{db: db} }
 
-func (p *dbProvider) ListByVehicle(vehicleID string, from, to *time.Time, page server.Page) ([]Model, int, error) {
+func (p *dbProvider) ListByVehicle(vehicleID string, f ListFilter, page server.Page) ([]Model, int, error) {
 	q := p.db.Model(&Entity{}).Where("vehicle_id = ? AND deleted_at IS NULL", vehicleID)
-	if from != nil {
-		q = q.Where("recorded_at >= ?", *from)
+	if f.From != nil {
+		q = q.Where("recorded_at >= ?", *f.From)
 	}
-	if to != nil {
-		q = q.Where("recorded_at <= ?", *to)
+	if f.To != nil {
+		q = q.Where("recorded_at <= ?", *f.To)
+	}
+	if len(f.Sources) > 0 {
+		q = q.Where("source IN ?", f.Sources)
 	}
 
 	var total int64
