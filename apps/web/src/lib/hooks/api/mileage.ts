@@ -1,6 +1,9 @@
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import { mileageService } from '../../../services/api/MileageService';
 import { RECORD_PAGE_SIZE } from './pageSize';
+import { vehicleKeys } from './vehicles';
+import { dashboardKeys } from './dashboard';
 import type { CreateMileageAttributes, MileageRecord } from '../../../types/models/mileage';
 
 // Hierarchical query-key factory mirroring vehicleKeys.
@@ -14,6 +17,21 @@ export const mileageKeys = {
   list: (params: { vehicleId: string; from?: string; to?: string }) =>
     [...mileageKeys.lists(), params] as const,
 };
+
+/**
+ * Refetch everything that displays a vehicle's odometer after a mutation that
+ * can append or retract a mileage record: vehicle list and detail, mileage
+ * lists, and dashboards. Without a vehicleId (fuel update/delete) every
+ * vehicle query is invalidated.
+ */
+export function invalidateOdometerQueries(qc: QueryClient, vehicleId?: string) {
+  void qc.invalidateQueries({ queryKey: vehicleKeys.lists() });
+  void qc.invalidateQueries({
+    queryKey: vehicleId ? vehicleKeys.detail(vehicleId) : vehicleKeys.all,
+  });
+  void qc.invalidateQueries({ queryKey: mileageKeys.lists() });
+  void qc.invalidateQueries({ queryKey: dashboardKeys.all });
+}
 
 // ---------------------------------------------------------------------------
 // Auto-fill helper (pure function — injectable for testing)
@@ -83,14 +101,15 @@ export function useMileageRecords(params: UseMileageParams | null | undefined) {
 
 /**
  * POST /api/fleet/vehicles/{vehicleId}/mileage — append a manual mileage record.
- * Invalidates all mileage lists for this vehicle on settle.
+ * On settle invalidates mileage lists, vehicle list/detail and dashboards
+ * (a new record can advance the vehicle's current odometer).
  */
 export function useCreateMileageRecord(vehicleId: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (attrs: CreateMileageAttributes) => mileageService.create(vehicleId, attrs),
     onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: mileageKeys.lists() });
+      invalidateOdometerQueries(queryClient, vehicleId);
     },
   });
 }

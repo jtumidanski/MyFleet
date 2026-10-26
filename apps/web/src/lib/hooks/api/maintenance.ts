@@ -4,6 +4,7 @@ import { maintenanceScheduleService } from '../../../services/api/MaintenanceSch
 import { maintenanceCategoryService } from '../../../services/api/MaintenanceCategoryService';
 import { mediaService } from '../../../services/api/MediaService';
 import { vehicleKeys } from './vehicles';
+import { invalidateOdometerQueries } from './mileage';
 import { RECORD_PAGE_SIZE } from './pageSize';
 import type {
   CreateMaintenanceRecordAttributes,
@@ -171,6 +172,7 @@ export function useCreateMaintenanceRecord(vehicleId: string) {
       maintenanceRecordService.createForVehicle(vehicleId, attrs),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
+      invalidateOdometerQueries(queryClient, vehicleId);
     },
   });
 }
@@ -189,7 +191,7 @@ export function useUpdateMaintenanceRecord(vehicleId: string) {
     onSettled: (_data, _error, variables) => {
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(variables.id) });
-      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+      invalidateOdometerQueries(queryClient, vehicleId);
     },
   });
 }
@@ -265,7 +267,7 @@ export function useDeleteMaintenanceRecord(vehicleId: string) {
     onSettled: (_data, _error, id) => {
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.detail(id) });
-      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+      invalidateOdometerQueries(queryClient, vehicleId);
     },
   });
 }
@@ -389,7 +391,7 @@ export function useDeleteMaintenanceSchedule() {
  * On success invalidates:
  *  - maintenanceRecordKeys.lists() — a new record was created
  *  - maintenanceScheduleKeys.lists() — schedule state changes
- *  - vehicleKeys.detail(vehicleId) — vehicle status may change
+ *  - odometer queries (vehicle list/detail, mileage, dashboards) — completion appends a mileage record
  */
 export function useCompleteMaintenanceSchedule(vehicleId: string) {
   const queryClient = useQueryClient();
@@ -404,7 +406,7 @@ export function useCompleteMaintenanceSchedule(vehicleId: string) {
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: maintenanceRecordKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: maintenanceScheduleKeys.lists() });
-      void queryClient.invalidateQueries({ queryKey: vehicleKeys.detail(vehicleId) });
+      invalidateOdometerQueries(queryClient, vehicleId);
     },
   });
 }
