@@ -82,6 +82,18 @@ func main() {
 		log.WithError(err).Fatal("backfill maintenance schedule due points")
 	}
 
+	// Give maintenance records that predate odometer sync a mileage history
+	// row and advance each vehicle's odometer to match (idempotent; a record
+	// whose entry was retracted is never re-inserted).
+	//
+	// Under the advisory lock for the same reason as the schedule backfill;
+	// the ignored `ran` flag is deliberate.
+	if _, err := database.WithLeaderLock(db, "maintenance-mileage-backfill", func() error {
+		return maintenancerecord.BackfillMileage(db, log)
+	}); err != nil {
+		log.WithError(err).Fatal("backfill maintenance mileage")
+	}
+
 	// Fleet-service validates auth-service JWT tokens via JWKS.
 	// Retry up to 10 times (3 s between attempts) so fleet-service waits for
 	// auth-service to be ready instead of fataling immediately.
