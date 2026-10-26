@@ -26,7 +26,8 @@ class MileageService {
       from?: string;
       to?: string;
       sources?: MileageSource[];
-      page?: number; pageSize?: number;
+      page?: number;
+      pageSize?: number;
     },
   ): Promise<{ data: Array<JsonApiResource<MileageRecordAttributes>>; meta?: PageMeta }> {
     const url = new URL(`${this.basePath}/${vehicleId}/mileage`, 'http://localhost');

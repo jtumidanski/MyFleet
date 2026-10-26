@@ -18,12 +18,7 @@ import type {
 export const mileageKeys = {
   all: ['mileage'] as const,
   lists: () => [...mileageKeys.all, 'list'] as const,
-  list: (params: {
-    vehicleId: string;
-    from?: string;
-    to?: string;
-    sources?: MileageSource[];
-  }) =>
+  list: (params: { vehicleId: string; from?: string; to?: string; sources?: MileageSource[] }) =>
     [...mileageKeys.lists(), params] as const,
 };
 
