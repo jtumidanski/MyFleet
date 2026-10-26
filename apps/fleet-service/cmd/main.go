@@ -134,7 +134,7 @@ func main() {
 	// on the transition edge (A8).
 	scheduleProc := maintenanceschedule.NewProcessor(log, maintenanceschedule.NewProvider(db), maintenanceschedule.NewAdministrator(db)).
 		WithOverdueHooks(db, activity.Record, emitScheduleOverdue)
-	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db), mileageAdmin).
+	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db, mileageAdmin), maintenanceschedule.NewAdministrator(db), mileageAdmin).
 		WithActivityRecorder(activity.Record).
 		WithEmitter(emitMaintenanceCompleted)
 
@@ -300,7 +300,7 @@ func main() {
 				mileage.InitializeRoutes(log, db, vehicleProc, mileageAdmin)(pr)
 				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, emitFuelLogged, mileageAdmin)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
-				maintenancerecord.InitializeRoutes(log, db, vehicleProc, categoryProc, mediaClient)(pr)
+				maintenancerecord.InitializeRoutes(log, db, vehicleProc, categoryProc, mediaClient, mileageAdmin)(pr)
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)
 				activity.InitializeRoutes(log, db, vehicleProc)(pr)
 				dashboard.InitializeRoutes(log, db, scheduleProc, activityProc, vehicleProc)(pr)

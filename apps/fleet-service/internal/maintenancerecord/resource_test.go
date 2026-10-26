@@ -17,6 +17,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancecategory"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
 )
 
@@ -45,7 +46,7 @@ func newRecordRouterWithDocs(t *testing.T, docs DocumentValidator) (chi.Router, 
 	log.SetOutput(io.Discard)
 
 	r := chi.NewRouter()
-	r.Group(InitializeRoutes(log, db, stubVehicles{map[string]string{"v1": "f1"}}, stubCategories{}, docs))
+	r.Group(InitializeRoutes(log, db, stubVehicles{map[string]string{"v1": "f1"}}, stubCategories{}, docs, mileage.NewAdministrator(db)))
 	return r, db
 }
 
@@ -82,7 +83,7 @@ func patchRecord(r chi.Router, id, body string, ident auth.Identity) *httptest.R
 // discarded. Deleting the CategoryID field or its apply-block fails this.
 func TestPatch_persistsAnEditedCategory(t *testing.T) {
 	r, db := newRecordRouter(t)
-	admin := NewAdministrator(db)
+	admin := NewAdministrator(db, mileage.NewAdministrator(db))
 	provider := NewProvider(db)
 	recID := insertRecord(t, admin, "v1", "cat-original", 5, 0)
 
@@ -107,7 +108,7 @@ func TestPatch_persistsAnEditedCategory(t *testing.T) {
 // so absent and empty are distinguishable.
 func TestPatch_omittedCategoryIsUnchanged(t *testing.T) {
 	r, db := newRecordRouter(t)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-original", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-original", 5, 0)
 
 	if rec := patchRecord(r, recID, `{"vendor":"Corner Garage"}`, identity("owner", "f1")); rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -128,7 +129,7 @@ func TestPatch_omittedCategoryIsUnchanged(t *testing.T) {
 // categoryID is an invariant; clearing it is a validation error, not a write.
 func TestPatch_clearedCategoryIsRejected(t *testing.T) {
 	r, db := newRecordRouter(t)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-original", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-original", 5, 0)
 
 	rec := patchRecord(r, recID, `{"categoryId":""}`, identity("owner", "f1"))
 
@@ -149,7 +150,7 @@ func TestPatch_clearedCategoryIsRejected(t *testing.T) {
 // from an entity that never carried one.
 func TestPatch_responseCarriesStoredState(t *testing.T) {
 	r, db := newRecordRouter(t)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-original", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-original", 5, 0)
 
 	rec := patchRecord(r, recID, `{"categoryId":"cat-reassigned"}`, identity("owner", "f1"))
 
@@ -174,7 +175,7 @@ func TestPatch_responseCarriesStoredState(t *testing.T) {
 
 func TestPatch_viewerIsForbidden(t *testing.T) {
 	r, db := newRecordRouter(t)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-original", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-original", 5, 0)
 
 	if rec := patchRecord(r, recID, `{"categoryId":"cat-x"}`, identity("viewer", "f1")); rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -187,7 +188,7 @@ func TestPatch_viewerIsForbidden(t *testing.T) {
 
 func TestPatch_otherFleetIsNotFound(t *testing.T) {
 	r, db := newRecordRouter(t)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-original", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-original", 5, 0)
 
 	if rec := patchRecord(r, recID, `{"categoryId":"cat-x"}`, identity("owner", "f2")); rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -239,7 +240,7 @@ func documentIDs(t *testing.T, rec *httptest.ResponseRecorder) []string {
 func TestAttachDocument_returns201WithTheUpdatedRecord(t *testing.T) {
 	docs := &stubDocs{}
 	r, db := newRecordRouterWithDocs(t, docs)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 
 	rec := attachDoc(r, recID, "media-1", identity("owner", "f1"))
 
@@ -264,7 +265,7 @@ func TestAttachDocument_returns201WithTheUpdatedRecord(t *testing.T) {
 func TestAttachDocument_rejectsMediaThatFailsOwnershipAndWritesNothing(t *testing.T) {
 	docs := &stubDocs{err: server.ErrValidation}
 	r, db := newRecordRouterWithDocs(t, docs)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 
 	rec := attachDoc(r, recID, "someone-elses-media", identity("owner", "f1"))
 
@@ -287,7 +288,7 @@ func TestAttachDocument_rejectsMediaThatFailsOwnershipAndWritesNothing(t *testin
 func TestAttachDocument_emptyMediaIDIs422AndMakesNoOwnershipCall(t *testing.T) {
 	docs := &stubDocs{}
 	r, db := newRecordRouterWithDocs(t, docs)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 
 	rec := attachDoc(r, recID, "", identity("owner", "f1"))
 
@@ -302,7 +303,7 @@ func TestAttachDocument_emptyMediaIDIs422AndMakesNoOwnershipCall(t *testing.T) {
 // FR-ATT-8: the drawer's sequential loop retries after a partial failure.
 func TestAttachDocument_isIdempotent(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 	ident := identity("owner", "f1")
 
 	if rec := attachDoc(r, recID, "media-1", ident); rec.Code != http.StatusCreated {
@@ -320,7 +321,7 @@ func TestAttachDocument_isIdempotent(t *testing.T) {
 // FR-ATT-7 at the HTTP layer: the cap answers 422, not 500.
 func TestAttachDocument_atTheCapIs422(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, MaxDocuments)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, MaxDocuments)
 
 	if rec := attachDoc(r, recID, "one-too-many", identity("owner", "f1")); rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want 422", rec.Code)
@@ -330,7 +331,7 @@ func TestAttachDocument_atTheCapIs422(t *testing.T) {
 func TestAttachDocument_viewerIsForbidden(t *testing.T) {
 	docs := &stubDocs{}
 	r, db := newRecordRouterWithDocs(t, docs)
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 
 	if rec := attachDoc(r, recID, "media-1", identity("viewer", "f1")); rec.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", rec.Code)
@@ -348,7 +349,7 @@ func TestAttachDocument_viewerIsForbidden(t *testing.T) {
 // cross-fleet existence is never leaked. Same as TestPatch_otherFleetIsNotFound.
 func TestAttachDocument_otherFleetIsNotFound(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 
 	if rec := attachDoc(r, recID, "media-1", identity("owner", "f2")); rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -357,9 +358,9 @@ func TestAttachDocument_otherFleetIsNotFound(t *testing.T) {
 
 func TestAttachDocumentRoute_softDeletedRecordIsNotFound(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	recID := insertRecord(t, a, "v1", "cat-1", 5, 0)
-	if err := a.SoftDelete(recID); err != nil {
+	if err := a.SoftDelete(recID, "v1"); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
 
@@ -371,7 +372,7 @@ func TestAttachDocumentRoute_softDeletedRecordIsNotFound(t *testing.T) {
 // FR-DET-1: 204, and the id is gone from the next GET.
 func TestDetachDocument_returns204AndTheIDIsGoneFromTheNextGet(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 	ident := identity("owner", "f1")
 	if rec := attachDoc(r, recID, "media-1", ident); rec.Code != http.StatusCreated {
 		t.Fatalf("attach status = %d", rec.Code)
@@ -394,7 +395,7 @@ func TestDetachDocument_returns204AndTheIDIsGoneFromTheNextGet(t *testing.T) {
 // its own assertion — task-025's attachment-count column reads from it.
 func TestDetachDocument_theIDIsGoneFromTheListPathToo(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 	ident := identity("owner", "f1")
 	if rec := attachDoc(r, recID, "media-1", ident); rec.Code != http.StatusCreated {
 		t.Fatalf("attach status = %d", rec.Code)
@@ -428,7 +429,7 @@ func TestDetachDocument_theIDIsGoneFromTheListPathToo(t *testing.T) {
 // FR-DET-4: never attached and already detached are indistinguishable.
 func TestDetachDocument_unattachedIsNotFound(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 	ident := identity("owner", "f1")
 
 	if rec := detachDoc(r, recID, "never-attached", ident); rec.Code != http.StatusNotFound {
@@ -448,7 +449,7 @@ func TestDetachDocument_unattachedIsNotFound(t *testing.T) {
 
 func TestDetachDocument_viewerIsForbidden(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 	if rec := attachDoc(r, recID, "media-1", identity("owner", "f1")); rec.Code != http.StatusCreated {
 		t.Fatalf("attach status = %d", rec.Code)
 	}
@@ -464,7 +465,7 @@ func TestDetachDocument_viewerIsForbidden(t *testing.T) {
 
 func TestDetachDocument_otherFleetIsNotFound(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 	if rec := attachDoc(r, recID, "media-1", identity("owner", "f1")); rec.Code != http.StatusCreated {
 		t.Fatalf("attach status = %d", rec.Code)
 	}
@@ -479,7 +480,7 @@ func TestDetachDocument_otherFleetIsNotFound(t *testing.T) {
 // consults the category, so this pins that it stays that way.
 func TestAttachAndDetach_behaveIdenticallyForAModificationKindRecord(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "mod-category", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "mod-category", 5, 0)
 	ident := identity("owner", "f1")
 
 	if rec := attachDoc(r, recID, "media-1", ident); rec.Code != http.StatusCreated {
@@ -495,7 +496,7 @@ func TestAttachAndDetach_behaveIdenticallyForAModificationKindRecord(t *testing.
 // exists to protect, so it gets its own test.
 func TestPatch_leavesDocumentRowsUntouched(t *testing.T) {
 	r, db := newRecordRouterWithDocs(t, &stubDocs{})
-	recID := insertRecord(t, NewAdministrator(db), "v1", "cat-1", 5, 0)
+	recID := insertRecord(t, NewAdministrator(db, mileage.NewAdministrator(db)), "v1", "cat-1", 5, 0)
 	ident := identity("owner", "f1")
 	if rec := attachDoc(r, recID, "media-1", ident); rec.Code != http.StatusCreated {
 		t.Fatalf("attach status = %d", rec.Code)

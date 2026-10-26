@@ -91,7 +91,7 @@ func TestCompleteInTransaction(t *testing.T) {
 		t.Fatalf("insert schedule: %v", err)
 	}
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db, mileage.NewAdministrator(db)), NewAdministrator(db), mileage.NewAdministrator(db))
 	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	out, err := deps.CompleteInTransaction(logrus.New(), CompletionInput{
 		ScheduleID:    created.ID(),
@@ -207,7 +207,7 @@ func TestCompleteInTransaction_oneTimeDeactivates(t *testing.T) {
 		t.Fatalf("insert schedule: %v", err)
 	}
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db, mileage.NewAdministrator(db)), NewAdministrator(db), mileage.NewAdministrator(db))
 	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	out, err := deps.CompleteInTransaction(logrus.New(), CompletionInput{
 		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
@@ -267,7 +267,7 @@ func TestCompleteInTransaction_recurringClearsAnchorAndStaysActive(t *testing.T)
 		t.Fatalf("insert schedule: %v", err)
 	}
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db, mileage.NewAdministrator(db)), NewAdministrator(db), mileage.NewAdministrator(db))
 	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := deps.CompleteInTransaction(logrus.New(), CompletionInput{
 		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
@@ -327,7 +327,7 @@ func TestCompleteInTransaction_inactiveScheduleWritesNothing(t *testing.T) {
 		t.Fatalf("seed inactive: row is still active")
 	}
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db, mileage.NewAdministrator(db)), NewAdministrator(db), mileage.NewAdministrator(db))
 	_, err = deps.CompleteInTransaction(logrus.New(), CompletionInput{
 		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
 		Date: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), LatestMileage: 60100,

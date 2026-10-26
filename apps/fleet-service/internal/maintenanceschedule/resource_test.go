@@ -41,7 +41,7 @@ func newScheduleRouter(t *testing.T, fleetID string, currentMileage int) (chi.Ro
 	log := logrus.New()
 	log.SetOutput(io.Discard)
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db, mileage.NewAdministrator(db)), NewAdministrator(db), mileage.NewAdministrator(db))
 	r := chi.NewRouter()
 	r.Group(InitializeRoutes(log, db, stubVehicleAccessor{fleetID: fleetID, currentMileage: currentMileage}, deps))
 	return r, db

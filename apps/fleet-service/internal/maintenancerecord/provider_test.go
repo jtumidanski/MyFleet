@@ -9,6 +9,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 )
 
 // newTestDBWithoutIndexes builds the schema-qualified sqlite fixture WITHOUT
@@ -32,6 +34,16 @@ func newTestDBWithoutIndexes(t *testing.T) *gorm.DB {
 	// the same workaround used in maintenanceschedule/completion_db_test.go,
 	// dashboard/aggregate_test.go, and activity/processor_test.go.
 	ddl := []string{
+		`CREATE TABLE fleet.vehicles (
+			id TEXT PRIMARY KEY, fleet_id TEXT, nickname TEXT, make TEXT, model TEXT,
+			trim TEXT, year INTEGER, vin TEXT, current_mileage INTEGER,
+			primary_image_media_id TEXT, notes TEXT, created_at DATETIME,
+			updated_at DATETIME, deleted_at DATETIME, purge_after DATETIME,
+			purge_operation_id TEXT)`,
+		`CREATE TABLE fleet.mileage_records (
+			id TEXT PRIMARY KEY, vehicle_id TEXT, mileage INTEGER, recorded_at DATETIME,
+			source TEXT, source_ref_id TEXT, created_by_user_id TEXT, created_at DATETIME,
+			deleted_at DATETIME, purge_operation_id TEXT)`,
 		`CREATE TABLE fleet.maintenance_records (
 			id TEXT PRIMARY KEY, vehicle_id TEXT, category_id TEXT, description TEXT,
 			performed_at DATETIME, mileage INTEGER, cost REAL, vendor TEXT, notes TEXT,
@@ -78,7 +90,7 @@ func insertRecord(t *testing.T, a Administrator, vehicleID, categoryID string, d
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	created, err := a.Insert(m)
+	created, err := a.Insert(m, nil)
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -88,7 +100,7 @@ func insertRecord(t *testing.T, a Administrator, vehicleID, categoryID string, d
 // nil means "no filter".
 func TestListByVehicle_nilCategoryIDsReturnsEverything(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	insertRecord(t, a, "v1", "maint-1", 1, 0)
 	insertRecord(t, a, "v1", "mod-1", 2, 0)
 	insertRecord(t, a, "v2", "maint-1", 3, 0)
@@ -107,7 +119,7 @@ func TestListByVehicle_nilCategoryIDsReturnsEverything(t *testing.T) {
 // seeing every maintenance record labelled as a modification (design D3).
 func TestListByVehicle_emptyCategoryIDsMatchesNothing(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	insertRecord(t, a, "v1", "maint-1", 1, 0)
 	insertRecord(t, a, "v1", "maint-2", 2, 0)
 
@@ -122,7 +134,7 @@ func TestListByVehicle_emptyCategoryIDsMatchesNothing(t *testing.T) {
 
 func TestListByVehicle_filtersByCategoryIDs(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	insertRecord(t, a, "v1", "maint-1", 1, 0)
 	insertRecord(t, a, "v1", "mod-1", 2, 0)
 	insertRecord(t, a, "v1", "mod-2", 3, 0)
@@ -145,7 +157,7 @@ func TestListByVehicle_filtersByCategoryIDs(t *testing.T) {
 // fit on one page (PRD FR-LIST-2).
 func TestListByVehicle_filteredTotalSurvivesPaging(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	for i := 1; i <= 7; i++ {
 		insertRecord(t, a, "v1", "mod-1", i, 0)
 	}
@@ -169,7 +181,7 @@ func TestListByVehicle_filteredTotalSurvivesPaging(t *testing.T) {
 // The observable contract is that every record still carries exactly its own.
 func TestListByVehicle_attachesEachRecordsOwnDocuments(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	insertRecord(t, a, "v1", "c1", 1, 2)
 	insertRecord(t, a, "v1", "c1", 2, 0)
 	insertRecord(t, a, "v1", "c1", 3, 3)

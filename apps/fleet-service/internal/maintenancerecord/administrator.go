@@ -8,18 +8,26 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
 // Administrator is the write interface for maintenance record data access.
 // All mutations (insert, update, soft-delete) go here.
 type Administrator interface {
-	Insert(Model) (Model, error)
-	Update(Model) (Model, error)
-	SoftDelete(id string) error
+	// Insert writes the record and, when entry is non-nil, appends it to the
+	// mileage ledger in the same transaction.
+	Insert(m Model, entry *mileage.Model) (Model, error)
+	// Update writes the editable fields and, when entry is non-nil, appends it
+	// to the mileage ledger in the same transaction.
+	Update(m Model, entry *mileage.Model) (Model, error)
+	// SoftDelete stamps the record deleted and retracts every mileage-ledger
+	// row it sourced (for vehicleID) in the same transaction.
+	SoftDelete(id, vehicleID string) error
 	// InsertTx inserts a record (and its document rows) using the supplied
 	// transaction handle, so cross-domain orchestrations (completion flow,
-	// design §10.3) can wrap it in a single db.Transaction.
+	// design §10.3) can wrap it in a single db.Transaction. It deliberately
+	// does NOT append mileage: the completion flow appends its own entry.
 	InsertTx(tx *gorm.DB, m Model) (Model, error)
 	// AttachDocument adds one media reference to an existing record and
 	// returns the re-read model. Deliberately NOT folded into Update: the
@@ -31,17 +39,37 @@ type Administrator interface {
 	DetachDocument(recordID, mediaID string) error
 }
 
-type dbAdministrator struct{ db *gorm.DB }
+// MileageLedger is the mileage ledger surface the maintenance record domain
+// depends on. Satisfied by mileage.Administrator.
+type MileageLedger interface {
+	AppendTx(tx *gorm.DB, m mileage.Model) (mileage.Model, error)
+	RetractTx(tx *gorm.DB, vehicleID, source, sourceRefID string) error
+}
+
+type dbAdministrator struct {
+	db     *gorm.DB
+	ledger MileageLedger
+}
 
 // NewAdministrator returns an Administrator backed by the given database.
-func NewAdministrator(db *gorm.DB) Administrator { return &dbAdministrator{db: db} }
+func NewAdministrator(db *gorm.DB, ledger MileageLedger) Administrator {
+	return &dbAdministrator{db: db, ledger: ledger}
+}
 
-func (a *dbAdministrator) Insert(m Model) (Model, error) {
+func (a *dbAdministrator) Insert(m Model, entry *mileage.Model) (Model, error) {
 	var out Model
 	err := a.db.Transaction(func(tx *gorm.DB) error {
 		var err error
 		out, err = a.InsertTx(tx, m)
-		return err
+		if err != nil {
+			return err
+		}
+		if entry != nil {
+			if _, err := a.ledger.AppendTx(tx, *entry); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return out, err
 }
@@ -62,9 +90,30 @@ func (a *dbAdministrator) InsertTx(tx *gorm.DB, m Model) (Model, error) {
 	return Make(e, docs), nil
 }
 
-func (a *dbAdministrator) Update(m Model) (Model, error) {
+func (a *dbAdministrator) Update(m Model, entry *mileage.Model) (Model, error) {
+	var out Model
+	err := a.db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		out, err = a.updateTx(tx, m)
+		if err != nil {
+			return err
+		}
+		if entry != nil {
+			if _, err := a.ledger.AppendTx(tx, *entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return Model{}, err
+	}
+	return out, nil
+}
+
+func (a *dbAdministrator) updateTx(tx *gorm.DB, m Model) (Model, error) {
 	e := m.ToEntity()
-	if err := a.db.Model(&Entity{}).Where("id = ? AND deleted_at IS NULL", e.ID).
+	if err := tx.Model(&Entity{}).Where("id = ? AND deleted_at IS NULL", e.ID).
 		Updates(map[string]any{
 			// This map is an explicit allow-list, so a field missing from it is
 			// silently dropped — and because the return below is built from the
@@ -91,28 +140,31 @@ func (a *dbAdministrator) Update(m Model) (Model, error) {
 	//      edited category looked saved until the next fetch. Returning stored
 	//      state means the response can no longer disagree with the row.
 	var stored Entity
-	if err := a.db.Where("id = ? AND deleted_at IS NULL", e.ID).First(&stored).Error; err != nil {
+	if err := tx.Where("id = ? AND deleted_at IS NULL", e.ID).First(&stored).Error; err != nil {
 		return Model{}, err
 	}
 	var docs []DocumentEntity
-	if err := a.db.Where("maintenance_record_id = ? AND deleted_at IS NULL", e.ID).Find(&docs).Error; err != nil {
+	if err := tx.Where("maintenance_record_id = ? AND deleted_at IS NULL", e.ID).Find(&docs).Error; err != nil {
 		return Model{}, err
 	}
 	return Make(stored, docs), nil
 }
 
-// SoftDelete stamps deleted_at on the maintenance record.
-func (a *dbAdministrator) SoftDelete(id string) error {
-	res := a.db.Model(&Entity{}).
-		Where("id = ? AND deleted_at IS NULL", id).
-		Update("deleted_at", time.Now().UTC())
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+// SoftDelete stamps deleted_at on the maintenance record and retracts every
+// mileage-ledger row the record sourced, in one transaction.
+func (a *dbAdministrator) SoftDelete(id, vehicleID string) error {
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&Entity{}).
+			Where("id = ? AND deleted_at IS NULL", id).
+			Update("deleted_at", time.Now().UTC())
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		return a.ledger.RetractTx(tx, vehicleID, mileage.SourceMaintenance, id)
+	})
 }
 
 // AttachDocument attaches one media reference to a record, enforcing the

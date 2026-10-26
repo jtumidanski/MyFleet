@@ -8,6 +8,8 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 )
 
 func newTestProcessor(t *testing.T) (*Processor, string) {
@@ -15,7 +17,7 @@ func newTestProcessor(t *testing.T) (*Processor, string) {
 	db := newTestDB(t)
 	log := logrus.New()
 	log.SetOutput(io.Discard)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, 0)
 	return NewProcessor(log, NewProvider(db), a), id
 }
@@ -37,7 +39,7 @@ func TestProcessorAttachDocument_passesValidationThrough(t *testing.T) {
 	db := newTestDB(t)
 	log := logrus.New()
 	log.SetOutput(io.Discard)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, MaxDocuments)
 	pr := NewProcessor(log, NewProvider(db), a)
 
