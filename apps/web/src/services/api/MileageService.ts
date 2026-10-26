@@ -1,11 +1,15 @@
 import type { JsonApiDocument, JsonApiResource, PageMeta } from '@myfleet/shared-ts';
 import { apiClient } from '../../lib/api/client';
-import type { MileageRecordAttributes, CreateMileageAttributes } from '../../types/models/mileage';
+import type {
+  MileageRecordAttributes,
+  MileageSource,
+  CreateMileageAttributes,
+} from '../../types/models/mileage';
 
 /**
  * Mileage service — wraps the fleet-service mileage endpoints.
  * Backend routes (apps/fleet-service/internal/mileage/resource.go, gateway-prefixed):
- *   GET  /api/fleet/vehicles/{id}/mileage  — list mileage records (newest first, paged, ?from=&to=)
+ *   GET  /api/fleet/vehicles/{id}/mileage  — list mileage records (newest first, paged, ?from=&to=&source=)
  *   POST /api/fleet/vehicles/{id}/mileage  — append a manual mileage record
  */
 class MileageService {
@@ -13,15 +17,22 @@ class MileageService {
 
   /**
    * GET /api/fleet/vehicles/{vehicleId}/mileage
-   * Supports ?from= and ?to= as RFC3339 range filters on recorded_at.
+   * Supports ?from= and ?to= as RFC3339 range filters on recorded_at, and
+   * ?source= as a comma-separated list of fuel|maintenance|manual (omitted when empty).
    */
   async listByVehicle(
     vehicleId: string,
-    params?: { from?: string; to?: string; page?: number; pageSize?: number },
+    params?: {
+      from?: string;
+      to?: string;
+      sources?: MileageSource[];
+      page?: number; pageSize?: number;
+    },
   ): Promise<{ data: Array<JsonApiResource<MileageRecordAttributes>>; meta?: PageMeta }> {
     const url = new URL(`${this.basePath}/${vehicleId}/mileage`, 'http://localhost');
     if (params?.from) url.searchParams.set('from', params.from);
     if (params?.to) url.searchParams.set('to', params.to);
+    if (params?.sources?.length) url.searchParams.set('source', params.sources.join(','));
     if (params?.page != null) url.searchParams.set('page[number]', String(params.page));
     if (params?.pageSize != null) url.searchParams.set('page[size]', String(params.pageSize));
 

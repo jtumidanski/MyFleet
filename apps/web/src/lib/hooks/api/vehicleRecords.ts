@@ -8,6 +8,7 @@ import {
   type VehicleRecordRow,
 } from '../../vehicleRecords';
 import type { MaintenanceCategory } from '../../../types/models/maintenanceCategory';
+import type { MileageSource } from '../../../types/models/mileage';
 
 /**
  * The subset of `useMaintenanceCategories()`'s return value this hook needs.
@@ -38,6 +39,9 @@ export interface CategoriesQueryState {
  * vehicleRecords.test.ts.
  */
 const EMPTY_CATEGORIES: MaintenanceCategory[] = [];
+// Fuel and maintenance readings already appear as their parent rows; the feed
+// lists only manual odometer readings from the mileage source.
+const MANUAL_ONLY: MileageSource[] = ['manual'];
 
 /**
  * Composes the three paginated record sources into one feed.
@@ -50,7 +54,7 @@ const EMPTY_CATEGORIES: MaintenanceCategory[] = [];
 export function useVehicleRecords(vehicleId: string, categoriesQuery: CategoriesQueryState) {
   const maintenance = useMaintenanceRecords(vehicleId);
   const fuel = useFuelLogs(vehicleId);
-  const mileage = useMileageRecords({ vehicleId });
+  const mileage = useMileageRecords({ vehicleId, sources: MANUAL_ONLY });
 
   const categories = categoriesQuery.data ?? EMPTY_CATEGORIES;
 

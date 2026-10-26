@@ -161,6 +161,14 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('useVehicleRecords', () => {
+  it('requests only manual mileage readings for the mileage source', () => {
+    setupSources({});
+
+    renderHook(() => useVehicleRecords('v1', NO_CATEGORIES));
+
+    expect(mockedUseMileageRecords).toHaveBeenCalledWith({ vehicleId: 'v1', sources: ['manual'] });
+  });
+
   it('merges rows from all three sources, newest first, with each row carrying its source kind and sourceId', () => {
     setupSources({
       maintenance: stub([maintenanceRecord('m1', 'oil-change', '2026-01-01T00:00:00Z')]),

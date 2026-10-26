@@ -4,7 +4,11 @@ import { mileageService } from '../../../services/api/MileageService';
 import { RECORD_PAGE_SIZE } from './pageSize';
 import { vehicleKeys } from './vehicles';
 import { dashboardKeys } from './dashboard';
-import type { CreateMileageAttributes, MileageRecord } from '../../../types/models/mileage';
+import type {
+  CreateMileageAttributes,
+  MileageRecord,
+  MileageSource,
+} from '../../../types/models/mileage';
 
 // Hierarchical query-key factory mirroring vehicleKeys.
 // all                          -> ['mileage']
@@ -14,7 +18,12 @@ import type { CreateMileageAttributes, MileageRecord } from '../../../types/mode
 export const mileageKeys = {
   all: ['mileage'] as const,
   lists: () => [...mileageKeys.all, 'list'] as const,
-  list: (params: { vehicleId: string; from?: string; to?: string }) =>
+  list: (params: {
+    vehicleId: string;
+    from?: string;
+    to?: string;
+    sources?: MileageSource[];
+  }) =>
     [...mileageKeys.lists(), params] as const,
 };
 
@@ -57,6 +66,8 @@ export interface UseMileageParams {
   vehicleId: string;
   from?: string;
   to?: string;
+  /** Restrict to these origins; omit for all sources. */
+  sources?: MileageSource[];
 }
 
 /**
@@ -69,13 +80,14 @@ export interface UseMileageParams {
  * Pages accumulate; `rows` is every page fetched so far.
  */
 export function useMileageRecords(params: UseMileageParams | null | undefined) {
-  const { vehicleId = '', from, to } = params ?? {};
+  const { vehicleId = '', from, to, sources } = params ?? {};
   return useInfiniteQuery({
-    queryKey: mileageKeys.list({ vehicleId, from, to }),
+    queryKey: mileageKeys.list({ vehicleId, from, to, sources }),
     queryFn: ({ pageParam }) =>
       mileageService.listByVehicle(vehicleId, {
         from,
         to,
+        sources,
         page: pageParam,
         pageSize: RECORD_PAGE_SIZE,
       }),

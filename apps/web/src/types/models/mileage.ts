@@ -1,5 +1,8 @@
 import type { JsonApiResource } from '@myfleet/shared-ts';
 
+/** Mirrors the backend ?source= filter values (lowercase). */
+export type MileageSource = 'fuel' | 'maintenance' | 'manual';
+
 /**
  * Mirrors apps/fleet-service/internal/mileage/rest.go Attributes.
  */
@@ -8,8 +11,7 @@ export interface MileageRecordAttributes {
   mileage: number;
   /** RFC3339 */
   recordedAt: string;
-  /** 'manual' | 'obd' | etc. */
-  source: string;
+  source: MileageSource;
   sourceRefId?: string;
   createdByUserId?: string;
   /** RFC3339 */
