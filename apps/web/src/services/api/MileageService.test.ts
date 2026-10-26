@@ -12,8 +12,9 @@ beforeEach(() => {
 });
 
 function requestedUrl(): URL {
-  const path = vi.mocked(apiClient.request).mock.calls[0][0] as string;
-  return new URL(path, 'http://localhost');
+  const call = vi.mocked(apiClient.request).mock.calls[0];
+  if (!call) throw new Error('apiClient.request was not called');
+  return new URL(call[0], 'http://localhost');
 }
 
 describe('mileageService.listByVehicle source filter', () => {
