@@ -29,7 +29,10 @@ vi.mock('../../../../lib/hooks/api/vehicles', () => ({
     detail: (id: string) => ['vehicles', 'detail', id],
   },
 }));
-vi.mock('../../../../lib/hooks/api/mileage', () => ({
+// Keep the real invalidateOdometerQueries/mileageKeys: useCompleteMaintenanceSchedule's
+// onSettled calls the helper, and the mock must not hide that export.
+vi.mock('../../../../lib/hooks/api/mileage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../lib/hooks/api/mileage')>()),
   useMileageRecords: () => ({ data: { rows: [] } }),
   getLatestMileage: () => undefined,
 }));
