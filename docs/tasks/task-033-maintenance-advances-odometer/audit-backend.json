@@ -1,0 +1,37 @@
+{
+  "service": "fleet-service",
+  "path": "apps/fleet-service",
+  "date": "2026-10-26",
+  "build": "pass",
+  "testsPassed": 21,
+  "testsFailed": 0,
+  "overallStatus": "needs-work",
+  "domains": [
+    {"name": "mileage", "type": "domain", "checks": [
+      {"id": "DOM-06", "name": "Processor accepts FieldLogger", "status": "fail", "evidence": "internal/mileage/processor.go deleted; no NewProcessor"},
+      {"id": "DOM-12", "name": "No cross-domain logic in handlers", "status": "fail", "evidence": "internal/mileage/resource.go:150 handler owns db.Transaction"},
+      {"id": "DOM-13", "name": "Handlers don't call providers directly", "status": "fail", "evidence": "internal/mileage/resource.go:93 prov.ListByVehicle"},
+      {"id": "DOM-18", "name": "Input structs narrow and unexported", "status": "warn", "evidence": "internal/mileage/resource.go:105 anonymous inline struct"}
+    ]},
+    {"name": "fuel", "type": "domain", "checks": [
+      {"id": "DOM-12", "name": "Handlers call processor only", "status": "fail", "evidence": "internal/fuel/resource.go:237 adm.SoftDelete, :211 adm.Update"},
+      {"id": "DOM-18", "name": "Input structs narrow and unexported", "status": "warn", "evidence": "internal/fuel/resource.go:66,153"}
+    ]},
+    {"name": "maintenancerecord", "type": "domain", "checks": [
+      {"id": "DOM-12", "name": "Handlers call processor only", "status": "pass", "evidence": "internal/maintenancerecord/resource.go:272 proc.Update"},
+      {"id": "DOM-15", "name": "administrator writes atomic with ledger", "status": "pass", "evidence": "internal/maintenancerecord/administrator.go:60-168"},
+      {"id": "DOM-18", "name": "Input structs narrow and unexported", "status": "warn", "evidence": "internal/maintenancerecord/resource.go:109,226,341"}
+    ]},
+    {"name": "maintenanceschedule", "type": "domain", "checks": [
+      {"id": "DOM-14", "name": "No direct entity creation", "status": "pass", "evidence": "internal/maintenanceschedule/completion_db.go:133-146 uses ledger.AppendTx"}
+    ]}
+  ],
+  "blocking": [
+    "DOM-06/12/13: apps/fleet-service/internal/mileage/resource.go:93,150 handler owns tx and calls provider/administrator; processor.go was deleted. Reintroduce mileage.Processor.",
+    "DOM-12: apps/fleet-service/internal/fuel/resource.go:237 (and :211) handler calls administrator directly; add SoftDelete/Update to fuel.Processor."
+  ],
+  "nonBlocking": [
+    "DOM-18: anonymous inline request structs (17 sites in fleet-service; mileage/resource.go:105, fuel/resource.go:66,153, maintenancerecord/resource.go:109,226,341)",
+    "maintenancerecord/backfill.go:29-80 writes mileage.Entity and fleet.vehicles outside any administrator"
+  ]
+}
