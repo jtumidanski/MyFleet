@@ -26,14 +26,16 @@ func BackfillMileage(db *gorm.DB, log logrus.FieldLogger) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		var candidates []backfillCandidate
 		// The NOT EXISTS deliberately ignores m.deleted_at: a record whose
-		// entry was retracted must never be re-inserted.
+		// entry was retracted must never be re-inserted. The CAST is needed
+		// because source_ref_id is text but maintenance_records.id is uuid in
+		// Postgres, which has no text = uuid operator.
 		if err := tx.Raw(`
 			SELECT r.id, r.vehicle_id, r.mileage, r.performed_at, r.created_by_user_id
 			FROM fleet.maintenance_records r
 			JOIN fleet.vehicles v ON v.id = r.vehicle_id AND v.deleted_at IS NULL
 			WHERE r.deleted_at IS NULL AND r.mileage > 0
 			  AND NOT EXISTS (SELECT 1 FROM fleet.mileage_records m
-			                  WHERE m.source = ? AND m.source_ref_id = r.id)`,
+			                  WHERE m.source = ? AND m.source_ref_id = CAST(r.id AS TEXT))`,
 			mileage.SourceMaintenance).Scan(&candidates).Error; err != nil {
 			return err
 		}
