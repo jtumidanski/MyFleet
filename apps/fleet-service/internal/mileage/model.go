@@ -2,7 +2,24 @@ package mileage
 
 import "time"
 
-// Model is immutable; append-only (no updates or deletes).
+// Source values for a mileage reading.
+const (
+	SourceFuel        = "fuel"
+	SourceMaintenance = "maintenance"
+	SourceManual      = "manual"
+)
+
+// ValidSource reports whether s is a recognised mileage source.
+func ValidSource(s string) bool {
+	switch s {
+	case SourceFuel, SourceMaintenance, SourceManual:
+		return true
+	}
+	return false
+}
+
+// Model is immutable; append-only except RetractTx, which soft-deletes a
+// parent's rows when the parent is deleted.
 type Model struct {
 	id              string
 	vehicleID       string

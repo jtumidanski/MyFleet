@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
+
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 )
 
 // Update's column allow-list is the layer that silently dropped an edited
@@ -17,7 +19,7 @@ import (
 // return value. Asserting on the return would have passed even before the fix.
 func TestUpdate_persistsAReassignedCategory(t *testing.T) {
 	db := newTestDB(t)
-	admin := NewAdministrator(db)
+	admin := NewAdministrator(db, mileage.NewAdministrator(db))
 	provider := NewProvider(db)
 
 	id := insertRecord(t, admin, "v1", "cat-original", 5, 0)
@@ -26,7 +28,7 @@ func TestUpdate_persistsAReassignedCategory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get before: %v", err)
 	}
-	if _, err := admin.Update(before.WithCategoryID("cat-reassigned")); err != nil {
+	if _, err := admin.Update(before.WithCategoryID("cat-reassigned"), nil); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 
@@ -44,7 +46,7 @@ func TestUpdate_persistsAReassignedCategory(t *testing.T) {
 // already there.
 func TestUpdate_leavesTheOtherEditableFieldsIntact(t *testing.T) {
 	db := newTestDB(t)
-	admin := NewAdministrator(db)
+	admin := NewAdministrator(db, mileage.NewAdministrator(db))
 	provider := NewProvider(db)
 
 	id := insertRecord(t, admin, "v1", "cat-original", 5, 0)
@@ -57,7 +59,7 @@ func TestUpdate_leavesTheOtherEditableFieldsIntact(t *testing.T) {
 		WithNotes("torque to spec").
 		WithMileage(84999).
 		WithCost(129.5).
-		WithDescription("  front pads  ")); err != nil {
+		WithDescription("  front pads  "), nil); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 
@@ -90,7 +92,7 @@ func TestUpdate_leavesTheOtherEditableFieldsIntact(t *testing.T) {
 // A fresh attach adds exactly one live row and the returned model reflects it.
 func TestAttachDocument_addsOneLiveRowAndReturnsTheStoredSet(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, 0)
 
 	m, err := a.AttachDocument(id, "media-1")
@@ -115,7 +117,7 @@ func TestAttachDocument_addsOneLiveRowAndReturnsTheStoredSet(t *testing.T) {
 // a second row.
 func TestAttachDocument_isIdempotentForAnAlreadyAttachedMedia(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, 0)
 
 	if _, err := a.AttachDocument(id, "media-1"); err != nil {
@@ -136,7 +138,7 @@ func TestAttachDocument_isIdempotentForAnAlreadyAttachedMedia(t *testing.T) {
 // FR-ATT-7: the eleventh attachment is rejected and writes nothing.
 func TestAttachDocument_rejectsTheEleventhAndWritesNothing(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, MaxDocuments)
 
 	_, err := a.AttachDocument(id, "one-too-many")
@@ -153,7 +155,7 @@ func TestAttachDocument_rejectsTheEleventhAndWritesNothing(t *testing.T) {
 // is not punished with a 422.
 func TestAttachDocument_reattachOnAFullRecordSucceeds(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, MaxDocuments-1)
 	if _, err := a.AttachDocument(id, "media-last"); err != nil {
 		t.Fatalf("attach to fill: %v", err)
@@ -169,16 +171,16 @@ func TestAttachDocument_reattachOnAFullRecordSucceeds(t *testing.T) {
 
 func TestAttachDocument_missingRecordIsNotFound(t *testing.T) {
 	db := newTestDB(t)
-	if _, err := NewAdministrator(db).AttachDocument("no-such-record", "media-1"); !errors.Is(err, ErrNotFound) {
+	if _, err := NewAdministrator(db, mileage.NewAdministrator(db)).AttachDocument("no-such-record", "media-1"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
 }
 
 func TestAttachDocument_softDeletedRecordIsNotFound(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, 0)
-	if err := a.SoftDelete(id); err != nil {
+	if err := a.SoftDelete(id, "v1"); err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
 
@@ -191,7 +193,7 @@ func TestAttachDocument_softDeletedRecordIsNotFound(t *testing.T) {
 // already depends on a stamped row being invisible to readers.
 func TestDetachDocument_soft_deletesTheRowAndLeavesItPresent(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, 0)
 	if _, err := a.AttachDocument(id, "media-1"); err != nil {
 		t.Fatalf("attach: %v", err)
@@ -220,7 +222,7 @@ func TestDetachDocument_soft_deletesTheRowAndLeavesItPresent(t *testing.T) {
 // FR-DET-4: never attached and already detached collapse to the same answer.
 func TestDetachDocument_unattachedMediaIsNotFound(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	id := insertRecord(t, a, "v1", "cat-1", 5, 0)
 
 	if err := a.DetachDocument(id, "never-attached"); !errors.Is(err, ErrNotFound) {
@@ -241,7 +243,7 @@ func TestDetachDocument_unattachedMediaIsNotFound(t *testing.T) {
 // Detach must not reach across records.
 func TestDetachDocument_doesNotDetachFromAnotherRecord(t *testing.T) {
 	db := newTestDB(t)
-	a := NewAdministrator(db)
+	a := NewAdministrator(db, mileage.NewAdministrator(db))
 	mine := insertRecord(t, a, "v1", "cat-1", 5, 0)
 	theirs := insertRecord(t, a, "v1", "cat-1", 6, 0)
 	if _, err := a.AttachDocument(theirs, "media-1"); err != nil {

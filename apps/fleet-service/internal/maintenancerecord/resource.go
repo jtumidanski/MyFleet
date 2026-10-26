@@ -52,8 +52,9 @@ func InitializeRoutes(
 	vehicleAccessor VehicleAccessor,
 	categoryAccessor CategoryAccessor,
 	docs DocumentValidator,
+	ledger MileageLedger,
 ) func(chi.Router) {
-	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db))
+	proc := NewProcessor(log, NewProvider(db), NewAdministrator(db, ledger))
 	return func(r chi.Router) {
 		// GET /vehicles/{id}/maintenance-records — list (paged, newest first).
 		r.Get("/vehicles/{id}/maintenance-records", func(w http.ResponseWriter, req *http.Request) {
@@ -268,7 +269,7 @@ func InitializeRoutes(
 				parsedAt = &t
 			}
 
-			updated, err := proc.Update(id, func(m Model) Model {
+			updated, err := proc.Update(id, identity.UserID, func(m Model) Model {
 				if attrs.CategoryID != nil {
 					m = m.WithCategoryID(*attrs.CategoryID)
 				}

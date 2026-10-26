@@ -36,11 +36,12 @@ func DerivePrice(price, total, gallons float64) (Derived, error) {
 type Processor struct {
 	log  logrus.FieldLogger
 	prov Provider
+	adm  Administrator
 }
 
-// NewProcessor constructs a Processor with the given logger and provider.
-func NewProcessor(log logrus.FieldLogger, prov Provider) *Processor {
-	return &Processor{log: log, prov: prov}
+// NewProcessor constructs a Processor with the given logger, provider and administrator.
+func NewProcessor(log logrus.FieldLogger, prov Provider, adm Administrator) *Processor {
+	return &Processor{log: log, prov: prov, adm: adm}
 }
 
 // GetByID fetches a fuel log by ID (only non-deleted rows).
@@ -58,4 +59,14 @@ func (pr *Processor) GetByID(id string) (Model, error) {
 // ListByVehicle returns a page of fuel logs for a vehicle.
 func (pr *Processor) ListByVehicle(vehicleID string, page server.Page) ([]Model, int, error) {
 	return pr.prov.ListByVehicle(vehicleID, page)
+}
+
+// SoftDelete soft-deletes a fuel log and retracts its mileage reading. An
+// unknown or already-deleted ID is server.ErrNotFound.
+func (pr *Processor) SoftDelete(id string) error {
+	current, err := pr.GetByID(id)
+	if err != nil {
+		return err
+	}
+	return pr.adm.SoftDelete(id, current.VehicleID())
 }

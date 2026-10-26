@@ -2,37 +2,40 @@ package mileage
 
 import (
 	"github.com/sirupsen/logrus"
+	"gorm.io/gorm"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
-// VehicleMileageUpdater is satisfied by vehicle.Administrator.UpdateCurrentMileage.
-// Injected so the processor does not import the vehicle package directly.
-type VehicleMileageUpdater interface {
-	UpdateCurrentMileage(vehicleID string, m int) error
-}
-
-// Processor holds mileage business logic.
+// Processor contains mileage business logic.
 type Processor struct {
-	log     logrus.FieldLogger
-	updater VehicleMileageUpdater
+	log  logrus.FieldLogger
+	db   *gorm.DB
+	prov Provider
+	adm  Administrator
 }
 
-// NewProcessor constructs a Processor with the given logger and mileage updater.
-func NewProcessor(log logrus.FieldLogger, updater VehicleMileageUpdater) *Processor {
-	return &Processor{log: log, updater: updater}
+// NewProcessor constructs a Processor. db is the handle used to open the
+// transaction that wraps an append.
+func NewProcessor(log logrus.FieldLogger, db *gorm.DB, prov Provider, adm Administrator) *Processor {
+	return &Processor{log: log, db: db, prov: prov, adm: adm}
 }
 
-// OnAppend is the reusable hook called after inserting a mileage record.
-// If rec.Mileage() < currentLatest the record is flagged and current_mileage
-// is NOT advanced (history is kept — insert already happened).
-// If rec.Mileage() >= currentLatest current_mileage is advanced via the updater.
-//
-// This hook is designed for reuse by fuel and maintenance processors (design §10.4).
-func (pr *Processor) OnAppend(rec Model, currentLatest int) (flagged bool, err error) {
-	if rec.Mileage() < currentLatest {
-		return true, nil
+// ListByVehicle returns a page of mileage readings for a vehicle.
+func (pr *Processor) ListByVehicle(vehicleID string, f ListFilter, page server.Page) ([]Model, int, error) {
+	return pr.prov.ListByVehicle(vehicleID, f, page)
+}
+
+// Append records a reading and advances the vehicle odometer in one transaction.
+func (pr *Processor) Append(m Model) (Model, error) {
+	var created Model
+	err := pr.db.Transaction(func(tx *gorm.DB) error {
+		var txErr error
+		created, txErr = pr.adm.AppendTx(tx, m)
+		return txErr
+	})
+	if err != nil {
+		return Model{}, err
 	}
-	if err := pr.updater.UpdateCurrentMileage(rec.VehicleID(), rec.Mileage()); err != nil {
-		return false, err
-	}
-	return false, nil
+	return created, nil
 }

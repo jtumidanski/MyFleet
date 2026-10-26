@@ -22,5 +22,5 @@ func (b *Builder) SetSourceRefID(ref string) *Builder        { b.m.sourceRefID =
 func (b *Builder) SetCreatedByUserID(userID string) *Builder { b.m.createdByUserID = userID; return b }
 
 // Build returns the model with no validation errors — mileage has no hard invariants
-// at the builder level (validation is contextual, e.g. flagging by OnAppend).
+// at the builder level (validation is contextual, e.g. flagging is set by Administrator.AppendTx).
 func (b *Builder) Build() Model { return b.m }

@@ -82,6 +82,18 @@ func main() {
 		log.WithError(err).Fatal("backfill maintenance schedule due points")
 	}
 
+	// Give maintenance records that predate odometer sync a mileage history
+	// row and advance each vehicle's odometer to match (idempotent; a record
+	// whose entry was retracted is never re-inserted).
+	//
+	// Under the advisory lock for the same reason as the schedule backfill;
+	// the ignored `ran` flag is deliberate.
+	if _, err := database.WithLeaderLock(db, "maintenance-mileage-backfill", func() error {
+		return maintenancerecord.BackfillMileage(db, log)
+	}); err != nil {
+		log.WithError(err).Fatal("backfill maintenance mileage")
+	}
+
 	// Fleet-service validates auth-service JWT tokens via JWKS.
 	// Retry up to 10 times (3 s between attempts) so fleet-service waits for
 	// auth-service to be ready instead of fataling immediately.
@@ -93,6 +105,7 @@ func main() {
 
 	// Build shared processors for cross-domain injection.
 	vehicleAdmin := vehicle.NewAdministrator(db)
+	mileageAdmin := mileage.NewAdministrator(db)
 	vehicleProc := vehicle.NewProcessor(log, vehicle.NewProvider(db), vehicleAdmin)
 	vehiclemediaProc := vehiclemedia.NewProcessor(log, vehiclemedia.NewProvider(db), vehiclemedia.NewAdministrator(db))
 
@@ -133,7 +146,7 @@ func main() {
 	// on the transition edge (A8).
 	scheduleProc := maintenanceschedule.NewProcessor(log, maintenanceschedule.NewProvider(db), maintenanceschedule.NewAdministrator(db)).
 		WithOverdueHooks(db, activity.Record, emitScheduleOverdue)
-	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db)).
+	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db, mileageAdmin), maintenanceschedule.NewAdministrator(db), mileageAdmin).
 		WithActivityRecorder(activity.Record).
 		WithEmitter(emitMaintenanceCompleted)
 
@@ -296,10 +309,10 @@ func main() {
 				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited, emitInviteCreated, inviteLimits)(pr)
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
-				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
-				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, emitFuelLogged)(pr)
+				mileage.InitializeRoutes(log, db, vehicleProc, mileageAdmin)(pr)
+				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, emitFuelLogged, mileageAdmin)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
-				maintenancerecord.InitializeRoutes(log, db, vehicleProc, categoryProc, mediaClient)(pr)
+				maintenancerecord.InitializeRoutes(log, db, vehicleProc, categoryProc, mediaClient, mileageAdmin)(pr)
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)
 				activity.InitializeRoutes(log, db, vehicleProc)(pr)
 				dashboard.InitializeRoutes(log, db, scheduleProc, activityProc, vehicleProc)(pr)

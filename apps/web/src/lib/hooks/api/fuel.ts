@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { fuelService } from '../../../services/api/FuelService';
 import { RECORD_PAGE_SIZE } from './pageSize';
+import { invalidateOdometerQueries } from './mileage';
 import type {
   CreateFuelLogAttributes,
   UpdateFuelLogAttributes,
@@ -86,6 +87,7 @@ export function useCreateFuelLog(vehicleId: string) {
     mutationFn: (attrs: CreateFuelLogAttributes) => fuelService.createForVehicle(vehicleId, attrs),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: fuelKeys.lists() });
+      invalidateOdometerQueries(queryClient, vehicleId);
     },
   });
 }
@@ -99,6 +101,7 @@ export function useUpdateFuelLog() {
     onSettled: (_data, _error, variables) => {
       void queryClient.invalidateQueries({ queryKey: fuelKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: fuelKeys.detail(variables.id) });
+      invalidateOdometerQueries(queryClient);
     },
   });
 }
@@ -111,6 +114,7 @@ export function useDeleteFuelLog() {
     onSettled: (_data, _error, id) => {
       void queryClient.invalidateQueries({ queryKey: fuelKeys.lists() });
       void queryClient.invalidateQueries({ queryKey: fuelKeys.detail(id) });
+      invalidateOdometerQueries(queryClient);
     },
   });
 }

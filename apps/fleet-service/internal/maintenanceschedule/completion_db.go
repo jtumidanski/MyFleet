@@ -22,6 +22,12 @@ type ScheduleAdvancer interface {
 	AdvanceTx(tx *gorm.DB, id string, date time.Time, miles int) error
 }
 
+// MileageAppender appends a mileage ledger row inside a transaction, advancing
+// current_mileage per the ledger rule. Satisfied by the mileage Administrator.
+type MileageAppender interface {
+	AppendTx(tx *gorm.DB, m mileage.Model) (mileage.Model, error)
+}
+
 // ActivityRecorder appends an activity event on the supplied tx (design §8.2).
 // Injected to avoid an import cycle. Satisfied by activity.Record.
 type ActivityRecorder func(tx *gorm.DB, actorUserID, eventType, fleetID string, vehicleID *string, payload map[string]any) error
@@ -36,13 +42,14 @@ type CompletionDeps struct {
 	DB       *gorm.DB
 	Records  RecordInserter
 	Schedule ScheduleAdvancer
+	Mileage  MileageAppender
 	record   ActivityRecorder
 	emit     CompletedEmitter
 }
 
 // NewCompletionDeps wires the concrete completion dependencies.
-func NewCompletionDeps(db *gorm.DB, records RecordInserter, schedule ScheduleAdvancer) CompletionDeps {
-	return CompletionDeps{DB: db, Records: records, Schedule: schedule}
+func NewCompletionDeps(db *gorm.DB, records RecordInserter, schedule ScheduleAdvancer, ledger MileageAppender) CompletionDeps {
+	return CompletionDeps{DB: db, Records: records, Schedule: schedule, Mileage: ledger}
 }
 
 // WithActivityRecorder injects the activity recorder run after completion.
@@ -64,7 +71,7 @@ func (d CompletionDeps) WithEmitter(emit CompletedEmitter) CompletionDeps {
 func (d CompletionDeps) CompleteInTransaction(log logrus.FieldLogger, in CompletionInput) (CompletionOutput, error) {
 	var out CompletionOutput
 	err := d.DB.Transaction(func(tx *gorm.DB) error {
-		c := &dbCompletion{tx: tx, records: d.Records, schedule: d.Schedule}
+		c := &dbCompletion{tx: tx, records: d.Records, schedule: d.Schedule, ledger: d.Mileage}
 		proc := NewCompletionProcessor(log, c)
 		var perr error
 		out, perr = proc.Complete(in)
@@ -100,6 +107,7 @@ type dbCompletion struct {
 	tx       *gorm.DB
 	records  RecordInserter
 	schedule ScheduleAdvancer
+	ledger   MileageAppender
 }
 
 // CreateRecord inserts a pre-filled maintenance record on the bound tx.
@@ -120,26 +128,21 @@ func (c *dbCompletion) CreateRecord(vehicleID, categoryID string, date time.Time
 	return created.ID(), nil
 }
 
-// AppendMileage inserts a mileage record (source=maintenance, ref=record id) on
-// the bound tx and mirrors current_mileage per the mileage OnAppend rule: only
-// advance vehicles.current_mileage when the new reading is >= the current value
-// (do not regress; lower readings are kept in history but flagged — design §10.4).
-func (c *dbCompletion) AppendMileage(vehicleID string, miles int, src, ref string) error {
+// AppendMileage appends a mileage ledger row (source=maintenance, ref=record id)
+// on the bound tx, recorded at the completion date and attributed to the acting
+// user. The ledger's AppendTx advances vehicles.current_mileage only when the
+// reading is >= the current value (never regresses; design §10.4).
+func (c *dbCompletion) AppendMileage(vehicleID string, miles int, recordedAt time.Time, src, ref, actorUserID string) error {
 	rec := mileage.NewBuilder().
 		SetVehicleID(vehicleID).
 		SetMileage(miles).
-		SetRecordedAt(time.Now().UTC()).
+		SetRecordedAt(recordedAt).
 		SetSource(src).
 		SetSourceRefID(ref).
+		SetCreatedByUserID(actorUserID).
 		Build()
-	e := rec.ToEntity()
-	if err := c.tx.Create(&e).Error; err != nil {
-		return err
-	}
-	// Mirror current_mileage on the vehicle, but never regress it (OnAppend rule).
-	return c.tx.Table("fleet.vehicles").
-		Where("id = ? AND deleted_at IS NULL AND current_mileage <= ?", vehicleID, miles).
-		Update("current_mileage", miles).Error
+	_, err := c.ledger.AppendTx(c.tx, rec)
+	return err
 }
 
 // AdvanceSchedule moves the schedule's completion point and recomputes next-due

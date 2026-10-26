@@ -156,4 +156,24 @@ describe('useMileageRecords', () => {
       expect.objectContaining({ page: 2, pageSize: 100 }),
     );
   });
+
+  it('passes sources through to the service', async () => {
+    const listByVehicle = vi
+      .spyOn(mileageService, 'listByVehicle')
+      .mockResolvedValue({ data: [], meta: { total: 0, totalPages: 1, number: 1, size: 100 } });
+
+    renderHook(() => useMileageRecords({ vehicleId: 'v1', sources: ['manual'] }), { wrapper });
+
+    await waitFor(() => expect(listByVehicle).toHaveBeenCalled());
+    expect(listByVehicle).toHaveBeenCalledWith(
+      'v1',
+      expect.objectContaining({ sources: ['manual'] }),
+    );
+  });
+
+  it('keys filtered and unfiltered lists apart', () => {
+    expect(mileageKeys.list({ vehicleId: 'v1', sources: ['manual'] })).not.toEqual(
+      mileageKeys.list({ vehicleId: 'v1' }),
+    );
+  });
 });

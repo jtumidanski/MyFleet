@@ -1,44 +1,51 @@
 package mileage
 
 import (
+	"io"
 	"testing"
-	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
-type fakeVehicleMileage struct{ set int }
-
-func (f *fakeVehicleMileage) UpdateCurrentMileage(vehicleID string, m int) error {
-	f.set = m
-	return nil
+func newTestProcessor(t *testing.T) (*Processor, func() int) {
+	t.Helper()
+	db := newTestDB(t)
+	seedVehicle(t, db, "v1", 2000)
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+	return NewProcessor(log, db, NewProvider(db), NewAdministrator(db)), func() int { return currentMileage(t, db, "v1") }
 }
 
-func TestAppend_updatesCurrentMileageWhenHigher(t *testing.T) {
-	vm := &fakeVehicleMileage{set: 1000}
-	p := NewProcessor(logrus.New(), vm)
-	rec := NewBuilder().SetVehicleID("v1").SetMileage(1500).SetRecordedAt(time.Now()).SetSource("manual").Build()
-	flagged, err := p.OnAppend(rec, 1000)
-	if err != nil || flagged {
-		t.Fatalf("higher mileage should not be flagged; flagged=%v err=%v", flagged, err)
-	}
-	if vm.set != 1500 {
-		t.Fatalf("current_mileage should advance to 1500, got %d", vm.set)
-	}
-}
-
-func TestAppend_flagsBelowLatestButKeeps(t *testing.T) {
-	vm := &fakeVehicleMileage{set: 2000}
-	p := NewProcessor(logrus.New(), vm)
-	rec := NewBuilder().SetVehicleID("v1").SetMileage(1500).SetRecordedAt(time.Now()).SetSource("manual").Build()
-	flagged, err := p.OnAppend(rec, 2000)
+func TestProcessor_Append_advancesOdometer(t *testing.T) {
+	pr, odo := newTestProcessor(t)
+	got, err := pr.Append(reading("v1", 2500, SourceManual, ""))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("append: %v", err)
 	}
-	if !flagged {
-		t.Fatal("below-latest entry should be flagged")
+	if got.Flagged() {
+		t.Error("expected not flagged")
 	}
-	if vm.set != 2000 {
-		t.Fatalf("current_mileage must not regress, stayed at latest; got %d", vm.set)
+	if odo() != 2500 {
+		t.Errorf("odometer = %d, want 2500", odo())
+	}
+}
+
+func TestProcessor_Append_belowOdometerIsKeptAndFlagged(t *testing.T) {
+	pr, odo := newTestProcessor(t)
+	got, err := pr.Append(reading("v1", 1500, SourceManual, ""))
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	if !got.Flagged() {
+		t.Error("expected flagged")
+	}
+	if odo() != 2000 {
+		t.Errorf("odometer = %d, want 2000", odo())
+	}
+	ms, total, err := pr.ListByVehicle("v1", ListFilter{}, server.Page{Number: 1, Size: 10})
+	if err != nil || total != 1 || len(ms) != 1 {
+		t.Fatalf("list = %d rows total %d err %v, want 1", len(ms), total, err)
 	}
 }
