@@ -76,7 +76,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         id: go
         with:
-          go-version: '1.27.2'  # exact, matching go.work; see main.yml
+          go-version: '1.27.3'  # exact, matching go.work; see main.yml
           cache: false          # see main.yml's backend job for why
 
       # Same key prefix as main.yml's backend job, deliberately: a PR run should
@@ -120,7 +120,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         id: go
         with:
-          go-version: '1.27.2'  # exact, matching go.work; see main.yml
+          go-version: '1.27.3'  # exact, matching go.work; see main.yml
           cache: false          # see main.yml's backend job for why
 
       # golangci-lint type-checks every package, so it wants a Go build cache
