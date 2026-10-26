@@ -1,3 +1,3 @@
 module github.com/jtumidanski/myfleet/packages/dto-go
 
-go 1.27.2
+go 1.27.3

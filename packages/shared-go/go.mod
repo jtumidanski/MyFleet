@@ -1,6 +1,6 @@
 module github.com/jtumidanski/myfleet/packages/shared-go
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.2
