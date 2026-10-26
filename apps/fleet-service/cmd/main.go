@@ -93,6 +93,7 @@ func main() {
 
 	// Build shared processors for cross-domain injection.
 	vehicleAdmin := vehicle.NewAdministrator(db)
+	mileageAdmin := mileage.NewAdministrator(db)
 	vehicleProc := vehicle.NewProcessor(log, vehicle.NewProvider(db), vehicleAdmin)
 	vehiclemediaProc := vehiclemedia.NewProcessor(log, vehiclemedia.NewProvider(db), vehiclemedia.NewAdministrator(db))
 
@@ -296,7 +297,7 @@ func main() {
 				invite.InitializeRoutes(log, db, membershipProc, activity.Record, emitMemberInvited, emitInviteCreated, inviteLimits)(pr)
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
-				mileage.InitializeRoutes(log, db, vehicleProc, vehicleAdmin)(pr)
+				mileage.InitializeRoutes(log, db, vehicleProc, mileageAdmin)(pr)
 				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, emitFuelLogged)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
 				maintenancerecord.InitializeRoutes(log, db, vehicleProc, categoryProc, mediaClient)(pr)

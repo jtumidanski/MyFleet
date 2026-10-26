@@ -10,7 +10,6 @@ import (
 // Append-only except RetractTx, which soft-deletes a parent's rows when the
 // parent is deleted.
 type Administrator interface {
-	Insert(Model) (Model, error)
 	// AppendTx inserts the reading and advances the vehicle odometer within tx.
 	AppendTx(tx *gorm.DB, m Model) (Model, error)
 	// RetractTx soft-deletes the matching readings and recomputes the odometer within tx.
@@ -21,14 +20,6 @@ type dbAdministrator struct{ db *gorm.DB }
 
 // NewAdministrator returns an Administrator backed by the given database.
 func NewAdministrator(db *gorm.DB) Administrator { return &dbAdministrator{db: db} }
-
-func (a *dbAdministrator) Insert(m Model) (Model, error) {
-	e := m.ToEntity()
-	if err := a.db.Create(&e).Error; err != nil {
-		return Model{}, err
-	}
-	return Make(e), nil
-}
 
 func (a *dbAdministrator) AppendTx(tx *gorm.DB, m Model) (Model, error) {
 	return appendTx(tx, m)

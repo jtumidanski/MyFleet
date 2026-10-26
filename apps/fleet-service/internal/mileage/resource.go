@@ -23,10 +23,8 @@ type VehicleAccessor interface {
 
 // InitializeRoutes wires the JWT-protected mileage endpoints.
 // vehicleAccessor is used to resolve fleetID and currentMileage from a vehicleID.
-// updater is injected for OnAppend (satisfied by vehicle.Administrator).
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor, updater VehicleMileageUpdater) func(chi.Router) {
-	proc := NewProcessor(log, updater)
-	adm := NewAdministrator(db)
+// adm appends readings and advances the vehicle odometer in one transaction.
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor, adm Administrator) func(chi.Router) {
 	prov := NewProvider(db)
 	return func(r chi.Router) {
 		// GET /vehicles/{id}/mileage — list mileage records (newest first, paged)
@@ -116,25 +114,23 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				SetVehicleID(vehicleID).
 				SetMileage(attrs.Mileage).
 				SetRecordedAt(recordedAt).
-				SetSource("manual").
+				SetSource(SourceManual).
 				SetCreatedByUserID(identity.UserID).
 				Build()
 
-			created, err := adm.Insert(rec)
-			if err != nil {
-				server.WriteError(w, err)
-				return
-			}
-
-			// Call OnAppend to advance or flag based on currentMileage.
-			flagged, err := proc.OnAppend(created, v.CurrentMileage())
+			var created Model
+			err = db.Transaction(func(tx *gorm.DB) error {
+				var txErr error
+				created, txErr = adm.AppendTx(tx, rec)
+				return txErr
+			})
 			if err != nil {
 				server.WriteError(w, err)
 				return
 			}
 
 			server.WriteJSON(w, http.StatusCreated, server.Document{
-				Data: Transform(created.WithFlagged(flagged)),
+				Data: Transform(created),
 			})
 		}))
 	}
