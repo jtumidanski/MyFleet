@@ -26,8 +26,8 @@ type VehicleAccessor interface {
 // vehicleAccessor resolves the owning vehicle's fleetID + currentMileage for
 // authz; ledger appends and retracts the fuel entries' mileage records.
 func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor, record ActivityRecorder, emit FuelLoggedEmitter, ledger MileageLedger) func(chi.Router) {
-	proc := NewProcessor(log, NewProvider(db))
 	adm := NewAdministrator(db, ledger)
+	proc := NewProcessor(log, NewProvider(db), adm)
 	loggingDeps := NewLoggingDeps(db, ledger).
 		WithActivityRecorder(record).
 		WithEmitter(emit)
@@ -234,7 +234,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			if err := adm.SoftDelete(id, current.VehicleID()); err != nil {
+			if err := proc.SoftDelete(id); err != nil {
 				server.WriteError(w, err)
 				return
 			}

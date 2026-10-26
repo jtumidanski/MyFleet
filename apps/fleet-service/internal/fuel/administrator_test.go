@@ -107,3 +107,37 @@ func TestSoftDelete_unknownIDIsNotFound(t *testing.T) {
 		t.Fatalf("current_mileage = %d, want 40000", got)
 	}
 }
+
+func TestProcessor_SoftDelete_resolvesVehicleAndRetracts(t *testing.T) {
+	db := newFuelDB(t)
+	ledger := mileage.NewAdministrator(db)
+	v := seedVehicleAt(t, db, 40000)
+	deps := NewLoggingDeps(db, ledger)
+	logFuelAt(t, deps, v, 41000)
+	second := logFuelAt(t, deps, v, 42000)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db, ledger))
+
+	if err := pr.SoftDelete(second.ID()); err != nil {
+		t.Fatalf("soft delete: %v", err)
+	}
+	if got := currentMileage(t, db, v.ID()); got != 41000 {
+		t.Fatalf("current_mileage = %d, want 41000", got)
+	}
+	if _, err := pr.GetByID(second.ID()); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("GetByID after delete err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestProcessor_SoftDelete_unknownIDIsNotFound(t *testing.T) {
+	db := newFuelDB(t)
+	ledger := mileage.NewAdministrator(db)
+	v := seedVehicleAt(t, db, 40000)
+	pr := NewProcessor(logrus.New(), NewProvider(db), NewAdministrator(db, ledger))
+
+	if err := pr.SoftDelete("missing-id"); !errors.Is(err, server.ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+	if got := currentMileage(t, db, v.ID()); got != 40000 {
+		t.Fatalf("current_mileage = %d, want 40000", got)
+	}
+}

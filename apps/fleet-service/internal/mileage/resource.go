@@ -46,7 +46,7 @@ func parseSources(raw string) ([]string, error) {
 // vehicleAccessor is used to resolve fleetID and currentMileage from a vehicleID.
 // adm appends readings and advances the vehicle odometer in one transaction.
 func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor, adm Administrator) func(chi.Router) {
-	prov := NewProvider(db)
+	proc := NewProcessor(log, db, NewProvider(db), adm)
 	return func(r chi.Router) {
 		// GET /vehicles/{id}/mileage — list mileage records (newest first, paged)
 		// Supports ?from= and ?to= as RFC3339 range filters on recorded_at, and
@@ -90,7 +90,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 			}
 
 			page := server.ParsePage(req)
-			ms, total, err := prov.ListByVehicle(vehicleID, ListFilter{From: from, To: to, Sources: sources}, page)
+			ms, total, err := proc.ListByVehicle(vehicleID, ListFilter{From: from, To: to, Sources: sources}, page)
 			if err != nil {
 				server.WriteError(w, err)
 				return
@@ -146,12 +146,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				SetCreatedByUserID(identity.UserID).
 				Build()
 
-			var created Model
-			err = db.Transaction(func(tx *gorm.DB) error {
-				var txErr error
-				created, txErr = adm.AppendTx(tx, rec)
-				return txErr
-			})
+			created, err := proc.Append(rec)
 			if err != nil {
 				server.WriteError(w, err)
 				return
