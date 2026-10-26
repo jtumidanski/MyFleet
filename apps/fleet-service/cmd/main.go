@@ -298,7 +298,7 @@ func main() {
 				vehicle.InitializeRoutes(log, db, membershipProc, vehiclemediaProc, vehicleStatusDeps, activity.Record, emitVehicleCreated)(pr)
 				vehiclemedia.InitializeRoutes(log, db, vehicleProc)(pr)
 				mileage.InitializeRoutes(log, db, vehicleProc, mileageAdmin)(pr)
-				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, emitFuelLogged)(pr)
+				fuel.InitializeRoutes(log, db, vehicleProc, activity.Record, emitFuelLogged, mileageAdmin)(pr)
 				maintenancecategory.InitializeRoutes(log, db)(pr)
 				maintenancerecord.InitializeRoutes(log, db, vehicleProc, categoryProc, mediaClient)(pr)
 				maintenanceschedule.InitializeRoutes(log, db, vehicleProc, completionDeps)(pr)

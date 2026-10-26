@@ -24,11 +24,11 @@ type VehicleAccessor interface {
 
 // InitializeRoutes wires the JWT-protected fuel log endpoints.
 // vehicleAccessor resolves the owning vehicle's fleetID + currentMileage for
-// authz and for the OnAppend mileage rule.
-func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor, record ActivityRecorder, emit FuelLoggedEmitter) func(chi.Router) {
+// authz; ledger appends and retracts the fuel entries' mileage records.
+func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor VehicleAccessor, record ActivityRecorder, emit FuelLoggedEmitter, ledger MileageLedger) func(chi.Router) {
 	proc := NewProcessor(log, NewProvider(db))
-	adm := NewAdministrator(db)
-	loggingDeps := NewLoggingDeps(db).
+	adm := NewAdministrator(db, ledger)
+	loggingDeps := NewLoggingDeps(db, ledger).
 		WithActivityRecorder(record).
 		WithEmitter(emit)
 	return func(r chi.Router) {
@@ -234,7 +234,7 @@ func InitializeRoutes(log logrus.FieldLogger, db *gorm.DB, vehicleAccessor Vehic
 				server.WriteError(w, err)
 				return
 			}
-			if err := adm.SoftDelete(id); err != nil {
+			if err := adm.SoftDelete(id, current.VehicleID()); err != nil {
 				server.WriteError(w, err)
 				return
 			}

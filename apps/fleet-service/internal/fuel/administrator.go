@@ -4,10 +4,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
 
@@ -18,14 +18,27 @@ type Administrator interface {
 	Insert(m Model) (Model, error)
 	// Update applies changes to an existing fuel log.
 	Update(m Model) (Model, error)
-	// SoftDelete stamps deleted_at on a fuel log.
-	SoftDelete(id string) error
+	// SoftDelete stamps deleted_at on a fuel log and retracts its mileage
+	// record, recomputing the vehicle odometer, in one transaction.
+	SoftDelete(id, vehicleID string) error
 }
 
-type dbAdministrator struct{ db *gorm.DB }
+// MileageLedger is the mileage ledger surface the fuel domain depends on.
+// Satisfied by mileage.Administrator.
+type MileageLedger interface {
+	AppendTx(tx *gorm.DB, m mileage.Model) (mileage.Model, error)
+	RetractTx(tx *gorm.DB, vehicleID, source, sourceRefID string) error
+}
+
+type dbAdministrator struct {
+	db     *gorm.DB
+	ledger MileageLedger
+}
 
 // NewAdministrator returns an Administrator backed by the given database.
-func NewAdministrator(db *gorm.DB) Administrator { return &dbAdministrator{db: db} }
+func NewAdministrator(db *gorm.DB, ledger MileageLedger) Administrator {
+	return &dbAdministrator{db: db, ledger: ledger}
+}
 
 func (a *dbAdministrator) Insert(m Model) (Model, error) {
 	e := m.ToEntity()
@@ -50,18 +63,21 @@ func (a *dbAdministrator) Update(m Model) (Model, error) {
 	return m, nil
 }
 
-// SoftDelete stamps deleted_at on the fuel log.
-func (a *dbAdministrator) SoftDelete(id string) error {
-	res := a.db.Model(&Entity{}).
-		Where("id = ? AND deleted_at IS NULL", id).
-		Update("deleted_at", time.Now().UTC())
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return server.ErrNotFound
-	}
-	return nil
+// SoftDelete stamps deleted_at on the fuel log, then retracts its mileage
+// record (which recomputes the vehicle odometer) in the same transaction.
+func (a *dbAdministrator) SoftDelete(id, vehicleID string) error {
+	return a.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&Entity{}).
+			Where("id = ? AND deleted_at IS NULL", id).
+			Update("deleted_at", time.Now().UTC())
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return server.ErrNotFound
+		}
+		return a.ledger.RetractTx(tx, vehicleID, mileage.SourceFuel, id)
+	})
 }
 
 // ActivityRecorder appends an activity event on the supplied tx (design §8.2).
@@ -76,13 +92,14 @@ type FuelLoggedEmitter func(tx *gorm.DB, fleetID, actorID, traceID, fuelLogID, v
 // orchestration (design §8.2, §10.5). All writes execute inside one transaction.
 type LoggingDeps struct {
 	DB     *gorm.DB
+	ledger MileageLedger
 	record ActivityRecorder
 	emit   FuelLoggedEmitter
 }
 
 // NewLoggingDeps wires the concrete logging dependencies.
-func NewLoggingDeps(db *gorm.DB) LoggingDeps {
-	return LoggingDeps{DB: db}
+func NewLoggingDeps(db *gorm.DB, ledger MileageLedger) LoggingDeps {
+	return LoggingDeps{DB: db, ledger: ledger}
 }
 
 // WithActivityRecorder injects the activity recorder run on each fuel log.
@@ -99,8 +116,10 @@ func (d LoggingDeps) WithEmitter(emit FuelLoggedEmitter) LoggingDeps {
 
 // LogInTransaction runs the full fuel-log flow in ONE db.Transaction:
 //  1. Insert the fuel log row.
-//  2. Insert a mileage record (source=fuel, ref=fuel log id).
-//  3. Advance vehicles.current_mileage via the OnAppend rule (never regress).
+//  2. Append a mileage record (source=fuel, ref=fuel log id) through the
+//     ledger, which advances vehicles.current_mileage only when the reading
+//     is not lower (never regress).
+//  3. Append the fuel.logged activity event.
 //  4. Enqueue a fuel.logged event in the transactional outbox.
 //
 // Mirror of maintenanceschedule.CompleteInTransaction (design §10.3).
@@ -114,32 +133,20 @@ func (d LoggingDeps) LogInTransaction(log logrus.FieldLogger, in LogInput) (Mode
 		}
 		created = Make(e)
 
-		// Step 2: insert mileage record (source=fuel, ref=fuel log id).
-		mileageID := uuid.NewString()
-		if err := tx.Exec(
-			`INSERT INTO fleet.mileage_records
-				(id, vehicle_id, mileage, recorded_at, source, source_ref_id, created_by_user_id, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			mileageID,
-			created.VehicleID(),
-			created.Mileage(),
-			created.Date(),
-			"fuel",
-			created.ID(),
-			created.CreatedByUserID(),
-			time.Now().UTC(),
-		).Error; err != nil {
+		// Step 2: append the mileage record via the ledger (source=fuel,
+		// ref=fuel log id); it advances current_mileage without regressing.
+		if _, err := d.ledger.AppendTx(tx, mileage.NewBuilder().
+			SetVehicleID(created.VehicleID()).
+			SetMileage(created.Mileage()).
+			SetRecordedAt(created.Date()).
+			SetSource(mileage.SourceFuel).
+			SetSourceRefID(created.ID()).
+			SetCreatedByUserID(created.CreatedByUserID()).
+			Build()); err != nil {
 			return err
 		}
 
-		// Step 3: advance current_mileage — never regress (OnAppend rule, design §10.4).
-		if err := tx.Table("fleet.vehicles").
-			Where("id = ? AND deleted_at IS NULL AND current_mileage <= ?", created.VehicleID(), created.Mileage()).
-			Update("current_mileage", created.Mileage()).Error; err != nil {
-			return err
-		}
-
-		// Step 3b: append a fuel.logged activity event in the SAME tx (§8.2).
+		// Step 3: append a fuel.logged activity event in the SAME tx (§8.2).
 		if d.record != nil {
 			vid := created.VehicleID()
 			if err := d.record(tx, created.CreatedByUserID(), "fuel.logged", in.FleetID, &vid, map[string]any{
