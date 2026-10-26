@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/sirupsen/logrus"
+
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 )
 
 // CompletionInput is the request to complete a maintenance schedule (design §10.3).
@@ -30,9 +32,10 @@ type CompletionOutput struct {
 type Completion interface {
 	// CreateRecord inserts a pre-filled maintenance record and returns its ID.
 	CreateRecord(vehicleID, categoryID string, date time.Time, miles int) (string, error)
-	// AppendMileage inserts a mileage record (source=maintenance, ref=record id)
-	// and mirrors current_mileage per the mileage OnAppend rule.
-	AppendMileage(vehicleID string, miles int, src, ref string) error
+	// AppendMileage appends a mileage ledger row (source=maintenance, ref=record
+	// id) stamped with the completion date and acting user; the ledger advances
+	// current_mileage when the reading is not lower than the current value.
+	AppendMileage(vehicleID string, miles int, recordedAt time.Time, src, ref, actorUserID string) error
 	// AdvanceSchedule moves the schedule's completion point and recomputes next-due.
 	AdvanceSchedule(scheduleID string, date time.Time, miles int) error
 }
@@ -62,7 +65,7 @@ func (pr *CompletionProcessor) Complete(in CompletionInput) (CompletionOutput, e
 	if err != nil {
 		return CompletionOutput{}, err
 	}
-	if err := pr.c.AppendMileage(in.VehicleID, in.LatestMileage, "maintenance", recordID); err != nil {
+	if err := pr.c.AppendMileage(in.VehicleID, in.LatestMileage, in.Date, mileage.SourceMaintenance, recordID, in.ActorUserID); err != nil {
 		return CompletionOutput{}, err
 	}
 	if err := pr.c.AdvanceSchedule(in.ScheduleID, in.Date, in.LatestMileage); err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/jtumidanski/myfleet/packages/shared-go/auth"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancerecord"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
 )
 
@@ -40,7 +41,7 @@ func newScheduleRouter(t *testing.T, fleetID string, currentMileage int) (chi.Ro
 	log := logrus.New()
 	log.SetOutput(io.Discard)
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
 	r := chi.NewRouter()
 	r.Group(InitializeRoutes(log, db, stubVehicleAccessor{fleetID: fleetID, currentMileage: currentMileage}, deps))
 	return r, db

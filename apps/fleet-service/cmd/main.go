@@ -134,7 +134,7 @@ func main() {
 	// on the transition edge (A8).
 	scheduleProc := maintenanceschedule.NewProcessor(log, maintenanceschedule.NewProvider(db), maintenanceschedule.NewAdministrator(db)).
 		WithOverdueHooks(db, activity.Record, emitScheduleOverdue)
-	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db)).
+	completionDeps := maintenanceschedule.NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), maintenanceschedule.NewAdministrator(db), mileageAdmin).
 		WithActivityRecorder(activity.Record).
 		WithEmitter(emitMaintenanceCompleted)
 

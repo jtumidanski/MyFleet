@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/maintenancerecord"
+	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/mileage"
 	"github.com/jtumidanski/myfleet/apps/fleet-service/internal/vehicle"
 	"github.com/jtumidanski/myfleet/packages/shared-go/server"
 )
@@ -90,7 +91,7 @@ func TestCompleteInTransaction(t *testing.T) {
 		t.Fatalf("insert schedule: %v", err)
 	}
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
 	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	out, err := deps.CompleteInTransaction(logrus.New(), CompletionInput{
 		ScheduleID:    created.ID(),
@@ -98,6 +99,7 @@ func TestCompleteInTransaction(t *testing.T) {
 		CategoryID:    "c1",
 		Date:          at,
 		LatestMileage: 42000,
+		ActorUserID:   "u9",
 	})
 	if err != nil {
 		t.Fatalf("complete: %v", err)
@@ -124,6 +126,18 @@ func TestCompleteInTransaction(t *testing.T) {
 	}
 	if mileageCount != 1 {
 		t.Fatalf("want 1 maintenance mileage record, got %d", mileageCount)
+	}
+
+	var row struct {
+		RecordedAt      time.Time
+		CreatedByUserID string
+	}
+	if err := db.Table("fleet.mileage_records").Select("recorded_at, created_by_user_id").
+		Where("source_ref_id = ?", out.MaintenanceRecordID).Scan(&row).Error; err != nil {
+		t.Fatalf("read mileage row: %v", err)
+	}
+	if !row.RecordedAt.Equal(at) || row.CreatedByUserID != "u9" {
+		t.Fatalf("want recorded_at %v actor u9, got %v / %q", at, row.RecordedAt, row.CreatedByUserID)
 	}
 
 	// current_mileage advanced to 42000.
@@ -193,7 +207,7 @@ func TestCompleteInTransaction_oneTimeDeactivates(t *testing.T) {
 		t.Fatalf("insert schedule: %v", err)
 	}
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
 	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	out, err := deps.CompleteInTransaction(logrus.New(), CompletionInput{
 		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
@@ -253,7 +267,7 @@ func TestCompleteInTransaction_recurringClearsAnchorAndStaysActive(t *testing.T)
 		t.Fatalf("insert schedule: %v", err)
 	}
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
 	at := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	if _, err := deps.CompleteInTransaction(logrus.New(), CompletionInput{
 		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
@@ -313,7 +327,7 @@ func TestCompleteInTransaction_inactiveScheduleWritesNothing(t *testing.T) {
 		t.Fatalf("seed inactive: row is still active")
 	}
 
-	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db))
+	deps := NewCompletionDeps(db, maintenancerecord.NewAdministrator(db), NewAdministrator(db), mileage.NewAdministrator(db))
 	_, err = deps.CompleteInTransaction(logrus.New(), CompletionInput{
 		ScheduleID: created.ID(), VehicleID: vehicleID, CategoryID: "c1",
 		Date: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), LatestMileage: 60100,
