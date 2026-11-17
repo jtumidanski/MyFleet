@@ -10,7 +10,7 @@ require (
 	github.com/jtumidanski/myfleet/packages/shared-go v0.0.0-20260804132647-f6f47ed75e55
 	github.com/minio/minio-go/v7 v7.4.1
 	github.com/sirupsen/logrus v1.10.2
-	golang.org/x/image v0.47.0
+	golang.org/x/image v0.48.0
 	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.31.2
 )
